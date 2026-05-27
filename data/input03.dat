@@ -45,11 +45,6 @@ EJNT,      0,         ,         ,         ,
 CONS,      0,    1,    1,    1,    1,    0,    1
 CONS,      1,    1,    1,    1,    1,    0,    1
 
-# --- LOAD ---
-#    NODE ID,   LC,     PX,     PY,     PZ,     MX,     MY,     MZ
-#                      (kN)    (kN)    (kN)   (kNm)   (kNm)   (kNm)
-LOAD,      0,    0,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00
-
 # --- ELEMENT LOAD(ELOD) ---
 #    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj
 #                          (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)

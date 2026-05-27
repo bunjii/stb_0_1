@@ -11,10 +11,8 @@ from scipy.sparse import csc_matrix
 
 class Solve:
 
-    def __init__(self, _mdl, _gui):
+    def __init__(self, _mdl):
         
-        self.gui     = _gui
-
         self.mdl     = _mdl 
         self.ndof    = 6
         self.num_row = None
@@ -337,7 +335,7 @@ class Solve:
                 m_zc= mzi - qyi * (0.5 * e.len) - 1.0 / 6.0 * (wyi + 2 * w_xc) * (0.5*e.len)**2 
                 e.forces[13, i] = m_zc
 
-                print(f"lc: {self.mdl.lcs.index(i)}, e.id: {e.id}, m_yi: {myi}, m_yc: {m_yc}, m_zi: {mzi}, m_zc: {m_zc}")
+                # print(f"lc: {self.mdl.lcs[i]}, e.id: {e.id}, m_yi: {myi}, m_yc: {m_yc}, m_zi: {mzi}, m_zc: {m_zc}")
         
         ###
 

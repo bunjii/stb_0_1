@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Structural Toolbox Viewer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="toolbar">
+    <span class="title">STB Viewer</span>
+    <label>
+      Model
+      <select id="modelSelect"></select>
+    </label>
+    <button id="btnReload" type="button">Reload</button>
+    <label class="check">
+      <input type="checkbox" id="chkSolve"> Solve
+    </label>
+    <label>
+      LC
+      <select id="lcSelect"></select>
+    </label>
+    <label>
+      Def. ×
+      <input type="number" id="defFactor" value="50" min="0" max="500" step="5">
+    </label>
+    <label class="check">
+      <input type="checkbox" id="chkDeformed"> Deformed
+    </label>
+    <label class="check">
+      <input type="checkbox" id="chkLoads" checked> Loads
+    </label>
+    <label class="check">
+      <input type="checkbox" id="chkLabels"> Node IDs
+    </label>
+    <span id="status">Loading…</span>
+  </div>
+  <div id="viewport"></div>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="/static/viewer.js"></script>
+</body>
+</html>

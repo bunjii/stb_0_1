@@ -1,0 +1,8 @@
+numpy
+scipy
+shapely
+
+[viewer]
+fastapi
+uvicorn[standard]
+httpx

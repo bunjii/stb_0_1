@@ -9,8 +9,8 @@ import vedo
 import pickle
 
 from classes.io import ReadLines, RegisterInputData, RegisterResultData
-from classes.solve import Solve
 from classes.export import Export
+from stb_engine import run_from_lines, StbParseError, StbSolveError
 
 class EventHandlersMixin:
 
@@ -442,12 +442,21 @@ class EventHandlersMixin:
         
         else:
             lns = self.wx_txt_input.GetText().split("\n")
-            self.mdl = ReadLines(lns)
-            self.input_txt = RegisterInputData(self.mdl) # added 20240219
 
-            self.mdl.filepath = self.filepath
+            try:
+                self.mdl, self.output_txt = run_from_lines(
+                    lns, filepath=self.filepath)
+            except StbParseError as ex:
+                wx.MessageBox(
+                    "Input parse error:\n" + str(ex),
+                    "Error", wx.OK | wx.ICON_ERROR)
+                return
+            except StbSolveError as ex:
+                wx.MessageBox(
+                    "Analysis error:\n" + str(ex),
+                    "Error", wx.OK | wx.ICON_ERROR)
+                return
 
-            Solve(self.mdl, True)
             self.isModelSolved = True
 
             self.choice_lc.SetItems([str(item) for item in self.mdl.lcs])
@@ -460,7 +469,6 @@ class EventHandlersMixin:
             self.UpdateEDisp()
             self.ApplyButtonStates()
             
-            self.output_txt = RegisterResultData(self.mdl)
             self.wx_txt_output.SetText(self.output_txt)
 
             #self.choice_lc.SetItems([str(item) for item in self.mdl.lcs])

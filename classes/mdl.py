@@ -1,5 +1,4 @@
 from cons import Cons
-from vedo import Points
 import numpy as np
 import copy
 
@@ -325,7 +324,7 @@ class Mdl:
     def SetBounds(self):
 
         pts = list(map(lambda n: (n.x, n.y, n.z), self.nds))
-        self.bounds = Points(pts).bounds()
+        self.bounds = common.CalcBounds(pts)
 
         return
 

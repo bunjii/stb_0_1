@@ -1,0 +1,29 @@
+# --- CLI sample: simple cantilever beam ---
+#
+# 2 m beam along +X, fixed at node 0, 5 kN downward at tip (LC 0).
+# Units: m, kN, kN/m, N/mm2 in MATE line (converted internally).
+
+# --- MATERIAL(MATE) ---
+#         ID,   NAME,        E,        G,    Gamma,    Alpha,       Fy
+MATE,      0,  STEEL,   205000,    79000,     78.5,  1.2e-05,      235
+
+# --- SECTION(SECT) ---
+#   TYPE 0 = rectangle (DIM1 x DIM2 in mm)
+SECT,      0,   RECT,      0,      0,  200.0,  300.0
+
+# --- NODE ---
+#         ID,         X,         Y,         Z
+NODE,      0,       0.0,       0.0,       0.0,
+NODE,      1,       2.0,       0.0,       0.0,
+
+# --- ELEMENT(ELEM) ---
+#         ID,     Ni,     Nj,    SEC,     Beta
+ELEM,      0,      0,      1,      0,      0.0
+
+# --- CONSTRAINT(CONS) ---
+#   (0:FREE, 1:FIXED)
+CONS,      0,    1,    1,    1,    1,    1,    1
+
+# --- POINT LOAD(PLOD) ---
+#    NODE ID,   LC,     PX,     PY,     PZ,     MX,     MY,     MZ
+PLOD,      1,    0,    0.00,   0.00,  -5.00,   0.00,   0.00,   0.00

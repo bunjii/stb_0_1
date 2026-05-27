@@ -1,8 +1,6 @@
 import numpy as np
 import math
 
-import vedo
-
 import common
 
 from nd   import Nd

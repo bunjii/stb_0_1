@@ -7,6 +7,24 @@ PRES_ANGLE = 0.001 # radian 0.001 ~ ca. 0.0573 degree
 PRES_ZERO  = 1e-10 
 GRAVITY    = 9.80665 # [m/s^2]
 
+
+def CalcBounds(pts):
+    """Axis-aligned bounds for (x, y, z) points: xmin, xmax, ymin, ymax, zmin, zmax."""
+
+    if pts == None or len(pts) == 0:
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    arr = np.array(pts, dtype=float)
+
+    return (
+        float(np.min(arr[:, 0])),
+        float(np.max(arr[:, 0])),
+        float(np.min(arr[:, 1])),
+        float(np.max(arr[:, 1])),
+        float(np.min(arr[:, 2])),
+        float(np.max(arr[:, 2])),
+    )
+
 class Plane:
 
     def __init__(self, _n, _vx, _vy, _vz):
