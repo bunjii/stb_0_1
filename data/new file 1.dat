@@ -1,0 +1,105 @@
+# --- HEADER INPUT ---
+
+# DATE OF INPUT DATA: 2024/06/28 22:24:11
+# NUM. OF MATERIALS: 1
+# NUM. OF CROSS-SECTIONS 1
+# NUM. OF NODES: 9
+# NUM. OF ELEMENTS: 9
+# NUM. OF CONSTRAINED NODES: 4
+# NUM. OF LOADS: 2
+# NUM. OF ELEMENT LOADS: 5
+
+### <INPUT DATA> ### 
+
+# TYPE OF ANALYSIS: 3D LINEAR STATIC
+
+# --- MATERIAL(MATE) ---
+#         ID,       NAME,        E,        G,    Gamma,    Alpha,       Fy
+#                           (N/mm2)   (N/mm2)   (kN/m3)       (-)   (N/mm2)
+MATE,      0,      SS400,   205000,    79000,     78.5,  1.2e-05,      235
+
+# --- SECTION(SECT) ---
+#         ID,       NAME,    MAT,   TYPE,  DIM 1,  DIM 2,  DIM 3,  DIM 4
+#                                            (mm)    (mm)    (mm)    (mm)
+#       (TYPE 0: RECT., 1: CIRC., 2: I, 3: CHS, 4: RHS) 
+SECT,      0,         G1,      0,      2,  400.0,  200.0,    8.0,   13.0
+
+# --- NODE ---
+#         ID,         X,         Y,         Z,  CONST.
+#                    (m)        (m)        (m)
+NODE,      0,       0.0,       0.0,       4.0, 
+NODE,      1,       4.0,       0.0,       4.0, 
+NODE,      2,       4.0,       4.0,       4.0, 
+NODE,      3,       0.0,       4.0,       4.0, 
+NODE,      4,       0.0,       0.0,       0.0,      *
+NODE,      5,       4.0,       0.0,       0.0,      *
+NODE,      6,       4.0,       4.0,       0.0,      *
+NODE,      7,       0.0,       4.0,       0.0,      *
+NODE,      8,       0.0,       2.0,       4.0, 
+
+# --- ELEMENT(ELEM) ---
+#         ID,     Ni,     Nj,    SEC,     Beta
+#                                         (deg)
+ELEM,      0,      0,      1,      0,      0.0
+ELEM,      1,      1,      2,      0,      0.0
+ELEM,      2,      2,      3,      0,      0.0
+ELEM,      3,      3,      8,      0,      0.0
+ELEM,      4,      4,      0,      0,      0.0
+ELEM,      5,      5,      1,      0,      0.0
+ELEM,      6,      2,      6,      0,      0.0
+ELEM,      7,      3,      7,      0,      0.0
+ELEM,      8,      8,      0,      0,      0.0
+
+# --- ELEMENT JOINT(EJNT) ---
+#    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj
+#             (kNm/rad) (kNm/rad) (kNm/rad) (kNm/rad)
+
+# --- CONSTRAINT(CONS) ---
+#    NODE ID,   TX,   TY,   TZ,   RX,   RY,   RZ
+#   (0:FREE, 1:FIXED)
+CONS,      4,    1,    1,    1,    1,    1,    1
+CONS,      5,    1,    1,    1,    1,    1,    1
+CONS,      6,    1,    1,    1,    1,    1,    1
+CONS,      7,    1,    1,    1,    1,    1,    1
+
+# --- POINT LOAD(PLOD) ---
+#    NODE ID,   LC,     PX,     PY,     PZ,     MX,     MY,     MZ
+#                      (kN)    (kN)    (kN)   (kNm)   (kNm)   (kNm)
+PLOD,      0,    4,  10.00,   0.00,   0.00,   0.00,   0.00,   0.00
+PLOD,      1,    4,   0.00,  10.00,   0.00,   0.00,   0.00,   0.00
+
+# --- ELEMENT LOAD(ELOD) ---
+#    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj
+#                          (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)
+#   (E/G: Element(=0) or Global(=1) Coordinate System)
+ELOD,      2,    1,    0,   0.00,   0.00, -10.00,   0.00,   0.00, -10.00
+ELOD,      3,    2,    0,   0.00, -10.00,   0.00,   0.00, -10.00,   0.00
+ELOD,      3,    3,    1,   0.00,   0.00, -10.00,   0.00,   0.00, -10.00
+ELOD,      8,    2,    0,   0.00, -10.00,   0.00,   0.00, -10.00,   0.00
+ELOD,      8,    3,    1,   0.00,   0.00, -10.00,   0.00,   0.00, -10.00
+
+# --- GRAVITY LOAD(GLOD) ---
+#         LC,     Vec X,     Vec Y,     Vec Z
+#                 (m/s2)     (m/s2)     (m/s2)
+
+# --- AXIS (AXIS) ---
+#         ID,       NAME,    V/H,    NID,  x-DIR(if V)
+#                  (V/H 0:V, 1:H)     (x-DIR 0:X, 1:Y)
+AXIS,      1,         Y1,      0,      5,      0
+AXIS,      2,         X1,      0,      4,      1
+AXIS,      3,         Y2,      0,      6,      0
+AXIS,      4,         X2,      0,      5,      1
+AXIS,      5,         Z0,      1,      4,       
+AXIS,      6,         Z1,      1,      0,       
+
+# --- PLOT (PLOT) ---
+#         ID,       NAME,   AXIS,   TYPE,     LC,  SCALE, DEFFAC
+#             (TYPE 0: MODEL, 1: LOAD, 2: FORCE, 3: UTIL)
+PLOT,      1,       MDX1,      1,      0,      4,     50,   0.02
+PLOT,      2,       MDY1,      2,      0,      4,     50,   0.02
+PLOT,      3,       MDX2,      4,      0,      4,     50,   0.02
+PLOT,      4,       FJY1,      1,      2,      4,     50,   0.02
+PLOT,      5,       FJX1,      2,      2,      4,     50,   0.02
+PLOT,      6,       FJX2,      4,      2,      4,     50,   0.02
+
+

@@ -1,0 +1,59 @@
+# --- HEADER ---
+
+# DATE: 2024/02/21 20:59:58
+# NUM. OF MATERIALS: 1
+# NUM. OF CROSS-SECTIONS 1
+# NUM. OF NODES: 2
+# NUM. OF ELEMENTS: 1
+# NUM. OF CONSTRAINED NODES: 2
+# NUM. OF LOADS: 1
+
+### <INPUT DATA> ### 
+
+# TYPE OF ANALYSIS: 3D LINEAR STATIC
+
+# --- MATERIAL(MATE) ---
+#         ID,   NAME,        E,        G,    Gamma,    Alpha,       Fy
+#                       (N/mm2)   (N/mm2)   (kN/m3)       (-)   (N/mm2)
+MATE,      0,  SS400,   205000,    79000,     78.5,  1.2e-05,      235
+
+# --- SECTION(SECT) ---
+#         ID,   NAME,    MAT,   TYPE,  DIM 1,  DIM 2,  DIM 3,  DIM 4
+#                                        (mm)    (mm)    (mm)    (mm)
+#   (TYPE 0: RECT., 1: CIRC., 2: I, 3: CHS, 4: RHS) 
+SECT,      0,     G1,      0,      2,  400.0,  200.0,    8.0,   13.0
+
+# --- NODE ---
+#         ID,         X,         Y,         Z,  CONST.
+#                    (m)        (m)        (m)
+NODE,      0,       0.0,       0.0,       0.0,      *
+NODE,      1,       4.0,       0.0,       0.0,      *
+
+# --- ELEMENT(ELEM) ---
+#         ID,     Ni,     Nj,    SEC,     Beta
+#                                         (deg)
+ELEM,      0,      0,      1,      0
+
+# --- ELEMENT JOINT ---
+#    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj
+#             (kNm/rad) (kNm/rad) (kNm/rad) (kNm/rad)
+EJNT,      0,         ,         ,         ,         
+
+# --- CONSTRAINT(CONS) ---
+#    NODE ID,   TX,   TY,   TZ,   RX,   RY,   RZ
+#   (0:FREE, 1:FIXED)
+CONS,      0,    1,    1,    1,    1,    0,    1
+CONS,      1,    1,    1,    1,    1,    0,    1
+
+# --- LOAD ---
+#    NODE ID,   LC,     PX,     PY,     PZ,     MX,     MY,     MZ
+#                      (kN)    (kN)    (kN)   (kNm)   (kNm)   (kNm)
+LOAD,      0,    0,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00
+
+# --- ELEMENT LOAD(ELOD) ---
+#    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj
+#                          (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)
+#   (E/G: Element(=0) or Global(=1) Coordinate System)
+ELOD,      0,    0,    1,   0.00,   0.00, -10.00,   0.00,   0.00, -10.00
+
+

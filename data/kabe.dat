@@ -1,0 +1,88 @@
+# --- HEADER INPUT ---
+
+# DATE OF INPUT DATA: 2024/06/04 00:07:06
+# NUM. OF MATERIALS: 2
+# NUM. OF CROSS-SECTIONS 2
+# NUM. OF NODES: 4
+# NUM. OF ELEMENTS: 6
+# NUM. OF CONSTRAINED NODES: 4
+# NUM. OF LOADS: 2
+# NUM. OF ELEMENT LOADS: 0
+
+### <INPUT DATA> ### 
+
+# TYPE OF ANALYSIS: 3D LINEAR STATIC
+
+# --- MATERIAL(MATE) ---
+#         ID,       NAME,        E,        G,    Gamma,    Alpha,       Fy
+#                           (N/mm2)   (N/mm2)   (kN/m3)       (-)   (N/mm2)
+MATE,      1,        E65,     6500,      433,      0.0,  0.0e+00,        0
+MATE,      2,      SN400,   205000,    79000,      0.0,  0.0e+00,        0
+
+# --- SECTION(SECT) ---
+#         ID,       NAME,    MAT,   TYPE,  DIM 1,  DIM 2,  DIM 3,  DIM 4
+#                                            (mm)    (mm)    (mm)    (mm)
+#       (TYPE 0: RECT., 1: CIRC., 2: I, 3: CHS, 4: RHS) 
+SECT,      1,        FR1,      1,      0,  424.3,  424.3
+SECT,      2,        BR1,      2,      0,    8.0,    8.0
+
+# --- NODE ---
+#         ID,         X,         Y,         Z,  CONST.
+#                    (m)        (m)        (m)
+NODE,      1,       0.0,       0.0,       0.0,      *
+NODE,      2,      0.91,       0.0,       0.0,      *
+NODE,      3,       0.0,       0.0,       3.2,      *
+NODE,      4,      0.91,       0.0,       3.2,      *
+
+# --- ELEMENT(ELEM) ---
+#         ID,     Ni,     Nj,    SEC,     Beta
+#                                         (deg)
+ELEM,      1,      1,      3,      1,      0.0
+ELEM,      2,      2,      4,      1,      0.0
+ELEM,      3,      1,      2,      1,      0.0
+ELEM,      4,      3,      4,      1,      0.0
+ELEM,      5,      1,      4,      2,      0.0
+ELEM,      6,      3,      2,      2,      0.0
+
+# --- ELEMENT JOINT(EJNT) ---
+#    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj
+#             (kNm/rad) (kNm/rad) (kNm/rad) (kNm/rad)
+EJNT,      1,      0.0,         ,      0.0,         
+EJNT,      2,      0.0,         ,      0.0,         
+EJNT,      3,      0.0,         ,      0.0,         
+EJNT,      4,      0.0,         ,      0.0,         
+EJNT,      5,      0.0,         ,      0.0,         
+EJNT,      6,      0.0,         ,      0.0,         
+
+# --- CONSTRAINT(CONS) ---
+#    NODE ID,   TX,   TY,   TZ,   RX,   RY,   RZ
+#   (0:FREE, 1:FIXED)
+CONS,      1,    1,    1,    1,    1,    1,    1
+CONS,      2,    1,    1,    1,    1,    1,    1
+CONS,      3,    0,    1,    0,    0,    0,    0
+CONS,      4,    0,    1,    0,    0,    0,    0
+
+# --- POINT LOAD(PLOD) ---
+#    NODE ID,   LC,     PX,     PY,     PZ,     MX,     MY,     MZ
+#                      (kN)    (kN)    (kN)   (kNm)   (kNm)   (kNm)
+PLOD,      3,    1,   6.24,   0.00,   0.00,   0.00,   0.00,   0.00
+PLOD,      4,    1,   6.24,   0.00,   0.00,   0.00,   0.00,   0.00
+
+# --- ELEMENT LOAD(ELOD) ---
+#    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj
+#                          (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)
+#   (E/G: Element(=0) or Global(=1) Coordinate System)
+
+# --- GRAVITY LOAD(GLOD) ---
+#         LC,     Vec X,     Vec Y,     Vec Z
+#                 (m/s2)     (m/s2)     (m/s2)
+
+# --- AXIS (AXIS) ---
+#         ID,       NAME,    V/H,    NID,  x-DIR(if V)
+#                  (V/H 0:V, 1:H)     (x-DIR 0:X, 1:Y)
+
+# --- PLOT (PLOT) ---
+#         ID,       NAME,   AXIS,   TYPE,     LC,  SCALE, DEFFAC
+#             (TYPE 0: MODEL, 1: LOAD, 2: FORCE, 3: UTIL)
+
+
