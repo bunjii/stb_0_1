@@ -36,8 +36,8 @@ const ALPHA = {
   opaque: 1.0,
 };
 
-const OPTIONS_STORAGE_KEY = "stb_viewer_options";
-const MODEL_STORAGE_KEY = "stb_viewer_last_model";
+const OPTIONS_STORAGE_KEY = "stb_gui_options";
+const MODEL_STORAGE_KEY = "stb_gui_last_model";
 const LABEL_BG = {
   elem: "rgba(47, 75, 124, 1.0)",
   material: "rgba(150, 95, 35, " + ALPHA.labelMaterial + ")",
@@ -325,7 +325,7 @@ function refreshDisplayStatus(model) {
   const lcKey = String(el.lcSelect.value);
   let extra = analysisComplete(model) ? " (solved)" : "";
   if (analysisComplete(model) && !modelHasForceData(model, lcKey)) {
-    extra += " — force data unavailable (restart stb view)";
+    extra += " — force data unavailable (restart stb gui)";
   }
   if ((el.chkReactions.checked || el.chkReactionValues.checked) &&
       !modelHasReactionData(model, lcKey)) {
@@ -2495,12 +2495,14 @@ async function fetchModel(path, solve) {
 }
 
 function outputFileName(path) {
-  const base = path.replace(/^.*\//, "").replace(/\.dat$/i, "");
-  return base + "_out.dat";
+  const file = path.replace(/^.*\//, "");
+  const stem = file.replace(/\.[^./]+$/i, "");
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+  return dir + stem + ".out";
 }
 
 function showTextDocumentWindow(text, title) {
-  const pdfName = title.replace(/\.dat$/i, ".pdf");
+  const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
   const saveName = title;
   const w = window.open("", "_blank", "width=920,height=720,scrollbars=yes,resizable=yes");
   if (!w) {
@@ -2664,7 +2666,7 @@ async function openResultsWindow() {
       currentModel = await fetchModel(path, true);
       text = currentModel.results_text;
       if (text == null || text == "") {
-        throw new Error("No result text from server — restart: stb view");
+        throw new Error("No result text from server — restart: stb gui");
       }
       currentResultsText = text;
       fillLcSelect(currentModel);
@@ -2730,7 +2732,7 @@ async function bootstrap() {
     header: el.resultsPanelHeader,
     collapseBtn: el.btnPanelCollapse,
     toggleBtn: el.btnTogglePanel,
-    storageKey: "stb_viewer_results_panel",
+    storageKey: "stb_gui_results_panel",
     defaultHidden: false,
   });
   initDraggablePanel({
@@ -2738,7 +2740,7 @@ async function bootstrap() {
     header: el.optionsPanelHeader,
     collapseBtn: el.btnOptionsCollapse,
     toggleBtn: el.btnToggleOptions,
-    storageKey: "stb_viewer_options_panel",
+    storageKey: "stb_gui_options_panel",
     defaultHidden: true,
   });
   try {

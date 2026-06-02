@@ -18,14 +18,14 @@ cd /path/to/stb_0_1   # Dropbox 上のパスでも可
 
 python3 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install -e ".[viewer]"
+.venv/bin/pip install -e ".[gui]"
 ```
 
 動作確認:
 
 ```bash
 .venv/bin/stb version
-.venv/bin/stb solve examples/cantilever.dat -o /tmp/out.dat -q
+.venv/bin/stb solve examples/cantilever.dat -o /tmp/cantilever.out -q
 ```
 
 ## Windows の場合
@@ -36,7 +36,7 @@ python3 -m venv .venv
 cd C:\Users\...\Dropbox\98_codes\stb_0_1
 py -3 -m venv .venv
 .\.venv\Scripts\pip install -U pip
-.\.venv\Scripts\pip install -e ".[viewer]"
+.\.venv\Scripts\pip install -e ".[gui]"
 ```
 
 ## Dropbox で venv を同期しない（推奨）
@@ -62,7 +62,7 @@ attr -s com.dropbox.ignored -V 1 .venv-win .venv_win .venv_py314_broken 2>/dev/n
 
 ```bash
 python3 -m venv ~/venvs/stb_0_1
-~/venvs/stb_0_1/bin/pip install -e "/path/to/Dropbox/.../stb_0_1[viewer]"
+~/venvs/stb_0_1/bin/pip install -e "/path/to/Dropbox/.../stb_0_1[gui]"
 ```
 
 ## 依存関係を更新したあと
@@ -70,7 +70,7 @@ python3 -m venv ~/venvs/stb_0_1
 `pyproject.toml` を pull したら、各 PC で:
 
 ```bash
-.venv/bin/pip install -e ".[viewer]"
+.venv/bin/pip install -e ".[gui]"
 ```
 
 ## Git pull 後（venv 追跡をやめたコミット以降）

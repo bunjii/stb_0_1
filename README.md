@@ -1,6 +1,6 @@
 # Structural Toolbox
 
-3D linear static analysis for frame structures. Use the **CLI** (`stb solve`) and **browser viewer** (`stb view`); the headless engine (`stb_engine`) is the shared solver core.
+3D linear static analysis for frame structures. Use the **CLI** (`stb solve`) and **browser application** (`stb gui`); the headless engine (`stb_engine`) is the shared solver core.
 
 ## Virtual environment (each PC)
 
@@ -10,7 +10,7 @@ Do **not** commit or share `.venv` via Git. Create one local venv per machine (L
 cd /path/to/stb_0_1
 python3 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install -e ".[viewer]"
+.venv/bin/pip install -e ".[gui]"
 ```
 
 Multi-machine / Dropbox notes: [docs/setup_venv.md](docs/setup_venv.md).
@@ -27,7 +27,7 @@ cd /path/to/stb_0_1
 Use the `stb` inside the project virtual environment (recommended):
 
 ```bash
-.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever_out.dat -q -v
+.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever.out -q -v
 ```
 
 Or activate the venv first: `source .venv/bin/activate`, then run `stb ...`.
@@ -42,7 +42,7 @@ Fix (pick one):
 # A) Recommended: install into project .venv and call it explicitly
 cd /path/to/stb_0_1
 .venv/bin/pip install -e .
-.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever_out.dat -q -v
+.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever.out -q -v
 
 # B) Remove the conflicting user entry, then use .venv only
 python3 -m pip uninstall structural-toolbox
@@ -55,13 +55,13 @@ Check which Python runs `stb`: `head -1 "$(which stb)"` should point to `.venv/b
 
 ```bash
 # Smallest sample (see examples/README.md)
-.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever_out.dat -q -v
+.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever.out -q -v
 
 # Run analysis; write results to a file
-stb solve data/input01.dat -o tests/_tmp_out/out.dat
+stb solve data/input01.dat -o tests/_tmp_out/input01.out
 
 # Same without installing (from project root)
-.venv/bin/python -m stb_cli solve data/input01.dat -o tests/_tmp_out/out.dat
+.venv/bin/python -m stb_cli solve data/input01.dat -o tests/_tmp_out/input01.out
 
 # Parse input only (no solve)
 stb validate data/input01.dat -v
@@ -69,19 +69,19 @@ stb validate data/input01.dat -v
 # Version
 stb version
 
-# Web 3D viewer (Phase C1)
-.venv/bin/pip install -e ".[viewer]"
-.venv/bin/stb view --file examples/cantilever.dat
-# or: .venv/bin/python -m stb_viewer
+# Browser application
+.venv/bin/pip install -e ".[gui]"
+.venv/bin/stb gui
+# or: .venv/bin/python -m stb_gui
 ```
 
-### Web viewer (Phase C1)
+### Structural Toolbox GUI
 
-Read-only **Three.js** frame viewer in the browser. Lists models under `data/` and `examples/`.
+**Three.js** frame modeler and viewer in the browser. Lists models under `data/` and `examples/`. The last opened model is remembered in the browser (`localStorage`).
 
 ```bash
-.venv/bin/pip install -e ".[viewer]"
-.venv/bin/stb view --file data/input01.dat --port 8765
+.venv/bin/pip install -e ".[gui]"
+.venv/bin/stb gui --port 8765
 ```
 
 Open http://127.0.0.1:8765/ — drag to orbit, scroll to zoom. Main bar: model, **Solve**, **Results** (forces, LC, deformation), **Options** (load arrow / label sizes; settings persist).
@@ -92,9 +92,11 @@ Stop the server with **Ctrl+C**.
 
 | Flag | Effect |
 |------|--------|
-| `-o`, `--output` | Result file (`solve` only; default is stdout) |
+| `-o`, `--output` | Result file (`.out`; `solve` only; default is stdout) |
 | `-q`, `--quiet` | Suppress solver progress messages on stderr/stdout |
 | `-v`, `--verbose` | Print status (node count, load cases, output path) |
+
+Result file naming convention: `model.dat` → `model.out` (same directory unless `-o` specifies otherwise).
 
 ### Exit codes
 
@@ -109,7 +111,7 @@ Stop the server with **Ctrl+C**.
 ```bash
 .venv/bin/python -c "
 from stb_engine import run_from_file
-mdl, txt = run_from_file('data/input01.dat', 'tests/_tmp_out/out.dat')
+mdl, txt = run_from_file('data/input01.dat', 'tests/_tmp_out/input01.out')
 print('load cases:', mdl.lcs)
 "
 ```
@@ -118,11 +120,11 @@ print('load cases:', mdl.lcs)
 
 **Exceptions:** `StbParseError`, `StbSolveError`
 
-Input and output use the same comma-separated text format (editable in the web viewer).  
+Input and output use the same comma-separated text format (editable in the GUI).  
 **Input reference:** [docs/input_format.md](docs/input_format.md) (`PLOD`, `ELOD`, `ALOD`, `GLOD`, … — not `LOAD`).
 
 ### Tests
 
 ```bash
-.venv/bin/python -m unittest tests.test_engine tests.test_cli tests.test_data_models tests.test_viewer -v
+.venv/bin/python -m unittest tests.test_engine tests.test_cli tests.test_data_models tests.test_gui -v
 ```

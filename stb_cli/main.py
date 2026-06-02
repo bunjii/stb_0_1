@@ -123,21 +123,19 @@ def cmd_solve(args):
     return EXIT_OK
 
 
-def cmd_view(args):
+def cmd_gui(args):
     _ensure_project_root_on_path()
     try:
-        from stb_viewer.model_json import normalize_model_relpath
-        from stb_viewer.server import run_server
+        from stb_gui.server import run_server
     except ImportError as ex:
         _stderr(str(ex))
-        _stderr("Install viewer extras: pip install -e \".[viewer]\"")
+        _stderr("Install GUI extras: pip install -e \".[gui]\"")
         return EXIT_INPUT
 
     try:
         run_server(
             host=args.host,
             port=args.port,
-            default_model=normalize_model_relpath(args.file),
             open_browser=(not args.no_browser),
         )
     except KeyboardInterrupt:
@@ -160,7 +158,7 @@ def _build_parser():
 
     parser = argparse.ArgumentParser(
         prog="stb",
-        description="Structural Toolbox - headless static analysis",
+        description="Structural Toolbox — static analysis and browser GUI",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -184,32 +182,28 @@ def _build_parser():
     p_sol.add_argument("input", help="Input model file")
     p_sol.add_argument(
         "-o", "--output",
-        help="Output results file (default: stdout)",
+        help="Output results file (.out; default: stdout)",
     )
     p_sol.set_defaults(func=cmd_solve)
 
-    p_view = sub.add_parser(
-        "view",
+    p_gui = sub.add_parser(
+        "gui",
         parents=[common],
-        help="Start web 3D viewer (Three.js)",
+        help="Start Structural Toolbox in the browser",
     )
-    p_view.add_argument(
+    p_gui.add_argument(
         "--host", default="127.0.0.1",
         help="Bind address (default: 127.0.0.1)",
     )
-    p_view.add_argument(
+    p_gui.add_argument(
         "--port", type=int, default=8765,
         help="Port (default: 8765)",
     )
-    p_view.add_argument(
-        "--file", default="examples/cantilever.dat",
-        help="Default model under project root",
-    )
-    p_view.add_argument(
+    p_gui.add_argument(
         "--no-browser", action="store_true",
         help="Do not open a browser",
     )
-    p_view.set_defaults(func=cmd_view)
+    p_gui.set_defaults(func=cmd_gui)
 
     return parser
 

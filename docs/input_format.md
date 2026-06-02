@@ -274,7 +274,7 @@ PLOD, ...
 Run:
 
 ```bash
-.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever_out.dat -q
+.venv/bin/stb solve examples/cantilever.dat -o examples/cantilever.out -q
 ```
 
 ---
@@ -290,7 +290,7 @@ Result files are text, with records such as:
 | `REAC` | Reactions at constrained nodes (kN, kNm) |
 | `EFRC` | Element end forces (kN, kNm) |
 
-See `examples/cantilever_out.dat` for a full example.
+See `examples/cantilever.out` for a full example.
 
 ---
 
