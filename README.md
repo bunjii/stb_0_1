@@ -1,6 +1,6 @@
 # Structural Toolbox
 
-3D linear static analysis for frame structures. Desktop UI (wxPython + VTK/vedo) and a headless analysis engine (`stb_engine`) share the same solver core.
+3D linear static analysis for frame structures. Use the **CLI** (`stb solve`) and **browser viewer** (`stb view`); the headless engine (`stb_engine`) is the shared solver core.
 
 ## Virtual environment (each PC)
 
@@ -118,7 +118,7 @@ print('load cases:', mdl.lcs)
 
 **Exceptions:** `StbParseError`, `StbSolveError`
 
-Input and output use the same comma-separated text format as the GUI editor.  
+Input and output use the same comma-separated text format (editable in the web viewer).  
 **Input reference:** [docs/input_format.md](docs/input_format.md) (`PLOD`, `ELOD`, `ALOD`, `GLOD`, … — not `LOAD`).
 
 ### Tests
@@ -126,55 +126,3 @@ Input and output use the same comma-separated text format as the GUI editor.
 ```bash
 .venv/bin/python -m unittest tests.test_engine tests.test_cli tests.test_data_models tests.test_viewer -v
 ```
-
-## GUI launch
-
-```bash
-cd /path/to/stb_0_1
-.venv/bin/python main_frame.py
-```
-
-## Debug launch (when needed)
-
-```bash
-STB_WXVTK_DEBUG=1 .venv/bin/python main_frame.py
-```
-
-Expected debug log example:
-
-- `[stb wxvtk] widget 0x...(wxPizza) -> XID 0xe...`
-
-## Linux: VTK embedding on Wayland (notes)
-
-### Symptoms
-
-- `vtkXOpenGLRenderWindow ... failed to get the converted tmp`
-- Immediate exit with `BadWindow`
-
-### Cause
-
-On wxGTK, `wxVTKRenderWindowInteractor` was passing a window handle from `GetHandle()` that was not the X11 Window ID (XID) VTK expects. VTK then performed X11 calls on an invalid window and crashed.
-
-### Fix (already applied in this repo)
-
-1. On Wayland sessions, VTK embedding is routed through X11 (XWayland).
-2. A patch resolves the real X11 XID via `GetGtkWidget()` and GTK/GDK instead of `GetHandle()`.
-3. `main_frame.py` sets `GDK_BACKEND=x11` when `WAYLAND_DISPLAY` is set.
-
-### Do you need to switch the whole desktop to X11?
-
-**No.**
-
-- You do not need to log into an X11-only session.
-- The app runs on XWayland while your desktop stays on Wayland (e.g. Fedora).
-- Only this application is forced to the X11 GDK backend for reliable VTK embedding.
-
-### Optional environment variables
-
-| Variable | Effect |
-|----------|--------|
-| (default on Wayland) | `GDK_BACKEND=x11` is set automatically |
-| `STB_ALLOW_WAYLAND=1` | Skip forcing X11; VTK embedding may fail again |
-| `STB_FORCE_SOFTWARE_GL=1` | Software OpenGL fallback if GPU issues are suspected |
-| `STB_GTK_INTEGER_SCALE=1` | Integer GTK scale (`GDK_SCALE=1`, `GDK_DPI_SCALE=1`) for HiDPI issues |
-| `STB_WXVTK_DEBUG=1` | Log wxVTK widget → XID mapping |
