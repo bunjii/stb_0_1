@@ -1,0 +1,39 @@
+# Virtual environments (create locally on each machine; do not commit or sync via Git)
+.venv/
+.venv-*/
+.venv_*/
+venv/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated docs
+docs/element_stiffness_matrix.html
+
+# Editor / OS
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local test / temp output
+tests/_tmp_out/
+*.log
+
+# VS Code (keep shared workspace settings)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
