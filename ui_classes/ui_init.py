@@ -885,7 +885,10 @@ class UIInitMixin(EventHandlersMixin):
                     if e.glds is not None:
                         num_cols = e.glds.shape[1]
                         if i < num_cols: lds += e.glds[:, i]
-                        #print(f"glds: {e.glds[:, i]} added")
+
+                    if e.alds is not None:
+                        num_cols = e.alds.shape[1]
+                        if i < num_cols: lds += e.alds[:, i]
 
                     wzi, wzj = lds[2], lds[5]
                     wyi, wyj = lds[1], lds[4]
@@ -996,6 +999,9 @@ class UIInitMixin(EventHandlersMixin):
                     if el.isGlobal == True: el_lds = e.tm[0:6, 0:6] @ el_lds
                     for i in range(6): lds[i] += el_lds[i, 0]
 
+                if e.glds is not None: lds += e.glds[:, self.clc]
+                if e.alds is not None: lds += e.alds[:, self.clc]
+
                 vy = e.pln.vy.v # drawing direction
                 p0 = np.array([e.n0.x, e.n0.y, e.n0.z])
                 p1 = np.array([e.n1.x, e.n1.y, e.n1.z])
@@ -1007,7 +1013,7 @@ class UIInitMixin(EventHandlersMixin):
                 qyj = e.forces[7][self.clc]
 
                 w_xc= wyi + (wyj - wyi) * 0.5
-                q_xc = 1.0 * qyi + 0.5 * (wyi + w_xc) * 0.5 * e.len ###
+                q_xc = -1.0 * qyi - 0.5 * (wyi + w_xc) * 0.5 * e.len
                 mp = 0.5 * p0 + 0.5 * p1 + (disp_fac * q_xc) * vy
 
                 spline_pts = []
@@ -1016,7 +1022,7 @@ class UIInitMixin(EventHandlersMixin):
                     x   = t * e.len
                     pt  = (1-t) * p0 + t * p1
                     w_x = wyi + (wyj - wyi) * t
-                    q_x = 1.0 * qyi + 0.5 * (wyi + w_x) * x
+                    q_x = -1.0 * qyi - 0.5 * (wyi + w_x) * x
 
                     pt_f = pt + disp_fac * q_x * vy
                     frc_graphics.append(vedo.Line(pt, pt_f, lw=self.size["line-weight-thin"], c=self.colors["force-d"]))
@@ -1072,6 +1078,9 @@ class UIInitMixin(EventHandlersMixin):
                     
                     if el.isGlobal == True: el_lds = e.tm[0:6, 0:6] @ el_lds
                     for i in range(6): lds[i] += el_lds[i, 0]
+
+                if e.glds is not None: lds += e.glds[:, self.clc]
+                if e.alds is not None: lds += e.alds[:, self.clc]
 
                 vz = e.pln.vz.v # drawing direction
                 p0 = np.array([e.n0.x, e.n0.y, e.n0.z])
@@ -1170,6 +1179,7 @@ class UIInitMixin(EventHandlersMixin):
                         lds[i] += el_lds[i, 0]
                 
                 if e.glds is not None: lds += e.glds[:, self.clc]
+                if e.alds is not None: lds += e.alds[:, self.clc]
 
                 vz = e.pln.vz.v # drawing direction of the element
 
@@ -1254,6 +1264,7 @@ class UIInitMixin(EventHandlersMixin):
                     for i in range(6): lds[i] += el_lds[i, 0]
                 
                 if e.glds is not None: lds += e.glds[:, self.clc]
+                if e.alds is not None: lds += e.alds[:, self.clc]
 
                 vy = e.pln.vy.v # drawing direction
 

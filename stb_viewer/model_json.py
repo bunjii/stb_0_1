@@ -40,12 +40,25 @@ def _dominant_signed_component(w):
     return best
 
 
-def _element_load_display_value(w, is_gravity=False):
+def _dominant_signed_component_profile(profile):
+    best = 0.0
+    if profile is None:
+        return best
+    for row in profile:
+        for i in range(1, 4):
+            if abs(row[i]) > abs(best):
+                best = row[i]
+    return best
+
+
+def _element_load_display_value(w, is_gravity=False, is_area=False):
     text = _format_load_value_text(_dominant_signed_component(w))
     if text is None:
         return None
     if is_gravity:
         text += "G"
+    elif is_area:
+        text += "A"
     return text
 
 
@@ -65,6 +78,9 @@ def _elem_local_wloads(elem, mdl, lc_idx):
 
     if elem.glds is not None and lc_idx < elem.glds.shape[1]:
         lds += elem.glds[:, lc_idx]
+
+    if elem.alds is not None and lc_idx < elem.alds.shape[1]:
+        lds += elem.alds[:, lc_idx]
 
     return lds
 
@@ -98,6 +114,63 @@ def _gravity_element_load_entries(mdl):
                 "gravity": True,
                 "w": w,
                 "display_value": _element_load_display_value(w, is_gravity=True),
+            })
+    return entries
+
+
+def _area_load_element_load_entries(mdl):
+    """Per-edge ALOD loads with sampled tributary profile (ECS, kN/m)."""
+
+    entries = []
+    for al in mdl.alds or []:
+        if al.elms is None:
+            continue
+
+        for idx, elem in enumerate(al.elms):
+            if elem.tm is None:
+                continue
+
+            p_ecs = elem.tm[0:3, 0:3] @ np.array(al.lds, dtype=float)
+            if np.max(np.abs(p_ecs)) < 1e-12:
+                continue
+
+            b0 = 0.0 if al.elms_b0 is None else float(al.elms_b0[idx])
+            b1 = 0.0 if al.elms_b1 is None else float(al.elms_b1[idx])
+            w = [
+                b0 * p_ecs[0] * 1e-3,
+                b0 * p_ecs[1] * 1e-3,
+                b0 * p_ecs[2] * 1e-3,
+                b1 * p_ecs[0] * 1e-3,
+                b1 * p_ecs[1] * 1e-3,
+                b1 * p_ecs[2] * 1e-3,
+            ]
+
+            profile = []
+            if al.elms_t is not None and al.elms_b is not None:
+                ts = al.elms_t[idx]
+                bs = al.elms_b[idx]
+                profile.append([0.0, 0.0, 0.0, 0.0])
+                for j in range(len(ts)):
+                    bj = float(bs[j])
+                    profile.append([
+                        float(ts[j]),
+                        float(bj * p_ecs[0] * 1e-3),
+                        float(bj * p_ecs[1] * 1e-3),
+                        float(bj * p_ecs[2] * 1e-3),
+                    ])
+                profile.append([1.0, 0.0, 0.0, 0.0])
+
+            entries.append({
+                "elem": elem.id,
+                "lc": al.lc,
+                "global": False,
+                "area_load": True,
+                "w": w,
+                "w_profile": profile if len(profile) > 1 else None,
+                "display_value": _element_load_display_value(
+                    [0.0, 0.0, _dominant_signed_component_profile(profile), 0.0, 0.0, 0.0],
+                    is_area=True,
+                ),
             })
     return entries
 
@@ -262,6 +335,7 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "display_value": _element_load_display_value(w, is_gravity=False),
         })
     element_loads.extend(_gravity_element_load_entries(mdl))
+    element_loads.extend(_area_load_element_load_entries(mdl))
 
     bounds = None
     if mdl.bounds != None:

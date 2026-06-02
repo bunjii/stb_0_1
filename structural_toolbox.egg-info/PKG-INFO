@@ -16,6 +16,19 @@ Requires-Dist: httpx; extra == "viewer"
 
 3D linear static analysis for frame structures. Desktop UI (wxPython + VTK/vedo) and a headless analysis engine (`stb_engine`) share the same solver core.
 
+## Virtual environment (each PC)
+
+Do **not** commit or share `.venv` via Git. Create one local venv per machine (Linux / Windows each use `.venv` in the project folder, or a path outside Dropbox).
+
+```bash
+cd /path/to/stb_0_1
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install -e ".[viewer]"
+```
+
+Multi-machine / Dropbox notes: [docs/setup_venv.md](docs/setup_venv.md).
+
 ## Command-line interface (Phase 1)
 
 Install the `stb` command (once per virtual environment):

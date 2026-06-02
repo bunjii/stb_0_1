@@ -36,6 +36,7 @@
       </label>
       <button type="button" id="btnDispContourAuto" class="btn-disp-contour-auto">Auto</button>
     </div>
+    <div id="viewerInfoOverlay" class="viewer-info-overlay"></div>
   </div>
 
   <div id="resultsPanel" class="float-panel">
@@ -70,6 +71,15 @@
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkLoads" checked> Input loads
+        </label>
+        <label class="panel-row">
+          <span>Input type</span>
+          <select id="loadTypeFilter">
+            <option value="all">All</option>
+            <option value="area">Area (ALOD)</option>
+            <option value="gravity">Gravity (GLOD)</option>
+            <option value="linepoint">Line + Point</option>
+          </select>
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkLoadValues"> Load values
@@ -137,8 +147,8 @@
         <p class="panel-hint">Saved automatically. Applies on next redraw.</p>
         <label class="panel-row">
           <span>Load arrow</span>
-          <input type="range" id="optLoadArrow" min="5" max="20" value="8">
-          <span class="range-val" id="optLoadArrowVal">8</span>
+          <input type="range" id="optLoadArrow" min="0.1" max="5" step="0.1" value="1.0">
+          <span class="range-val" id="optLoadArrowVal">1.0</span>
         </label>
         <label class="panel-row">
           <span>Support gizmo</span>
@@ -156,39 +166,54 @@
           <span class="range-val">px</span>
         </label>
         <label class="panel-row">
+          <span>Element line</span>
+          <input type="number" id="optElementLineWidth" min="0.5" max="3" step="0.5" value="1.5">
+          <span class="range-val">px</span>
+        </label>
+        <label class="panel-row">
+          <span>Load line</span>
+          <input type="number" id="optLoadLineWidth" min="0.5" max="3" step="0.5" value="1.5">
+          <span class="range-val">px</span>
+        </label>
+        <label class="panel-row">
+          <span>Force line</span>
+          <input type="number" id="optForceLineWidth" min="0.5" max="3" step="0.5" value="1.5">
+          <span class="range-val">px</span>
+        </label>
+        <label class="panel-row">
           <span>Node ID</span>
-          <input type="range" id="optNodeLabel" min="1" max="8" value="3">
-          <span class="range-val" id="optNodeLabelVal">3</span>
+          <input type="range" id="optNodeLabel" min="0.1" max="2" step="0.1" value="1.0">
+          <span class="range-val" id="optNodeLabelVal">1.0</span>
         </label>
         <label class="panel-row">
           <span>Elem ID</span>
-          <input type="range" id="optElemLabel" min="1" max="8" value="3">
-          <span class="range-val" id="optElemLabelVal">3</span>
+          <input type="range" id="optElemLabel" min="0.1" max="2" step="0.1" value="1.0">
+          <span class="range-val" id="optElemLabelVal">1.0</span>
         </label>
         <label class="panel-row">
           <span>Material</span>
-          <input type="range" id="optMaterialLabel" min="1" max="8" value="4">
-          <span class="range-val" id="optMaterialLabelVal">4</span>
+          <input type="range" id="optMaterialLabel" min="0.1" max="2" step="0.1" value="1.2">
+          <span class="range-val" id="optMaterialLabelVal">1.2</span>
         </label>
         <label class="panel-row">
           <span>Section</span>
-          <input type="range" id="optSectionLabel" min="1" max="8" value="3">
-          <span class="range-val" id="optSectionLabelVal">3</span>
+          <input type="range" id="optSectionLabel" min="0.1" max="2" step="0.1" value="1.0">
+          <span class="range-val" id="optSectionLabelVal">1.0</span>
         </label>
         <label class="panel-row">
           <span>Load value</span>
-          <input type="range" id="optLoadLabel" min="1" max="8" value="3">
-          <span class="range-val" id="optLoadLabelVal">3</span>
+          <input type="range" id="optLoadLabel" min="0.1" max="2" step="0.1" value="1.0">
+          <span class="range-val" id="optLoadLabelVal">1.0</span>
         </label>
         <label class="panel-row">
           <span>Reaction value</span>
-          <input type="range" id="optReactionLabel" min="1" max="8" value="3">
-          <span class="range-val" id="optReactionLabelVal">3</span>
+          <input type="range" id="optReactionLabel" min="0.1" max="2" step="0.1" value="1.0">
+          <span class="range-val" id="optReactionLabelVal">1.0</span>
         </label>
         <label class="panel-row">
           <span>Force value</span>
-          <input type="range" id="optForceLabel" min="1" max="10" value="6">
-          <span class="range-val" id="optForceLabelVal">6</span>
+          <input type="range" id="optForceLabel" min="0.1" max="2.5" step="0.1" value="1.5">
+          <span class="range-val" id="optForceLabelVal">1.5</span>
         </label>
       </section>
     </div>

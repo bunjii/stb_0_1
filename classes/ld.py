@@ -2,8 +2,6 @@ import common
 import math
 
 import numpy as np
-from shapely.geometry import Polygon
-from scipy.spatial import Voronoi
 
 class Lcase:
     def __init__(self, _lc, _lname):
@@ -137,187 +135,243 @@ class ALd:
 
         self.clc = None  # will be set by mdl
 
-        self.nds = None  # will be set by SetLdPropsByVolonoiDivision in mdl
+        self.nds = None  # kept for backward-compat (no longer used for corner point loads)
         self.elms = None # will be set by mdl
-        self.nds_areas = None # will be set by SetLdPropsByVolonoiDivision in mdl
-        self.elms_areas = None # will be set by SetLdPropsByVolonoiDivision in mdl
+        self.nds_areas = None # kept for backward-compat
+        self.elms_areas = None # tributary area [m^2] per boundary member (aligned to self.elms)
+        self.elms_dc = None    # tributary-area centroid distance [m] from member.n0 (aligned to self.elms)
+        self.elms_b0 = None    # tributary width [m] at member.n0 (aligned to self.elms)
+        self.elms_b1 = None    # tributary width [m] at member.n1 (aligned to self.elms)
+        self.elms_t = None     # sampled position t=[0..1] for tributary-width profile
+        self.elms_b = None     # sampled tributary-width profile [m] aligned to self.elms_t
 
-        # self.SetLdPropsByVolonoiDivision()
+    # ------------------------------------------------------------------
+    # Area-load distribution (tributary-area method).
+    #
+    # The panel pressure is distributed onto its boundary members using a
+    # nearest-edge (medial-axis) tributary partition of the panel surface.
+    # For each member we store the tributary area and the position of its
+    # centroid along the member axis. The solver converts these into an
+    # equivalent linearly-varying member load that exactly reproduces the
+    # tributary resultant and its point of application (hence exact global
+    # equilibrium and support reactions), including the member-axial
+    # pressure component.
+    # ------------------------------------------------------------------
+    def SetMemberAreaLoads(self, grid_n: int = 240):
 
-    def SetLdPropsByVolonoiDivision(self):
-
-        # Identify the vertices of the quadrilateral or triangle
-        vertices_3d = []
         elms = self.elms
-        nds = []
 
-        for e in elms:
-            if e.n0 not in nds:
-                nds.append(e.n0)
-            if e.n1 not in nds:
-                nds.append(e.n1)
+        if elms is None or len(elms) < 3:
+            raise ValueError("ALOD panel needs at least 3 boundary members")
 
-        for nd in nds:
-            vertices_3d.append([nd.x, nd.y, nd.z])
-        
-        vertices_3d = np.array(vertices_3d)
+        # 1. Order the boundary members into a closed loop of vertices.
+        loop = ALd._BuildBoundaryLoop(elms)
+        if loop is None:
+            raise ValueError(
+                f"ALOD elements {[e.id for e in elms]} do not form a single closed loop")
 
-        # Verify we have at least 3 vertices
-        if len(vertices_3d) < 3:
-            raise ValueError("Need at least 3 vertices to form a polygon")
+        # ordered start vertices of each edge (= polygon vertices)
+        verts_3d = np.array([[seg["v0"].x, seg["v0"].y, seg["v0"].z] for seg in loop])
+        n_edge = len(loop)
 
-        # Calculate transformation matrix from 3D to 2D
-        v1 = vertices_3d[1] - vertices_3d[0]  # First edge vector
-        v2 = vertices_3d[2] - vertices_3d[0]  # Second edge vector (using third vertex for triangle)
-        normal = np.cross(v1, v2)
-        normal = normal / np.linalg.norm(normal)
+        # 2. Project the (possibly non-planar) panel onto its best-fit plane.
+        centroid = verts_3d.mean(axis=0)
+        rel = verts_3d - centroid
+        # least-significant singular vector is the plane normal
+        _, _, vt = np.linalg.svd(rel, full_matrices=True)
+        normal = vt[2]
+        e1 = verts_3d[1] - verts_3d[0]
+        e1 = e1 - np.dot(e1, normal) * normal
+        e1 = e1 / np.linalg.norm(e1)
+        e2 = np.cross(normal, e1)
 
-        e1 = v1 / np.linalg.norm(v1)  # First basis vector
-        e2 = np.cross(normal, e1)  # Second basis vector (perpendicular to e1)
+        verts_2d = np.column_stack([rel @ e1, rel @ e2])
 
-        transform_matrix = np.vstack([e1, e2])  # Matrix for 3D to 2D projection
+        # 3. Exact polygon area (shoelace) used to normalise the tributary areas.
+        poly_area = ALd._PolygonArea(verts_2d)
+        if poly_area < common.PRES_ZERO:
+            raise ValueError("ALOD panel has (near) zero area")
 
-        # Project 3D vertices to 2D
-        origin = vertices_3d[0]  # Origin point for the projection
-        vertices_2d = np.array([
-            transform_matrix @ (vertex - origin) for vertex in vertices_3d
-        ])
+        # 4. Nearest-edge tributary partition -> per-edge area, centroid, end widths.
+        areas, dcs, b0s, b1s, ts, bs = ALd._TributaryByEdge(verts_2d, grid_n)
 
-        # Define boundary polygon
-        boundary_polygon = Polygon(vertices_2d)  # 2D polygon object
+        # normalise so the assigned areas sum exactly to the true panel area
+        total = sum(areas)
+        if total > common.PRES_ZERO:
+            scale = poly_area / total
+            areas = [a * scale for a in areas]
 
-        # Generate points by dividing each edge and include vertices
-        num_div = 8  # Number of divisions for each edge
-        points_2d = []  # List to store 2D points
-        points_3d = []  # List to store 3D points
-        n_vertices = len(vertices_3d)  # Get number of vertices
+        # 5. Map each edge result back to its member (centroid measured from member.n0).
+        self.elms = [seg["elm"] for seg in loop]
+        self.elms_areas = areas
+        self.elms_dc = []
+        self.elms_b0 = []
+        self.elms_b1 = []
+        self.elms_t = []
+        self.elms_b = []
+        for k, seg in enumerate(loop):
+            e = seg["elm"]
+            dc_from_v0 = dcs[k]              # measured from edge start vertex (seg["v0"])
+            b0_from_v0 = b0s[k]
+            b1_from_v0 = b1s[k]
+            t_from_v0 = ts[k]
+            b_from_v0 = bs[k]
+            if seg["v0"] is e.n0:
+                self.elms_dc.append(dc_from_v0)
+                self.elms_b0.append(b0_from_v0)
+                self.elms_b1.append(b1_from_v0)
+                self.elms_t.append(t_from_v0)
+                self.elms_b.append(b_from_v0)
+            else:                            # edge runs n1 -> n0, flip the coordinate
+                self.elms_dc.append(e.len - dc_from_v0)
+                self.elms_b0.append(b1_from_v0)
+                self.elms_b1.append(b0_from_v0)
+                self.elms_t.append(np.array([1.0 - t for t in t_from_v0[::-1]], dtype=np.float64))
+                self.elms_b.append(np.array(b_from_v0[::-1], dtype=np.float64))
 
-        # Add vertices first
-        for vertex_2d, vertex_3d in zip(vertices_2d, vertices_3d):
-            points_2d.append(vertex_2d)
-            points_3d.append(vertex_3d)
-
-        # Add points on edges
-        for i in range(n_vertices):
-            start_2d = vertices_2d[i]
-            end_2d = vertices_2d[(i+1)%n_vertices]
-            start_3d = vertices_3d[i]
-            end_3d = vertices_3d[(i+1)%n_vertices]
-            
-            for j in range(1, num_div):
-                t = j / num_div
-                point_2d = start_2d + t * (end_2d - start_2d)
-                points_2d.append(point_2d)
-                point_3d = start_3d + t * (end_3d - start_3d)
-                points_3d.append(point_3d)
-
-        points_2d = np.array(points_2d)
-        points_3d = np.array(points_3d)
-
-        # points_3d: [x, y, z] all points in 3D
-        # 
-
-        # Calculate bounding box for 2D projected vertices
-        min_x, min_y = np.min(vertices_2d, axis=0)  # Minimum coordinates of the bounding box
-        max_x, max_y = np.max(vertices_2d, axis=0)  # Maximum coordinates of the bounding box
-
-        # Set margin and extra points for Voronoi calculation
-        margin = max(max_x - min_x, max_y - min_y) * 2  # Margin size for extra points
-        extra_points = []  # List to store points outside the polygon for proper Voronoi computation
-        n_extra = 4  # Number of extra points along each direction
-
-        for i in range(n_extra):
-            for j in range(n_extra):
-                x = min_x - margin + (max_x - min_x + 2*margin) * i/(n_extra-1)
-                y = min_y - margin
-                extra_points.append([x, y])
-                y = max_y + margin
-                extra_points.append([x, y])
-            y = min_y - margin + (max_y - min_y + 2*margin) * i/(n_extra-1)
-            extra_points.append([min_x - margin, y])
-            extra_points.append([max_x + margin, y])
-
-        extra_points = np.array(extra_points)
-        all_points_2d = np.vstack([points_2d, extra_points])
-
-        # Generate Voronoi diagram
-        vor = Voronoi(all_points_2d)  # Voronoi diagram object
-
-        # Calculate total area based on polygon type
-        n_vertices = len(vertices_3d)
-        if n_vertices == 3:  # Triangle case
-            total_area_3d = np.linalg.norm(np.cross(v1, v2)) / 2
-        elif n_vertices == 4:  # Quadrilateral case
-            # Calculate area using two triangles
-            v3 = vertices_3d[3] - vertices_3d[0]
-            total_area_3d = (np.linalg.norm(np.cross(v1, v2)) + np.linalg.norm(np.cross(v2, v3))) / 2
-        else:
-            raise ValueError("Only triangles and quadrilaterals are supported")
-
-        total_area_2d = boundary_polygon.area
-        scale_factor = total_area_3d / total_area_2d
-
-        total_area_2d = boundary_polygon.area
-        scale_factor = total_area_3d / total_area_2d
-        areas_2d = []  # List to store areas of 2D regions
-        areas_3d = []  # List to store areas of 3D regions
-
-        for i in range(len(points_2d)):
-            region_idx = vor.point_region[i]
-            region = vor.regions[region_idx]
-            
-            if -1 in region or len(region) < 3:
-                continue
-            
-            vertices_2d = vor.vertices[region]
-            region_polygon = Polygon(vertices_2d)
-            clipped_region = region_polygon.intersection(boundary_polygon)
-            
-            if clipped_region.area > 0:
-                area_2d = clipped_region.area
-                areas_2d.append(area_2d)
-                area_3d = area_2d * scale_factor
-                areas_3d.append(area_3d)
-
-        # Print areas
-        # print(f"Individual 3D areas: {[f'{a:.2f}' for a in areas_3d]}")
-
-        self.nds = nds
-
-        # node areas
-        node_areas = []
-        for nd in nds:
-
-            nd_pos = [nd.x, nd.y, nd.z]
-
-            for i in range(len(points_3d)):
-                if np.linalg.norm(points_3d[i] - nd_pos) < common.PRES_LEN:
-                    node_areas.append(areas_3d[i])
-                    break
-
-        self.nds_areas = node_areas
-
-        # element areas
-        elms_areas = []
-        for e in elms:
-            sp = np.array([e.n0.x, e.n0.y, e.n0.z])
-            ep = np.array([e.n1.x, e.n1.y, e.n1.z])
-            elm_areas = []
-            for i in range(num_div-1):
-                t = (i + 1) / num_div
-                p = (1-t) * sp + t * ep
-
-                for j in range(len(points_3d)):
-                    if np.linalg.norm(points_3d[j] - p) < common.PRES_LEN:
-                        elm_areas.append(areas_3d[j])
-                        break
-
-            elms_areas.append(elm_areas)
-
-        self.elms = elms
-        self.elms_areas = elms_areas
+        # corner point loads are no longer used
+        self.nds = None
+        self.nds_areas = None
 
         return
+
+    @staticmethod
+    def _BuildBoundaryLoop(elms):
+        """Order the given members into a single closed polygon loop.
+
+        Returns a list of dicts {"elm", "v0", "v1"} where consecutive edges
+        share a vertex (v1 of edge k == v0 of edge k+1), or None if the
+        members do not form exactly one closed loop.
+        """
+
+        remaining = list(elms)
+        first = remaining.pop(0)
+        loop = [{"elm": first, "v0": first.n0, "v1": first.n1}]
+        current = first.n1
+        start = first.n0
+
+        while remaining:
+            nxt = None
+            for e in remaining:
+                if e.n0 is current:
+                    nxt = {"elm": e, "v0": e.n0, "v1": e.n1}
+                    break
+                if e.n1 is current:
+                    nxt = {"elm": e, "v0": e.n1, "v1": e.n0}
+                    break
+            if nxt is None:
+                return None
+            remaining.remove(nxt["elm"])
+            loop.append(nxt)
+            current = nxt["v1"]
+
+        # the loop must close back onto the starting vertex
+        if current is not start:
+            return None
+
+        return loop
+
+    @staticmethod
+    def _PolygonArea(pts_2d):
+        x = pts_2d[:, 0]
+        y = pts_2d[:, 1]
+        return 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+    @staticmethod
+    def _PointsInPolygon(px, py, poly):
+        """Vectorised ray-casting point-in-polygon test for a simple polygon."""
+
+        n = len(poly)
+        inside = np.zeros(px.shape, dtype=bool)
+        j = n - 1
+        for i in range(n):
+            xi, yi = poly[i, 0], poly[i, 1]
+            xj, yj = poly[j, 0], poly[j, 1]
+            cond = ((yi > py) != (yj > py)) & (
+                px < (xj - xi) * (py - yi) / (yj - yi + 1e-300) + xi)
+            inside ^= cond
+            j = i
+        return inside
+
+    @staticmethod
+    def _TributaryByEdge(verts_2d, grid_n):
+        """Partition the polygon by nearest boundary edge (medial-axis / 45-deg
+        tributary rule) and return per-edge (area, centroid-distance-from-v0)."""
+
+        n_edge = len(verts_2d)
+
+        min_x, min_y = verts_2d.min(axis=0)
+        max_x, max_y = verts_2d.max(axis=0)
+        span = max(max_x - min_x, max_y - min_y)
+        h = span / grid_n
+        cell_area = h * h
+
+        # cell-centre grid covering the bounding box
+        xs = np.arange(min_x + 0.5 * h, max_x, h)
+        ys = np.arange(min_y + 0.5 * h, max_y, h)
+        gx, gy = np.meshgrid(xs, ys)
+        gx = gx.ravel()
+        gy = gy.ravel()
+
+        inside = ALd._PointsInPolygon(gx, gy, verts_2d)
+        gx = gx[inside]
+        gy = gy[inside]
+
+        pts = np.column_stack([gx, gy])
+
+        # distance from every interior cell to every edge segment (clamped)
+        dist = np.empty((n_edge, pts.shape[0]), dtype=np.float64)
+        tparam = np.empty((n_edge, pts.shape[0]), dtype=np.float64)  # length along edge from v0
+        for k in range(n_edge):
+            a = verts_2d[k]
+            b = verts_2d[(k + 1) % n_edge]
+            ab = b - a
+            L2 = np.dot(ab, ab)
+            ap = pts - a
+            t = (ap @ ab) / L2
+            tc = np.clip(t, 0.0, 1.0)
+            proj = a + np.outer(tc, ab)
+            dvec = pts - proj
+            dist[k] = np.sqrt(np.sum(dvec * dvec, axis=1))
+            tparam[k] = t * np.sqrt(L2)  # projected length along edge from v0
+
+        owner = np.argmin(dist, axis=0)
+
+        n_bin = max(24, grid_n // 10)
+        areas = []
+        dcs = []
+        b0s = []
+        b1s = []
+        ts = []
+        bs = []
+        for k in range(n_edge):
+            a = verts_2d[k]
+            b = verts_2d[(k + 1) % n_edge]
+            Lk = float(np.linalg.norm(b - a))
+            mask = owner == k
+            cnt = int(np.count_nonzero(mask))
+            areas.append(cnt * cell_area)
+            if cnt > 0:
+                dcs.append(float(np.mean(tparam[k][mask])))
+            else:
+                dcs.append(0.5 * Lk)
+
+            # Tributary width along the edge from cell strips (zero at convex corners).
+            widths = np.zeros(n_bin, dtype=np.float64)
+            if cnt > 0:
+                tk = tparam[k][mask]
+                bins = np.linspace(0.0, Lk, n_bin + 1)
+                for bi in range(n_bin):
+                    lo, hi = bins[bi], bins[bi + 1]
+                    in_bin = (tk >= lo) & (tk < hi if bi < n_bin - 1 else tk <= hi)
+                    if np.any(in_bin):
+                        widths[bi] = np.count_nonzero(in_bin) * cell_area / max(hi - lo, 1e-12)
+            b0s.append(float(widths[0]))
+            b1s.append(float(widths[-1]))
+            ts.append(np.array([(bi + 0.5) / n_bin for bi in range(n_bin)], dtype=np.float64))
+            bs.append(widths)
+
+        return areas, dcs, b0s, b1s, ts, bs
 
     def OutputALdInfo(self):
         props = ["ALOD",

@@ -36,9 +36,24 @@ class TestViewerModelJson(unittest.TestCase):
         data = load_model_dict("data/UK_ROOF_240420.dat", solve=False)
         gravity = [ld for ld in data["element_loads"] if ld.get("gravity")]
         self.assertGreater(len(gravity), 50)
-        self.assertAlmostEqual(abs(gravity[0]["w"][2]), 1.8, places=1)
+        self.assertAlmostEqual(abs(gravity[0]["w"][2]), 0.18, places=1)
         self.assertTrue(str(gravity[0]["display_value"]).endswith("G"))
-        self.assertIn("-1.8G", gravity[0]["display_value"])
+        self.assertIn("-0.2G", gravity[0]["display_value"])
+
+    def test_building_area_load_element_loads_after_solve(self):
+        data = load_model_dict("data/building_4f_x4y2.dat", solve=True)
+        self.assertTrue(data["solved"])
+        area = [ld for ld in data["element_loads"] if ld.get("area_load")]
+        self.assertGreater(len(area), 0)
+        by_lc = {}
+        for ld in area:
+            by_lc.setdefault(ld["lc"], 0)
+            by_lc[ld["lc"]] += 1
+        self.assertGreater(by_lc.get(0, 0), 0)
+        self.assertGreater(by_lc.get(1, 0), 0)
+        self.assertFalse(area[0]["global"])
+        self.assertEqual(len(area[0]["w"]), 6)
+        self.assertTrue(str(area[0]["display_value"]).endswith("A"))
 
     def test_load_cantilever_solved(self):
         data = load_model_dict("examples/cantilever.dat", solve=True)

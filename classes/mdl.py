@@ -76,7 +76,7 @@ class Mdl:
 
         for al in self.alds:
             al.elms = list(filter(lambda e: e.id in al.eids, self.elms)) 
-            al.SetLdPropsByVolonoiDivision()
+            al.SetMemberAreaLoads()
 
         return
     
@@ -127,8 +127,15 @@ class Mdl:
                         newld.gz = factor * newld.gz
                         self.glds.append(newld)
 
-                    elif type(l) == ld.Ald:
+                    elif type(l) == ld.ALd:
                         newld.lds = [factor * e for e in newld.lds]
+                        newld.elms = None
+                        newld.elms_areas = None
+                        newld.elms_dc = None
+                        newld.elms_b0 = None
+                        newld.elms_b1 = None
+                        newld.elms_t = None
+                        newld.elms_b = None
                         self.alds.append(newld)
 
         # # create area loads

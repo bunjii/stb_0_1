@@ -763,6 +763,8 @@ class Export:
                 
                 if e.glds is not None: lds += e.glds[:, clc]
 
+                if e.alds is not None: lds += e.alds[:, clc]
+
                 vz = np.array([e.pln.vz.v[0], e.pln.vz.v[2], 0.0]) # drawing direction of the element
 
                 if e.isVxZ: 
@@ -823,8 +825,7 @@ class Export:
                     my_x = myi + qzi * x + 1.0 / 6.0 * (wzi + 2.0 * wz_x) * x**2
 
                     wy_x = wyi + (wyj - wyi) * t
-                    qy_x = 1.0 * qyi + 0.5 * (wyi + wy_x) * x
-                    qy_x = -1.0 * qzi - 0.5 * (wzi + wy_x) * x
+                    qy_x = -1.0 * qyi - 0.5 * (wyi + wy_x) * x
                     if abs(qy_x) > abs(qy_max):
                         qy_max = qy_x
                     mz_x = mzi - qyi * x - 1.0 / 6.0 * (wyi + 2.0 * wy_x) * x**2
