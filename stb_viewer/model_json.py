@@ -1,6 +1,8 @@
 import os
 import json
 
+import numpy as np
+
 _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -8,10 +10,103 @@ def project_root():
     return _STB_ROOT
 
 
+def normalize_model_relpath(path):
+    """Normalize a project-relative model path (forward slashes)."""
+
+    if path is None:
+        return None
+    path = str(path).strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def _format_load_value_text(val):
+    """Format one load intensity for viewer labels (matches viewer.js)."""
+
+    if abs(val) < 1e-6:
+        return None
+    return f"{val:.1f}"
+
+
+def _dominant_signed_component(w):
+    """Dominant force component (kN/m) from distributed-load w vector."""
+
+    best = 0.0
+    for i in range(3):
+        for j in (i, i + 3):
+            if abs(w[j]) > abs(best):
+                best = w[j]
+    return best
+
+
+def _element_load_display_value(w, is_gravity=False):
+    text = _format_load_value_text(_dominant_signed_component(w))
+    if text is None:
+        return None
+    if is_gravity:
+        text += "G"
+    return text
+
+
+def _elem_local_wloads(elem, mdl, lc_idx):
+    """Sum element distributed loads in local ECS for one load-case index."""
+
+    lds = np.zeros(6, dtype=float)
+    elds = mdl.elds if mdl.elds != None else []
+
+    for el in elds:
+        if el.eid != elem.id or el.clc != lc_idx:
+            continue
+        el_lds = np.array(el.lds, dtype=float).reshape(6)
+        if el.isGlobal:
+            el_lds = (elem.tm[0:6, 0:6] @ el_lds.reshape(6, 1)).flatten()
+        lds += el_lds
+
+    if elem.glds is not None and lc_idx < elem.glds.shape[1]:
+        lds += elem.glds[:, lc_idx]
+
+    return lds
+
+
+def _gravity_element_load_entries(mdl):
+    """Per-element distributed loads from GLOD (local ECS, kN/m)."""
+
+    from classes import common
+
+    entries = []
+    for g in mdl.glds or []:
+        for elem in mdl.elms:
+            if elem.tm is None or elem.sec is None or elem.sec.mat is None:
+                continue
+            mass_per_len = elem.sec.A * elem.sec.mat.gamma / common.GRAVITY
+            lds = elem.tm[0:6, 0:6] @ np.array([
+                mass_per_len * g.gx,
+                mass_per_len * g.gy,
+                mass_per_len * g.gz,
+                mass_per_len * g.gx,
+                mass_per_len * g.gy,
+                mass_per_len * g.gz,
+            ])
+            w = [float(lds[i]) * 1e-3 for i in range(6)]
+            if max(abs(x) for x in w) < 1e-12:
+                continue
+            entries.append({
+                "elem": elem.id,
+                "lc": g.lc,
+                "global": False,
+                "gravity": True,
+                "w": w,
+                "display_value": _element_load_display_value(w, is_gravity=True),
+            })
+    return entries
+
+
 def resolve_model_path(path):
     """Resolve path under project root; reject paths outside the tree."""
 
-    if path == None or path.strip() == "":
+    path = normalize_model_relpath(path)
+    if path == None or path == "":
         raise ValueError("Model path is empty")
 
     root = os.path.realpath(project_root())
@@ -67,20 +162,75 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
 
     elements = []
     for e in sorted(mdl.elms, key=lambda x: x.id):
-        sec_name = e.sec.name if e.sec != None else ""
-        elements.append({
+        sec = e.sec
+        sec_name = sec.name if sec != None else ""
+        sec_id = sec.id if sec != None else None
+        mat_name = sec.mat.name if sec != None and sec.mat != None else ""
+        mat_id = sec.mat.id if sec != None and sec.mat != None else None
+        item = {
             "id": e.id,
             "n0": e.n0.id,
             "n1": e.n1.id,
             "section": sec_name,
-        })
+            "section_id": sec_id,
+            "material_name": mat_name,
+            "material_id": mat_id,
+        }
+        if e.pln != None:
+            item["len"] = float(e.len)
+            item["is_vxz"] = bool(e.isVxZ)
+            item["vx"] = [
+                float(e.pln.vx.v[0]), float(e.pln.vx.v[1]), float(e.pln.vx.v[2]),
+            ]
+            item["vy"] = [
+                float(e.pln.vy.v[0]), float(e.pln.vy.v[1]), float(e.pln.vy.v[2]),
+            ]
+            item["vz"] = [
+                float(e.pln.vz.v[0]), float(e.pln.vz.v[1]), float(e.pln.vz.v[2]),
+            ]
+        if solved and e.forces is not None and mdl.lcs != None:
+            item["forces"] = {}
+            item["local_wloads"] = {}
+            for i, lc in enumerate(mdl.lcs):
+                f = e.forces[:, i]
+                item["forces"][str(lc)] = [float(f[j]) for j in range(f.shape[0])]
+                w = _elem_local_wloads(e, mdl, i)
+                item["local_wloads"][str(lc)] = [float(w[j]) for j in range(6)]
+        elements.append(item)
 
     supports = []
     for c in mdl.cons:
-        supports.append({
+        item = {
             "node": c.nid,
             "fixed": [bool(x) for x in c.csts],
-        })
+        }
+        if solved and c.nd.reacts is not None and mdl.lcs != None:
+            item["reacts"] = {}
+            for i, lc in enumerate(mdl.lcs):
+                rs = c.nd.reacts[i]
+                item["reacts"][str(lc)] = [
+                    float(rs[0]) * 1e-3, float(rs[1]) * 1e-3, float(rs[2]) * 1e-3,
+                    float(rs[3]) * 1e-3, float(rs[4]) * 1e-3, float(rs[5]) * 1e-3,
+                ]
+        supports.append(item)
+
+    reactions = []
+    if solved and mdl.lcs != None:
+        for i, lc in enumerate(mdl.lcs):
+            for c in mdl.cons:
+                if c.nd.reacts is None:
+                    continue
+                rs = c.nd.reacts[i]
+                reactions.append({
+                    "node": c.nid,
+                    "lc": lc,
+                    "rx": float(rs[0]) * 1e-3,
+                    "ry": float(rs[1]) * 1e-3,
+                    "rz": float(rs[2]) * 1e-3,
+                    "mx": float(rs[3]) * 1e-3,
+                    "my": float(rs[4]) * 1e-3,
+                    "mz": float(rs[5]) * 1e-3,
+                })
 
     point_loads = []
     for l in mdl.lds:
@@ -97,16 +247,21 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
 
     element_loads = []
     for el in mdl.elds:
+        w = [
+            float(el.lds[0]) * 1e-3, float(el.lds[1]) * 1e-3,
+            float(el.lds[2]) * 1e-3, float(el.lds[3]) * 1e-3,
+            float(el.lds[4]) * 1e-3, float(el.lds[5]) * 1e-3,
+        ]
+        if max(abs(x) for x in w) < 1e-12:
+            continue
         element_loads.append({
             "elem": el.eid,
             "lc": el.lc,
             "global": bool(el.isGlobal),
-            "w": [
-                float(el.lds[0]) * 1e-3, float(el.lds[1]) * 1e-3,
-                float(el.lds[2]) * 1e-3, float(el.lds[3]) * 1e-3,
-                float(el.lds[4]) * 1e-3, float(el.lds[5]) * 1e-3,
-            ],
+            "w": w,
+            "display_value": _element_load_display_value(w, is_gravity=False),
         })
+    element_loads.extend(_gravity_element_load_entries(mdl))
 
     bounds = None
     if mdl.bounds != None:
@@ -119,19 +274,21 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
     return {
         "path": relpath,
         "solved": solved,
+        "schema": 2,
         "date_analysis": mdl.date_analysis,
         "load_cases": mdl.lcs if mdl.lcs != None else [],
         "bounds": bounds,
         "nodes": nodes,
         "elements": elements,
         "supports": supports,
+        "reactions": reactions,
         "point_loads": point_loads,
         "element_loads": element_loads,
     }
 
 
-def load_model_dict(path, solve=False, quiet=True):
-    """Parse (and optionally solve) a model file; return dict for JSON."""
+def _load_mdl(path, solve=False, quiet=True):
+    """Parse model file; optionally run analysis. Returns Mdl instance."""
 
     import sys
     root = project_root()
@@ -142,8 +299,6 @@ def load_model_dict(path, solve=False, quiet=True):
     from stb_engine.errors import StbParseError, StbSolveError
 
     full = resolve_model_path(path)
-    relpath = os.path.relpath(full, root).replace("\\", "/")
-
     lines = read_input_file(full)
     try:
         mdl = parse_input(lines)
@@ -170,7 +325,37 @@ def load_model_dict(path, solve=False, quiet=True):
             except StbSolveError as ex:
                 raise ValueError(str(ex))
 
-    return mdl_to_dict(mdl, relpath=relpath, solved=solve)
+    return mdl, full
+
+
+def load_model_dict(path, solve=False, quiet=True):
+    """Parse (and optionally solve) a model file; return dict for JSON."""
+
+    mdl, full = _load_mdl(path, solve=solve, quiet=quiet)
+    relpath = os.path.relpath(full, project_root()).replace("\\", "/")
+    data = mdl_to_dict(mdl, relpath=relpath, solved=solve)
+
+    if solve:
+        from stb_engine import format_results
+        data["results_text"] = format_results(mdl)
+
+    return data
+
+
+def load_results_text(path, quiet=True):
+    """Run analysis and return result text (same as CLI .out file)."""
+
+    mdl, full = _load_mdl(path, solve=True, quiet=quiet)
+    from stb_engine import format_results
+    return format_results(mdl)
+
+
+def load_input_text(path):
+    """Return raw .dat input file contents."""
+
+    full = resolve_model_path(path)
+    with open(full, encoding="utf-8", errors="replace") as fh:
+        return fh.read()
 
 
 def model_to_json(path, solve=False, quiet=True):

@@ -126,6 +126,7 @@ def cmd_solve(args):
 def cmd_view(args):
     _ensure_project_root_on_path()
     try:
+        from stb_viewer.model_json import normalize_model_relpath
         from stb_viewer.server import run_server
     except ImportError as ex:
         _stderr(str(ex))
@@ -136,7 +137,7 @@ def cmd_view(args):
         run_server(
             host=args.host,
             port=args.port,
-            default_model=args.file,
+            default_model=normalize_model_relpath(args.file),
             open_browser=(not args.no_browser),
         )
     except KeyboardInterrupt:

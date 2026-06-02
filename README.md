@@ -71,7 +71,7 @@ Read-only **Three.js** frame viewer in the browser. Lists models under `data/` a
 .venv/bin/stb view --file data/input01.dat --port 8765
 ```
 
-Open http://127.0.0.1:8765/ — drag to orbit, scroll to zoom. Toolbar: pick model, **Solve** (run analysis server-side), **Deformed** + scale, load case, point loads, node IDs.
+Open http://127.0.0.1:8765/ — drag to orbit, scroll to zoom. Main bar: model, **Solve**, **Results** (forces, LC, deformation), **Options** (load arrow / label sizes; settings persist).
 
 Stop the server with **Ctrl+C**.
 
