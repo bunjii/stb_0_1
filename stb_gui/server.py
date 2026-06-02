@@ -1,7 +1,6 @@
 import os
-from urllib.parse import quote
 
-from stb_viewer.model_json import (
+from stb_gui.model_json import (
     project_root,
     list_model_files,
     load_model_dict,
@@ -21,11 +20,11 @@ def create_app(default_model=None):
         from fastapi.responses import FileResponse, JSONResponse
     except ImportError:
         raise ImportError(
-            "Web viewer requires fastapi and uvicorn. "
-            "Install with: pip install -e \".[viewer]\""
+            "Structural Toolbox GUI requires fastapi and uvicorn. "
+            "Install with: pip install -e \".[gui]\""
         )
 
-    app = FastAPI(title="Structural Toolbox Viewer", version="0.1.0")
+    app = FastAPI(title="Structural Toolbox", version="0.1.0")
 
     @app.get("/")
     def index():
@@ -106,14 +105,8 @@ def create_app(default_model=None):
     return app
 
 
-def viewer_open_url(host, port, default_model=None):
-    """URL opened in the browser; ?file= selects the CLI model on first load."""
-
-    default_model = normalize_model_relpath(default_model)
-    url = "http://{0}:{1}/".format(host, port)
-    if default_model:
-        url += "?file=" + quote(default_model, safe="/")
-    return url
+def gui_open_url(host, port):
+    return "http://{0}:{1}/".format(host, port)
 
 
 def run_server(host="127.0.0.1", port=8765, default_model=None, open_browser=True):
@@ -121,11 +114,12 @@ def run_server(host="127.0.0.1", port=8765, default_model=None, open_browser=Tru
         import uvicorn
     except ImportError:
         raise ImportError(
-            "Web viewer requires uvicorn. Install with: pip install -e \".[viewer]\""
+            "Structural Toolbox GUI requires uvicorn. "
+            "Install with: pip install -e \".[gui]\""
         )
 
     app = create_app(default_model=default_model)
-    url = viewer_open_url(host, port, default_model)
+    url = gui_open_url(host, port)
 
     if open_browser:
         try:
@@ -134,9 +128,7 @@ def run_server(host="127.0.0.1", port=8765, default_model=None, open_browser=Tru
         except Exception:
             pass
 
-    print("STB viewer: {0}".format(url.split("?")[0]))
-    if default_model != None:
-        print("  default model: {0}".format(default_model))
+    print("Structural Toolbox: {0}".format(url))
     print("  project root: {0}".format(project_root()))
     print("  Press Ctrl+C to stop.")
 

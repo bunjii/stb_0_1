@@ -33,7 +33,7 @@ class TestStbEngine(unittest.TestCase):
         out_dir = os.path.join(_STB_ROOT, "tests", "_tmp_out")
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
-        out_path = os.path.join(out_dir, "out.dat")
+        out_path = os.path.join(out_dir, "engine.out")
 
         mdl, txt = run_from_file(_data_path("input01.dat"), out_path)
 

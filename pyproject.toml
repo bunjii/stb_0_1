@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-viewer = [
+gui = [
     "fastapi",
     "uvicorn[standard]",
     "httpx",
@@ -26,4 +26,4 @@ stb = "stb_cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["stb_engine*", "stb_cli*", "stb_viewer*"]
+include = ["stb_engine*", "stb_cli*", "stb_gui*"]

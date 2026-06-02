@@ -6,7 +6,7 @@ _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _STB_ROOT not in sys.path:
     sys.path.insert(0, _STB_ROOT)
 
-from stb_viewer.model_json import (
+from stb_gui.model_json import (
     load_model_dict,
     list_model_files,
     normalize_model_relpath,
@@ -14,7 +14,7 @@ from stb_viewer.model_json import (
 )
 
 
-class TestViewerModelJson(unittest.TestCase):
+class TestGuiModelJson(unittest.TestCase):
 
     def test_list_models_includes_cantilever(self):
         models = list_model_files()
@@ -100,20 +100,20 @@ class TestViewerModelJson(unittest.TestCase):
         self.assertTrue(full.endswith("UK_ROOF_240420.dat"))
 
 
-class TestViewerApi(unittest.TestCase):
+class TestGuiApi(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         try:
             from fastapi.testclient import TestClient
-            from stb_viewer.server import create_app
+            from stb_gui.server import create_app
         except ImportError:
             cls.client = None
             return
         except RuntimeError:
             cls.client = None
             return
-        cls.client = TestClient(create_app(default_model="examples/cantilever.dat"))
+        cls.client = TestClient(create_app())
 
     def test_api_models(self):
         if self.client == None:
@@ -122,6 +122,7 @@ class TestViewerApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertTrue("examples/cantilever.dat" in body["models"])
+        self.assertIsNone(body["default"])
 
     def test_api_model_geometry(self):
         if self.client == None:
@@ -166,25 +167,19 @@ class TestViewerApi(unittest.TestCase):
             self.skipTest("fastapi not installed")
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
-        self.assertTrue("STB Viewer" in r.text)
+        self.assertTrue("Structural Toolbox" in r.text)
 
-    def test_viewer_open_url_includes_file_query(self):
-        from stb_viewer.server import viewer_open_url
-        url = viewer_open_url("127.0.0.1", 8765, "data/UK_ROOF_240420.dat")
-        self.assertIn("?file=data/UK_ROOF_240420.dat", url)
-        plain = viewer_open_url("127.0.0.1", 8765, None)
-        self.assertNotIn("?file=", plain)
-
-    def test_viewer_open_url_normalizes_backslashes(self):
-        from stb_viewer.server import viewer_open_url
-        url = viewer_open_url("127.0.0.1", 8765, r"data\UK_ROOF_240420.dat")
-        self.assertIn("?file=data/UK_ROOF_240420.dat", url)
+    def test_gui_open_url(self):
+        from stb_gui.server import gui_open_url
+        url = gui_open_url("127.0.0.1", 8765)
+        self.assertEqual(url, "http://127.0.0.1:8765/")
+        self.assertNotIn("?file=", url)
 
     def test_api_models_default_normalizes_backslashes(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
         from fastapi.testclient import TestClient
-        from stb_viewer.server import create_app
+        from stb_gui.server import create_app
         client = TestClient(create_app(default_model=r"data\UK_ROOF_240420.dat"))
         r = client.get("/api/models")
         self.assertEqual(r.status_code, 200)

@@ -124,7 +124,7 @@ class TestAreaLoadViewerWloads(unittest.TestCase):
         cls.mdl, _ = run_from_file(_data_path("area_load_panel.dat"))
 
     def test_local_wloads_includes_alds(self):
-        from stb_viewer.model_json import _elem_local_wloads
+        from stb_gui.model_json import _elem_local_wloads
         e = next(x for x in self.mdl.elms if x.alds is not None)
         w = _elem_local_wloads(e, self.mdl, 0)
         a = e.alds[:, 0]

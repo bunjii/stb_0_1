@@ -41,7 +41,7 @@ class TestStbCli(unittest.TestCase):
         out_dir = os.path.join(_STB_ROOT, "tests", "_tmp_out")
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
-        out_path = os.path.join(out_dir, "cli_out.dat")
+        out_path = os.path.join(out_dir, "cli.out")
 
         r = _run_stb([
             "solve",

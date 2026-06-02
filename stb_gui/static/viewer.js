@@ -36,8 +36,8 @@ const ALPHA = {
   opaque: 1.0,
 };
 
-const OPTIONS_STORAGE_KEY = "stb_viewer_options";
-const MODEL_STORAGE_KEY = "stb_viewer_last_model";
+const OPTIONS_STORAGE_KEY = "stb_gui_options";
+const MODEL_STORAGE_KEY = "stb_gui_last_model";
 const LABEL_BG = {
   elem: "rgba(47, 75, 124, 1.0)",
   material: "rgba(150, 95, 35, " + ALPHA.labelMaterial + ")",
@@ -325,7 +325,7 @@ function refreshDisplayStatus(model) {
   const lcKey = String(el.lcSelect.value);
   let extra = analysisComplete(model) ? " (solved)" : "";
   if (analysisComplete(model) && !modelHasForceData(model, lcKey)) {
-    extra += " — force data unavailable (restart stb view)";
+    extra += " — force data unavailable (restart stb gui)";
   }
   if ((el.chkReactions.checked || el.chkReactionValues.checked) &&
       !modelHasReactionData(model, lcKey)) {
@@ -573,6 +573,48 @@ function beamDispLocalAtT(dl, L, t) {
   const v = H1 * v1 + H2 * rz1 + H3 * v2 + H4 * rz2;
   const w = H1 * w1 - H2 * ry1 + H3 * w2 - H4 * ry2;
   return new THREE.Vector3(u, v, w);
+}
+
+function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv) {
+  const lcKey = String(lc);
+  const p0u = nodePosition(n0, model, lc, defFac, false);
+  const p1u = nodePosition(n1, model, lc, defFac, false);
+
+  const hasShape =
+    e.vx && e.vy && e.vz && e.len && e.len > 1e-12 &&
+    n0.disps && n1.disps && n0.disps[lcKey] && n1.disps[lcKey];
+
+  if (!hasShape) {
+    const p0d = nodePosition(n0, model, lc, defFac, true);
+    const p1d = nodePosition(n1, model, lc, defFac, true);
+    return {
+      pts: [p0d, p1d],
+      mags: [nodeDispMagnitude(n0, lc, defFac), nodeDispMagnitude(n1, lc, defFac)],
+    };
+  }
+
+  const d0g = n0.disps[lcKey];
+  const d1g = n1.disps[lcKey];
+  const t0l = globalVecToLocal(new THREE.Vector3(d0g[0], d0g[1], d0g[2]), e);
+  const r0l = globalVecToLocal(new THREE.Vector3(d0g[3], d0g[4], d0g[5]), e);
+  const t1l = globalVecToLocal(new THREE.Vector3(d1g[0], d1g[1], d1g[2]), e);
+  const r1l = globalVecToLocal(new THREE.Vector3(d1g[3], d1g[4], d1g[5]), e);
+  const dl = [
+    t0l.x, t0l.y, t0l.z, r0l.x, r0l.y, r0l.z,
+    t1l.x, t1l.y, t1l.z, r1l.x, r1l.y, r1l.z,
+  ];
+
+  const pts = [];
+  const mags = [];
+  for (let i = 0; i <= nDiv; i++) {
+    const t = i / nDiv;
+    const pl = beamDispLocalAtT(dl, e.len, t);
+    const pg = localVecToGlobal(pl, e);
+    const pBase = elemPointAlong(p0u, p1u, t);
+    pts.push(pBase.clone().addScaledVector(pg, defFac));
+    mags.push(pg.length());
+  }
+  return { pts: pts, mags: mags };
 }
 
 function maxDispPointInfo(model, lc, defFac, nm) {
@@ -881,6 +923,7 @@ function buildModelScene(model) {
     updateDispContourOverlay(false, null, null, defFac, false);
   }
 
+  const defDiv = 16;
   for (const e of model.elements) {
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
@@ -889,22 +932,35 @@ function buildModelScene(model) {
     const p1u = nodePosition(n1, model, lc, defFac, false);
     linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
 
+    const needCurve = (deformed && !showDispContour) || (showDispContour && deformed && dispDisplayRange);
+    const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv) : null;
+
     if (showDispContour && dispDisplayRange) {
-      const useDefPos = deformed;
-      const p0c = nodePosition(n0, model, lc, defFac, useDefPos);
-      const p1c = nodePosition(n1, model, lc, defFac, useDefPos);
-      contourPts.push(p0c.x, p0c.y, p0c.z, p1c.x, p1c.y, p1c.z);
-      const m0 = nodeDispMagnitude(n0, lc, defFac);
-      const m1 = nodeDispMagnitude(n1, lc, defFac);
-      const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
-      const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
-      contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
+      if (deformed && curve) {
+        for (let i = 0; i < curve.pts.length - 1; i++) {
+          const a = curve.pts[i];
+          const b = curve.pts[i + 1];
+          contourPts.push(a.x, a.y, a.z, b.x, b.y, b.z);
+          const ca = dispContourColor(dispContourT(curve.mags[i], dispDisplayRange));
+          const cb = dispContourColor(dispContourT(curve.mags[i + 1], dispDisplayRange));
+          contourColors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b);
+        }
+      } else {
+        contourPts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+        const m0 = nodeDispMagnitude(n0, lc, defFac);
+        const m1 = nodeDispMagnitude(n1, lc, defFac);
+        const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
+        const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
+        contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
+      }
     }
 
-    if (deformed && !showDispContour) {
-      const p0d = nodePosition(n0, model, lc, defFac, true);
-      const p1d = nodePosition(n1, model, lc, defFac, true);
-      linePtsDef.push(p0d.x, p0d.y, p0d.z, p1d.x, p1d.y, p1d.z);
+    if (deformed && !showDispContour && curve) {
+      for (let i = 0; i < curve.pts.length - 1; i++) {
+        const a = curve.pts[i];
+        const b = curve.pts[i + 1];
+        linePtsDef.push(a.x, a.y, a.z, b.x, b.y, b.z);
+      }
     }
   }
 
@@ -2439,12 +2495,14 @@ async function fetchModel(path, solve) {
 }
 
 function outputFileName(path) {
-  const base = path.replace(/^.*\//, "").replace(/\.dat$/i, "");
-  return base + "_out.dat";
+  const file = path.replace(/^.*\//, "");
+  const stem = file.replace(/\.[^./]+$/i, "");
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+  return dir + stem + ".out";
 }
 
 function showTextDocumentWindow(text, title) {
-  const pdfName = title.replace(/\.dat$/i, ".pdf");
+  const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
   const saveName = title;
   const w = window.open("", "_blank", "width=920,height=720,scrollbars=yes,resizable=yes");
   if (!w) {
@@ -2608,7 +2666,7 @@ async function openResultsWindow() {
       currentModel = await fetchModel(path, true);
       text = currentModel.results_text;
       if (text == null || text == "") {
-        throw new Error("No result text from server — restart: stb view");
+        throw new Error("No result text from server — restart: stb gui");
       }
       currentResultsText = text;
       fillLcSelect(currentModel);
@@ -2674,7 +2732,7 @@ async function bootstrap() {
     header: el.resultsPanelHeader,
     collapseBtn: el.btnPanelCollapse,
     toggleBtn: el.btnTogglePanel,
-    storageKey: "stb_viewer_results_panel",
+    storageKey: "stb_gui_results_panel",
     defaultHidden: false,
   });
   initDraggablePanel({
@@ -2682,7 +2740,7 @@ async function bootstrap() {
     header: el.optionsPanelHeader,
     collapseBtn: el.btnOptionsCollapse,
     toggleBtn: el.btnToggleOptions,
-    storageKey: "stb_viewer_options_panel",
+    storageKey: "stb_gui_options_panel",
     defaultHidden: true,
   });
   try {

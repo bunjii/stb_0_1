@@ -5,8 +5,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="stb-viewer",
-        description="Structural Toolbox web viewer (Three.js)",
+        prog="stb-gui",
+        description="Structural Toolbox browser application",
     )
     parser.add_argument(
         "--host", default="127.0.0.1",
@@ -17,18 +17,13 @@ def main():
         help="Port (default: 8765)",
     )
     parser.add_argument(
-        "--file", default="examples/cantilever.dat",
-        help="Default model path under project root",
-    )
-    parser.add_argument(
         "--no-browser", action="store_true",
         help="Do not open a browser window",
     )
     args = parser.parse_args()
 
     try:
-        from stb_viewer.model_json import normalize_model_relpath
-        from stb_viewer.server import run_server
+        from stb_gui.server import run_server
     except ImportError as ex:
         sys.stderr.write(str(ex) + "\n")
         sys.exit(1)
@@ -36,7 +31,6 @@ def main():
     run_server(
         host=args.host,
         port=args.port,
-        default_model=normalize_model_relpath(args.file),
         open_browser=(not args.no_browser),
     )
 
