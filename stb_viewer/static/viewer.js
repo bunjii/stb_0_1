@@ -6,60 +6,80 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 const COLORS = {
   background: 0xe1dee4,
-  element: 0x666666,
-  node: 0x8648d2,
-  supportTrans: 0x2563eb,
-  supportRot: 0xd97706,
+  element: 0x333333,
+  node: 0x333333,
+  supportTrans: 0xBF3434,
+  supportRot: 0x618FCD,
   supportAnchor: 0x374151,
-  load: 0xff0000,
+  load: 0xd45087,
   reaction: 0x0d9488,
   reactionMoment: 0x9333ea,
-  deform: 0x8648d2,
-  nodeLabel: 0x4a148c,
-  force: 0x0047ab,
+  deform: 0x4E8AC6,
+  nodeLabel: 0x000000,
+  force: 0x4D829E,
 };
 
 const PRES_ZERO = 1e-10;
 const FORCE_LABELS = ["", "Nx", "Vy", "Vz", "Mx", "My", "Mz"];
 const FORCE_UNITS = ["", "kN", "kN", "kN", "kNm", "kNm", "kNm"];
 
+const ALPHA = {
+  labelElem: 1.0,
+  labelMaterial: 1.0,
+  labelSection: 1.0,
+  labelLoad: 1.0,
+  labelReactionForce: 1.0,
+  labelReactionMoment: 1.0,
+  labelDefaultBg: 1.0,
+  forceValueBg: 1.0,
+  elementGhost: 1.0,
+  opaque: 1.0,
+};
+
 const OPTIONS_STORAGE_KEY = "stb_viewer_options";
 const MODEL_STORAGE_KEY = "stb_viewer_last_model";
 const LABEL_BG = {
-  elem: "rgba(55, 55, 65, 0.88)",
-  material: "rgba(150, 95, 35, 0.92)",
-  section: "rgba(45, 95, 175, 0.92)",
-  load: "rgba(180, 40, 40, 0.88)",
-  reactionForce: "rgba(13, 120, 110, 0.92)",
-  reactionMoment: "rgba(147, 51, 234, 0.92)",
+  elem: "rgba(47, 75, 124, 1.0)",
+  material: "rgba(150, 95, 35, " + ALPHA.labelMaterial + ")",
+  section: "rgba(45, 95, 175, " + ALPHA.labelSection + ")",
+  load: "rgba(20, 83, 45, " + ALPHA.labelLoad + ")",
+  reactionForce: "rgba(13, 120, 110, " + ALPHA.labelReactionForce + ")",
+  reactionMoment: "rgba(147, 51, 234, " + ALPHA.labelReactionMoment + ")",
 };
 
 const OPTIONS_DEFAULTS = {
-  loadArrowSize: 8,
+  loadArrowSize: 1.0,
+  inputLoadType: "all",
   supportGizmoSize: 25,
   supportLineWidth: 2,
   dispContourLineWidth: 2.5,
-  nodeLabelSize: 3,
-  elemLabelSize: 3,
-  materialLabelSize: 4,
-  sectionLabelSize: 3,
-  loadLabelSize: 3,
-  reactionLabelSize: 3,
-  forceLabelSize: 6,
+  elementLineWidth: 2.0,
+  loadLineWidth: 2.0,
+  forceLineWidth: 1.0,
+  nodeLabelSize: 1.0,
+  elemLabelSize: 1.0,
+  materialLabelSize: 1.2,
+  sectionLabelSize: 1.0,
+  loadLabelSize: 1.0,
+  reactionLabelSize: 1.0,
+  forceLabelSize: 1.5,
 };
 
 const OPTIONS_LIMITS = {
-  loadArrowSize: { min: 5, max: 20 },
+  loadArrowSize: { min: 0.1, max: 5.0 },
   supportGizmoSize: { min: 25, max: 50 },
   supportLineWidth: { min: 0.5, max: 3 },
   dispContourLineWidth: { min: 0.5, max: 3 },
-  nodeLabelSize: { min: 1, max: 8 },
-  elemLabelSize: { min: 1, max: 8 },
-  materialLabelSize: { min: 1, max: 8 },
-  sectionLabelSize: { min: 1, max: 8 },
-  loadLabelSize: { min: 1, max: 8 },
-  reactionLabelSize: { min: 1, max: 8 },
-  forceLabelSize: { min: 1, max: 10 },
+  elementLineWidth: { min: 0.5, max: 3 },
+  loadLineWidth: { min: 0.5, max: 3 },
+  forceLineWidth: { min: 0.5, max: 3 },
+  nodeLabelSize: { min: 0.1, max: 2.0 },
+  elemLabelSize: { min: 0.1, max: 2.0 },
+  materialLabelSize: { min: 0.1, max: 2.0 },
+  sectionLabelSize: { min: 0.1, max: 2.0 },
+  loadLabelSize: { min: 0.1, max: 2.0 },
+  reactionLabelSize: { min: 0.1, max: 2.0 },
+  forceLabelSize: { min: 0.1, max: 2.5 },
 };
 
 function clampViewerOption(key, value) {
@@ -91,11 +111,13 @@ const el = {
   dispLegendTitle: document.getElementById("dispLegendTitle"),
   dispLegendLc: document.getElementById("dispLegendLc"),
   dispLegendBar: document.getElementById("dispLegendBar"),
+  viewerInfoOverlay: document.getElementById("viewerInfoOverlay"),
   dispContourMin: document.getElementById("dispContourMin"),
   dispContourMax: document.getElementById("dispContourMax"),
   btnDispContourAuto: document.getElementById("btnDispContourAuto"),
   chkSupports: document.getElementById("chkSupports"),
   chkLoads: document.getElementById("chkLoads"),
+  loadTypeFilter: document.getElementById("loadTypeFilter"),
   chkLoadValues: document.getElementById("chkLoadValues"),
   chkReactions: document.getElementById("chkReactions"),
   chkReactionValues: document.getElementById("chkReactionValues"),
@@ -125,6 +147,9 @@ const el = {
   optSupportGizmoVal: document.getElementById("optSupportGizmoVal"),
   optSupportLineWidth: document.getElementById("optSupportLineWidth"),
   optDispContourLineWidth: document.getElementById("optDispContourLineWidth"),
+  optElementLineWidth: document.getElementById("optElementLineWidth"),
+  optLoadLineWidth: document.getElementById("optLoadLineWidth"),
+  optForceLineWidth: document.getElementById("optForceLineWidth"),
   optNodeLabel: document.getElementById("optNodeLabel"),
   optNodeLabelVal: document.getElementById("optNodeLabelVal"),
   optElemLabel: document.getElementById("optElemLabel"),
@@ -288,6 +313,7 @@ function rebuildScene() {
   try {
     enrichModelReactions(currentModel);
     buildModelScene(currentModel);
+    updateViewerInfoOverlay(currentModel);
   } catch (ex) {
     console.error(ex);
     setStatus("Display error: " + ex.message);
@@ -306,6 +332,90 @@ function refreshDisplayStatus(model) {
     extra += " — no reaction data for LC " + lcKey;
   }
   setStatus(path + extra + " — " + model.nodes.length + " nodes, " + model.elements.length + " elements");
+}
+
+function boolOnOff(v) {
+  return v ? "ON" : "OFF";
+}
+
+function selectedForceLabel() {
+  const id = parseInt(el.forceSelect.value, 10) || 0;
+  if (id <= 0 || id >= FORCE_LABELS.length) return "None";
+  return FORCE_LABELS[id];
+}
+
+function updateViewerInfoOverlay(model) {
+  if (!el.viewerInfoOverlay) return;
+  if (!model) {
+    el.viewerInfoOverlay.textContent = "No model loaded.";
+    return;
+  }
+
+  const path = normalizeModelPath(model.path || el.modelSelect.value || "");
+  const fileName = path ? path.replace(/^.*\//, "") : "(none)";
+  const lc = String(el.lcSelect.value || "");
+  const solved = analysisComplete(model);
+  const defFac = parseFloat(el.defFactor.value) || 0;
+  const forceComp = selectedForceLabel();
+
+  const pointLoads = model.point_loads ? model.point_loads.length : 0;
+  const elemLoads = model.element_loads ? model.element_loads.length : 0;
+  const supports = model.supports ? model.supports.length : 0;
+
+  const displayLines = [];
+  if (el.chkDeformed.checked) displayLines.push("deformed shape x" + defFac.toFixed(1));
+  if (el.chkDispContour && el.chkDispContour.checked) displayLines.push("disp contour");
+  if (el.chkLoads.checked) {
+    displayLines.push("input loads (" + loadTypeFilterValue() + ")");
+    if (el.chkLoadValues.checked) displayLines.push("load values");
+  }
+  if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
+  if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
+  if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
+  if (el.chkLabels && el.chkLabels.checked) displayLines.push("node IDs");
+  if (el.chkElemLabels && el.chkElemLabels.checked) displayLines.push("element IDs");
+  if (el.chkMaterial && el.chkMaterial.checked) displayLines.push("material labels");
+  if (el.chkSection && el.chkSection.checked) displayLines.push("section labels");
+  if (forceComp !== "None") {
+    displayLines.push(
+      "force diagram: " + forceComp +
+      " (div " + (el.frcDiv ? el.frcDiv.value : "-") +
+      ", x" + (el.frcFactor ? el.frcFactor.value : "-") + ")"
+    );
+    if (el.chkForceValues && el.chkForceValues.checked) displayLines.push("force values");
+  }
+
+  const lines = [
+    "[File]",
+    "file: " + fileName,
+    "path: " + (path || "(none)"),
+    "solved: " + boolOnOff(solved),
+    "analysis date: " + (model.date_analysis || "-"),
+    "LC: " + lc,
+    "nodes: " + (model.nodes ? model.nodes.length : 0),
+    "elements: " + (model.elements ? model.elements.length : 0),
+    "supports: " + supports,
+    "point loads: " + pointLoads,
+    "element loads: " + elemLoads,
+  ];
+
+  if (displayLines.length > 0) {
+    lines.push(
+      "",
+      "[Display]",
+      ...displayLines
+    );
+  }
+
+  lines.push(
+    "",
+    "[Options]",
+    "load arrow scale: " + Number(viewerOptions.loadArrowSize).toFixed(1),
+    "load label scale: " + Number(viewerOptions.loadLabelSize).toFixed(0),
+    "reaction label scale: " + Number(viewerOptions.reactionLabelSize).toFixed(0),
+  );
+
+  el.viewerInfoOverlay.textContent = lines.join("\n");
 }
 
 function applyZUpView() {
@@ -399,9 +509,9 @@ function nodePosition(n, model, lc, defFac, deformed) {
 function nodeDispMagnitude(n, lc, defFac) {
   if (!n.disps || !n.disps[String(lc)]) return 0;
   const d = n.disps[String(lc)];
-  const ux = d[0] * defFac;
-  const uy = d[1] * defFac;
-  const uz = d[2] * defFac;
+  const ux = d[0];
+  const uy = d[1];
+  const uz = d[2];
   return Math.hypot(ux, uy, uz);
 }
 
@@ -422,9 +532,89 @@ function maxDispNodeInfo(model, lc, defFac) {
   let best = null;
   for (const n of model.nodes || []) {
     const mag = nodeDispMagnitude(n, lc, defFac);
-    if (!best || mag > best.mag) best = { node: n, mag: mag };
+    if (!best || mag > best.mag) {
+      const p0 = nodePosition(n, model, lc, defFac, false);
+      const p1 = nodePosition(n, model, lc, defFac, true);
+      best = { node: n, mag: mag, p0: p0, p1: p1 };
+    }
   }
-  if (!best || !best.node) return null;
+  if (!best) return null;
+  return best;
+}
+
+function nodeDispVector(n, lc, defFac) {
+  if (!n.disps || !n.disps[String(lc)]) return new THREE.Vector3(0, 0, 0);
+  const d = n.disps[String(lc)];
+  return new THREE.Vector3(d[0], d[1], d[2]);
+}
+
+function globalVecToLocal(v, elem) {
+  if (!elem || !elem.vx || !elem.vy || !elem.vz) return v.clone();
+  const vx = new THREE.Vector3().fromArray(elem.vx);
+  const vy = new THREE.Vector3().fromArray(elem.vy);
+  const vz = new THREE.Vector3().fromArray(elem.vz);
+  return new THREE.Vector3(v.dot(vx), v.dot(vy), v.dot(vz));
+}
+
+function beamDispLocalAtT(dl, L, t) {
+  const u1 = dl[0], v1 = dl[1], w1 = dl[2];
+  const ry1 = dl[4], rz1 = dl[5];
+  const u2 = dl[6], v2 = dl[7], w2 = dl[8];
+  const ry2 = dl[10], rz2 = dl[11];
+
+  const N1 = 1 - t;
+  const N2 = t;
+  const H1 = 1 - 3 * t * t + 2 * t * t * t;
+  const H2 = L * (t - 2 * t * t + t * t * t);
+  const H3 = 3 * t * t - 2 * t * t * t;
+  const H4 = L * (-t * t + t * t * t);
+
+  const u = N1 * u1 + N2 * u2;
+  const v = H1 * v1 + H2 * rz1 + H3 * v2 + H4 * rz2;
+  const w = H1 * w1 - H2 * ry1 + H3 * w2 - H4 * ry2;
+  return new THREE.Vector3(u, v, w);
+}
+
+function maxDispPointInfo(model, lc, defFac, nm) {
+  let best = maxDispNodeInfo(model, lc, defFac);
+  const nDiv = 20;
+  for (const e of model.elements || []) {
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1 || !n0.disps || !n1.disps) continue;
+    if (!n0.disps[String(lc)] || !n1.disps[String(lc)]) continue;
+    if (!e.vx || !e.vy || !e.vz || !e.len || e.len <= 1e-12) continue;
+
+    const d0g = n0.disps[String(lc)];
+    const d1g = n1.disps[String(lc)];
+    const t0 = new THREE.Vector3(d0g[0], d0g[1], d0g[2]);
+    const r0 = new THREE.Vector3(d0g[3], d0g[4], d0g[5]);
+    const t1 = new THREE.Vector3(d1g[0], d1g[1], d1g[2]);
+    const r1 = new THREE.Vector3(d1g[3], d1g[4], d1g[5]);
+
+    const t0l = globalVecToLocal(t0, e);
+    const r0l = globalVecToLocal(r0, e);
+    const t1l = globalVecToLocal(t1, e);
+    const r1l = globalVecToLocal(r1, e);
+    const dl = [
+      t0l.x, t0l.y, t0l.z, r0l.x, r0l.y, r0l.z,
+      t1l.x, t1l.y, t1l.z, r1l.x, r1l.y, r1l.z,
+    ];
+
+    const p0u = nodePosition(n0, model, lc, defFac, false);
+    const p1u = nodePosition(n1, model, lc, defFac, false);
+
+    for (let i = 1; i < nDiv; i++) {
+      const t = i / nDiv;
+      const pl = beamDispLocalAtT(dl, e.len, t);
+      const pg = localVecToGlobal(pl, e);
+      const mag = pg.length();
+      if (!best || mag > best.mag) {
+        const pBase = elemPointAlong(p0u, p1u, t);
+        best = { mag: mag, p0: pBase, p1: pBase.clone().addScaledVector(pg, defFac), elem: e, t: t };
+      }
+    }
+  }
   return best;
 }
 
@@ -444,8 +634,9 @@ function formatDispInputValue(v) {
 }
 
 function formatDispAbsValue(v) {
-  if (Math.abs(v) < 1e-9) return "0";
-  return v.toFixed(1);
+  const mm = v * 1e3;
+  if (Math.abs(mm) < 1e-6) return "0.0 mm";
+  return mm.toFixed(1) + " mm";
 }
 
 function dispContourGradientCss() {
@@ -554,11 +745,12 @@ function addDispContourLineSegments(positions, colors, group) {
 
 function addMaxDisplacementMarker(model, lc, defFac, span, deformed, group, labelGroup) {
   if (!deformed) return;
-  const info = maxDispNodeInfo(model, lc, defFac);
-  if (!info || info.mag < 1e-12) return;
+  const nm = nodeMap(model);
+  const info = maxDispPointInfo(model, lc, defFac, nm);
+  if (!info || info.mag < 1e-12 || !info.p0 || !info.p1) return;
 
-  const p0 = nodePosition(info.node, model, lc, defFac, false);
-  const p1 = nodePosition(info.node, model, lc, defFac, true);
+  const p0 = info.p0.clone();
+  const p1 = info.p1.clone();
   const dir = p1.clone().sub(p0);
   const dlen = dir.length();
   if (dlen < 1e-12) return;
@@ -717,27 +909,27 @@ function buildModelScene(model) {
   }
 
   if (linePts.length > 0) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(linePts, 3));
-    const mat = new THREE.LineBasicMaterial({
-      color: COLORS.element,
-      linewidth: 1,
-      transparent: deformed || showDispContour,
-      opacity: (deformed || showDispContour) ? 0.45 : 1.0,
-    });
-    modelGroup.add(new THREE.LineSegments(geo, mat));
+    addWideLineSegmentsFromPts(
+      linePts,
+      COLORS.element,
+      modelGroup,
+      2,
+      elementLineWidthPx(),
+      (deformed || showDispContour) ? ALPHA.elementGhost : ALPHA.opaque
+    );
   }
 
   if (showDispContour && contourPts.length > 0) {
     addDispContourLineSegments(contourPts, contourColors, modelGroup);
   } else if (deformed && linePtsDef.length > 0) {
-    const geoDef = new THREE.BufferGeometry();
-    geoDef.setAttribute("position", new THREE.Float32BufferAttribute(linePtsDef, 3));
-    const matDef = new THREE.LineBasicMaterial({
-      color: COLORS.deform,
-      linewidth: 1,
-    });
-    modelGroup.add(new THREE.LineSegments(geoDef, matDef));
+    addWideLineSegmentsFromPts(
+      linePtsDef,
+      COLORS.deform,
+      modelGroup,
+      3,
+      elementLineWidthPx(),
+      ALPHA.opaque
+    );
   }
 
   const nodePts = [];
@@ -773,7 +965,7 @@ function buildModelScene(model) {
     const maxPMag = maxPointLoadMag(model, lc);
     const maxWMag = maxElementLoadMag(model, lc);
 
-    if (model.point_loads) {
+    if (model.point_loads && shouldDrawPointLoad()) {
       for (const l of model.point_loads) {
         if (String(l.lc) !== String(lc)) continue;
         const n = nm[l.node];
@@ -790,7 +982,7 @@ function buildModelScene(model) {
           if (labelText) {
             addLoadValueLabel(
               labelText,
-              loadValueLabelPoint(tip, dir, span, loadLabelScale),
+              loadValueLabelPoint(p, tip, span, loadLabelScale),
               span,
               loadLabelScale,
               labelGroup
@@ -836,7 +1028,6 @@ function buildModelScene(model) {
         scaleFactor: nodeLabelScale,
         bg: null,
         fg: colorHex(COLORS.nodeLabel),
-        opaque: true,
       });
       sprite.renderOrder = 16;
       sprite.position.copy(nodeLabelPoint(p, span, nodeLabelScale));
@@ -853,7 +1044,7 @@ function buildModelScene(model) {
 
     if (showElemLabels) {
       const p = offsetLabelPoint(elemPointAlong(p0, p1, 0.55), p0, p1, 0);
-      addElemLabel(String(e.id), p, span, elemLabelScale, labelGroup, LABEL_BG.elem);
+      addElemLabel(String(e.id), p, span, elemLabelScale, labelGroup, LABEL_BG.elem, false);
     }
     if (showMaterial) {
       const text = elementMaterialText(e);
@@ -874,6 +1065,7 @@ function buildModelScene(model) {
   buildForceDiagrams(model);
   updateWorldAxes(model);
   refreshDisplayStatus(model);
+  updateViewerInfoOverlay(model);
 }
 
 function formatForceValue(val) {
@@ -936,21 +1128,33 @@ function addLineSegmentsFromPts(pts, color, group, renderOrder) {
   group.add(lines);
 }
 
-function clampLineWidthPx(v, fallback) {
+function clampLineWidthPx(v, fallback, maxVal) {
   const n = parseFloat(v);
   if (!isFinite(n) || n < 0.5) return fallback;
-  return Math.min(n, OPTIONS_LIMITS.supportLineWidth.max);
+  return Math.min(n, maxVal != null ? maxVal : OPTIONS_LIMITS.supportLineWidth.max);
 }
 
 function supportLineWidthPx() {
-  return clampLineWidthPx(viewerOptions.supportLineWidth, 2);
+  return clampLineWidthPx(viewerOptions.supportLineWidth, 2, OPTIONS_LIMITS.supportLineWidth.max);
 }
 
 function dispContourLineWidthPx() {
-  return clampLineWidthPx(viewerOptions.dispContourLineWidth, 2.5);
+  return clampLineWidthPx(viewerOptions.dispContourLineWidth, 2.5, OPTIONS_LIMITS.dispContourLineWidth.max);
 }
 
-function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx) {
+function elementLineWidthPx() {
+  return clampLineWidthPx(viewerOptions.elementLineWidth, 1.5, OPTIONS_LIMITS.elementLineWidth.max);
+}
+
+function loadLineWidthPx() {
+  return clampLineWidthPx(viewerOptions.loadLineWidth, 1.5, OPTIONS_LIMITS.loadLineWidth.max);
+}
+
+function forceLineWidthPx() {
+  return clampLineWidthPx(viewerOptions.forceLineWidth, 1.5, OPTIONS_LIMITS.forceLineWidth.max);
+}
+
+function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx, opacity) {
   if (pts.length < 6) return;
   const geo = new LineSegmentsGeometry();
   geo.setPositions(pts);
@@ -958,6 +1162,8 @@ function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx)
     color: color,
     linewidth: lineWidthPx,
     worldUnits: false,
+    transparent: opacity != null && opacity < ALPHA.opaque,
+    opacity: opacity != null ? opacity : ALPHA.opaque,
   });
   const w = el.viewport.clientWidth || 1;
   const h = el.viewport.clientHeight || 1;
@@ -973,24 +1179,14 @@ function supportDiscTextureKey(fixed) {
   return fixed.map(function (f) { return f ? "1" : "0"; }).join("");
 }
 
-function hatchSupportSector(ctx, cx, cy, r, startAngle, endAngle, strokeColor) {
+function fillSupportSector(ctx, cx, cy, r, startAngle, endAngle, fillColor) {
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(cx, cy);
   ctx.arc(cx, cy, r, startAngle, endAngle);
   ctx.closePath();
-  ctx.clip();
-
-  ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = 2;
-  const step = 5;
-  const span = r * 2.4;
-  for (let d = -span; d < span; d += step) {
-    ctx.beginPath();
-    ctx.moveTo(cx - span, cy + d);
-    ctx.lineTo(cx + span, cy + d - span);
-    ctx.stroke();
-  }
+  ctx.fillStyle = fillColor;
+  ctx.fill();
   ctx.restore();
 }
 
@@ -1012,7 +1208,7 @@ function createSupportDiscTexture(fixed) {
     COLORS.supportTrans, COLORS.supportTrans, COLORS.supportTrans,
     COLORS.supportRot, COLORS.supportRot, COLORS.supportRot,
   ];
-  const outline = colorHex(COLORS.supportAnchor);
+  const outline = "#000000";
 
   ctx.clearRect(0, 0, px, px);
 
@@ -1020,12 +1216,13 @@ function createSupportDiscTexture(fixed) {
     const a0 = -Math.PI / 2 + i * (Math.PI / 3);
     const a1 = a0 + Math.PI / 3;
     if (fixed[i]) {
-      hatchSupportSector(ctx, cx, cy, r, a0, a1, colorHex(sectorColors[i]));
+      fillSupportSector(ctx, cx, cy, r, a0, a1, colorHex(sectorColors[i]));
     }
   }
 
   ctx.strokeStyle = outline;
-  ctx.lineWidth = 3;
+  ctx.globalAlpha = ALPHA.opaque;
+  ctx.lineWidth = 10.0;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
@@ -1062,7 +1259,7 @@ function addSupportDisc(center, fixed, size, group) {
 function loadArrowLength(model) {
   const span = modelSpan(model);
   const pct = parseFloat(viewerOptions.loadArrowSize);
-  if (!isFinite(pct) || pct < 1) return span * 0.3;
+  if (!isFinite(pct) || pct <= 0) return span * 0.01;
   return span * (pct / 100);
 }
 
@@ -1105,15 +1302,39 @@ function formatLoadPointValue(l, dir) {
   return "";
 }
 
+const LOAD_DIV_NUM = 8;
+
 function isGravityLoad(ld) {
   return !!(ld && (ld.gravity === true || ld.gravity === 1));
 }
 
-function formatLoadDistributedValue(mag, isGravity, displayValue) {
+function isAreaLoad(ld) {
+  return !!(ld && (ld.area_load === true || ld.area_load === 1));
+}
+
+function formatLoadDistributedValue(mag, isGravity, isArea, displayValue) {
   if (displayValue) return displayValue;
   if (Math.abs(mag) < 1e-6) return "";
   const text = formatReactionValue(mag);
-  return isGravity ? text + "G" : text;
+  if (isGravity) return text + "G";
+  if (isArea) return text + "A";
+  return text;
+}
+
+function distributedLoadAxes(elem, isGlobal) {
+  if (isGlobal) {
+    return [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, 0, 1),
+    ];
+  }
+  if (!elem || !elem.vx || !elem.vy || !elem.vz) return null;
+  return [
+    new THREE.Vector3().fromArray(elem.vx),
+    new THREE.Vector3().fromArray(elem.vy),
+    new THREE.Vector3().fromArray(elem.vz),
+  ];
 }
 
 function labelWorldHeight(span, scaleFactor, fallback) {
@@ -1124,14 +1345,42 @@ function labelOffsetDistance(span, scaleFactor, fallback) {
   return labelWorldHeight(span, scaleFactor, fallback) * 0.5 * 1.2;
 }
 
+function loadValueOffsetDistance(span, scaleFactor) {
+  // Requested rule: move by text-height * 1.2 from the shaft end.
+  return labelWorldHeight(span, scaleFactor, 0.03) * 1.2;
+}
+
 function nodeLabelPoint(nodePoint, span, scaleFactor) {
   const pad = labelOffsetDistance(span, scaleFactor, 0.03);
   return new THREE.Vector3(nodePoint.x, nodePoint.y + pad, nodePoint.z);
 }
 
-function loadValueLabelPoint(tip, dir, span, scaleFactor) {
-  const d = dir.clone().normalize();
-  return tip.clone().addScaledVector(d, labelOffsetDistance(span, scaleFactor, 0.03));
+function loadValueLabelPoint(tail, tip, span, scaleFactor) {
+  const axis = new THREE.Vector3().subVectors(tip, tail);
+  if (axis.lengthSq() < 1e-18) return tail.clone();
+  axis.normalize();
+  const pad = loadValueOffsetDistance(span, scaleFactor);
+  return tail.clone().addScaledVector(axis, -pad);
+}
+
+function loadTypeFilterValue() {
+  const t = viewerOptions.inputLoadType;
+  if (t === "area" || t === "gravity" || t === "linepoint") return t;
+  return "all";
+}
+
+function shouldDrawPointLoad() {
+  const t = loadTypeFilterValue();
+  return t === "all" || t === "linepoint";
+}
+
+function shouldDrawElementLoad(ld) {
+  const t = loadTypeFilterValue();
+  if (t === "all") return true;
+  if (t === "area") return isAreaLoad(ld);
+  if (t === "gravity") return isGravityLoad(ld);
+  if (t === "linepoint") return !isAreaLoad(ld) && !isGravityLoad(ld);
+  return true;
 }
 
 function addLoadValueLabel(text, point, span, scaleFactor, group) {
@@ -1200,6 +1449,7 @@ function drawElementInputLoads(model, opts) {
 
   for (const ld of loads) {
     if (String(ld.lc) !== String(lc)) continue;
+    if (!shouldDrawElementLoad(ld)) continue;
     const e = em[ld.elem];
     if (!e) continue;
     const n0 = nm[e.n0];
@@ -1207,32 +1457,273 @@ function drawElementInputLoads(model, opts) {
     if (!n0 || !n1) continue;
 
     const w = ld.w;
-    const mag = elementLoadMagnitude(w);
-    if (mag < 1e-9) continue;
+    if (elementLoadMagnitude(w) < 1e-9) continue;
 
-    const t = 0.5;
     const p0 = nodePosition(n0, model, lc, defFac, deformed);
     const p1 = nodePosition(n1, model, lc, defFac, deformed);
-    const p = elemPointAlong(p0, p1, t);
-    const wGlob = elementLoadVector(w, t, e, ld.global);
-    if (wGlob.lengthSq() < 1e-18) continue;
+    drawTrapezoidalDistributedLoad(ld, e, p0, p1, {
+      arrowBase,
+      maxWMag,
+      span,
+      loadLabelScale,
+      showValues,
+    });
+  }
+}
 
-    const dir = wGlob.clone().normalize();
-    const len = scaledReactionArrowLength(arrowBase, mag, maxWMag);
-    const tip = addLoadArrow(p, dir, len, modelGroup);
-    if (showValues && tip) {
-      const labelText = formatLoadDistributedValue(mag, isGravityLoad(ld), ld.display_value);
+function drawTrapezoidalDistributedLoad(ld, e, p0, p1, opts) {
+  const { arrowBase, maxWMag, span, loadLabelScale, showValues } = opts;
+  const w = ld.w;
+  const axes = distributedLoadAxes(e, ld.global);
+  if (!axes) {
+    drawSingleDistributedLoadArrow(ld, e, p0, p1, opts);
+    return;
+  }
+
+  const along = new THREE.Vector3().subVectors(p1, p0);
+  const elemLen = along.length();
+  if (elemLen < 1e-9) return;
+  along.normalize();
+
+  const loadColor = COLORS.load;
+  const hasProfile = Array.isArray(ld.w_profile) && ld.w_profile.length >= 2;
+
+  for (let axisIdx = 0; axisIdx < 3; axisIdx++) {
+    const w0 = hasProfile ? ld.w_profile[0][axisIdx + 1] : w[axisIdx];
+    const w1 = hasProfile ? ld.w_profile[ld.w_profile.length - 1][axisIdx + 1] : w[axisIdx + 3];
+    if (hasProfile) {
+      let maxAbs = 0;
+      for (let i = 0; i < ld.w_profile.length; i++) {
+        maxAbs = Math.max(maxAbs, Math.abs(ld.w_profile[i][axisIdx + 1]));
+      }
+      if (maxAbs < PRES_ZERO) continue;
+    } else {
+      if (Math.abs(w0) < PRES_ZERO && Math.abs(w1) < PRES_ZERO) continue;
+    }
+
+    const axis = axes[axisIdx];
+    const isParallel = Math.abs(axis.dot(along)) > 0.999;
+    const outlineOffsets = [];
+
+    for (let j = 0; j <= LOAD_DIV_NUM; j++) {
+      const t = j / LOAD_DIV_NUM;
+      const pt = elemPointAlong(p0, p1, t);
+      const wAt = hasProfile ? profileAxisValue(ld.w_profile, axisIdx, t) : (w0 + t * (w1 - w0));
+      if (Math.abs(wAt) < PRES_ZERO) continue;
+
+      const vOff = distributedLoadOffset(axis, wAt, arrowBase, maxWMag);
+
+      if (isParallel) {
+        if (j === LOAD_DIV_NUM) continue;
+        const tip = pt.clone().add(vOff);
+        addDirectedArrow(pt, tip, modelGroup, loadColor, loadLineWidthPx());
+      } else {
+        const ept = pt.clone().sub(vOff);
+        outlineOffsets.push(ept);
+        addDirectedArrow(ept, pt, modelGroup, loadColor, loadLineWidthPx());
+      }
+    }
+
+    if (!isParallel && outlineOffsets.length >= 2) {
+      const outlinePts = [];
+      for (let i = 0; i < outlineOffsets.length - 1; i++) {
+        addLinePair(outlineOffsets[i], outlineOffsets[i + 1], outlinePts);
+      }
+      addWideLineSegmentsFromPts(outlinePts, loadColor, modelGroup, 4, loadLineWidthPx(), 1.0);
+      if (!isAreaLoad(ld)) {
+        addDirectedArrow(outlineOffsets[0], p0, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(
+          outlineOffsets[outlineOffsets.length - 1],
+          p1,
+          modelGroup,
+          loadColor,
+          loadLineWidthPx()
+        );
+      } else {
+        const endPts = [];
+        addLinePair(outlineOffsets[0], p0, endPts);
+        addLinePair(outlineOffsets[outlineOffsets.length - 1], p1, endPts);
+        addWideLineSegmentsFromPts(endPts, loadColor, modelGroup, 4, loadLineWidthPx(), 1.0);
+      }
+    }
+  }
+
+  if (showValues) {
+    const t = 0.5;
+    const pt = elemPointAlong(p0, p1, t);
+    const wGlob = hasProfile ? profileLoadVector(ld.w_profile, e, t, ld.global) : elementLoadVector(w, t, e, ld.global);
+    if (wGlob.lengthSq() > 1e-18) {
+      const mag = wGlob.length();
+      const dir = wGlob.clone().normalize();
+      const labelText = formatLoadDistributedValue(
+        mag,
+        isGravityLoad(ld),
+        isAreaLoad(ld),
+        ld.display_value
+      );
       if (labelText) {
+        const seg = distributedArrowSegmentAt(ld, axes, p0, p1, t, hasProfile, w, arrowBase, maxWMag);
+        const tail = seg ? seg.tail : pt.clone();
+        const tip = seg ? seg.tip : pt.clone().addScaledVector(dir, scaledReactionArrowLength(arrowBase, mag, maxWMag));
         addLoadValueLabel(
           labelText,
-          loadValueLabelPoint(tip, dir, span, loadLabelScale),
+          loadValueLabelPoint(tail, tip, span, loadLabelScale),
           span,
           loadLabelScale,
           labelGroup
         );
       }
     }
+    drawDistributedEndLabels(ld, e, p0, p1, opts);
   }
+}
+
+function drawSingleDistributedLoadArrow(ld, e, p0, p1, opts) {
+  const { arrowBase, maxWMag, span, loadLabelScale, showValues } = opts;
+  const w = ld.w;
+  const t = 0.5;
+  const pt = elemPointAlong(p0, p1, t);
+  const wGlob = elementLoadVector(w, t, e, ld.global);
+  if (wGlob.lengthSq() < 1e-18) return;
+  const mag = wGlob.length();
+  const dir = wGlob.clone().normalize();
+  const len = scaledReactionArrowLength(arrowBase, mag, maxWMag);
+  const tip = addLoadArrow(pt, dir, len, modelGroup);
+  if (showValues && tip) {
+    const labelText = formatLoadDistributedValue(
+      mag,
+      isGravityLoad(ld),
+      isAreaLoad(ld),
+      ld.display_value
+    );
+    if (labelText) {
+      addLoadValueLabel(
+        labelText,
+        loadValueLabelPoint(pt, tip, span, loadLabelScale),
+        span,
+        loadLabelScale,
+        labelGroup
+      );
+    }
+  }
+}
+
+function drawDistributedEndLabels(ld, e, p0, p1, opts) {
+  const { arrowBase, maxWMag, span, loadLabelScale } = opts;
+  const hasProfile = Array.isArray(ld.w_profile) && ld.w_profile.length >= 2;
+  const w = ld.w;
+  const axes = distributedLoadAxes(e, ld.global);
+  let bestAxis = 0;
+  let bestMag = 0;
+  for (let i = 0; i < 3; i++) {
+    let m = 0;
+    if (hasProfile) {
+      for (let k = 0; k < ld.w_profile.length; k++) {
+        m = Math.max(m, Math.abs(ld.w_profile[k][i + 1]));
+      }
+    } else {
+      const wi = w[i];
+      const wj = w[i + 3];
+      m = Math.max(Math.abs(wi), Math.abs(wj));
+    }
+    if (m > bestMag) {
+      bestMag = m;
+      bestAxis = i;
+    }
+  }
+  if (bestMag < 1e-9) return;
+
+  const ends = [
+    { t: 0, val: hasProfile ? ld.w_profile[0][bestAxis + 1] : w[bestAxis] },
+    { t: 1, val: hasProfile ? ld.w_profile[ld.w_profile.length - 1][bestAxis + 1] : w[bestAxis + 3] },
+  ];
+  for (const end of ends) {
+    const pt = elemPointAlong(p0, p1, end.t);
+    const wGlob = hasProfile ? profileLoadVector(ld.w_profile, e, end.t, ld.global) : elementLoadVector(w, end.t, e, ld.global);
+    if (wGlob.lengthSq() < 1e-18) continue;
+    const seg = distributedArrowSegmentAt(ld, axes, p0, p1, end.t, hasProfile, w, arrowBase, maxWMag);
+    const dir = wGlob.clone().normalize();
+    const tail = seg ? seg.tail : pt.clone();
+    const tip = seg ? seg.tip : pt.clone().addScaledVector(dir, scaledReactionArrowLength(arrowBase, Math.abs(end.val), maxWMag));
+    const text = formatReactionValue(end.val);
+    addLoadValueLabel(
+      text,
+      loadValueLabelPoint(tail, tip, span, loadLabelScale),
+      span,
+      loadLabelScale,
+      labelGroup
+    );
+  }
+}
+
+function distributedLoadOffset(axis, wAt, arrowBase, maxWMag) {
+  const len = scaledReactionArrowLength(arrowBase, Math.abs(wAt), maxWMag);
+  const sgn = wAt >= 0 ? 1 : -1;
+  return axis.clone().multiplyScalar(len * sgn);
+}
+
+function distributedArrowSegmentAt(ld, axes, p0, p1, t, hasProfile, w, arrowBase, maxWMag) {
+  if (!axes) return null;
+  const axisIdx = dominantAxisAtT(ld, t, hasProfile, w);
+  const axis = axes[axisIdx];
+  if (!axis) return null;
+  const pt = elemPointAlong(p0, p1, t);
+  const wAt = hasProfile ? profileAxisValue(ld.w_profile, axisIdx, t) : (w[axisIdx] + t * (w[axisIdx + 3] - w[axisIdx]));
+  if (Math.abs(wAt) < PRES_ZERO) return null;
+  const along = new THREE.Vector3().subVectors(p1, p0).normalize();
+  const isParallel = Math.abs(axis.dot(along)) > 0.999;
+  const vOff = distributedLoadOffset(axis, wAt, arrowBase, maxWMag);
+  if (isParallel) {
+    return { tail: pt.clone(), tip: pt.clone().add(vOff) };
+  }
+  const ept = pt.clone().sub(vOff);
+  return { tail: ept, tip: pt.clone() };
+}
+
+function dominantAxisAtT(ld, t, hasProfile, w) {
+  const comps = hasProfile
+    ? [
+        profileAxisValue(ld.w_profile, 0, t),
+        profileAxisValue(ld.w_profile, 1, t),
+        profileAxisValue(ld.w_profile, 2, t),
+      ]
+    : [
+        w[0] + t * (w[3] - w[0]),
+        w[1] + t * (w[4] - w[1]),
+        w[2] + t * (w[5] - w[2]),
+      ];
+  let idx = 0;
+  let best = Math.abs(comps[0]);
+  for (let i = 1; i < 3; i++) {
+    const a = Math.abs(comps[i]);
+    if (a > best) {
+      best = a;
+      idx = i;
+    }
+  }
+  return idx;
+}
+
+function profileAxisValue(profile, axisIdx, t) {
+  if (!Array.isArray(profile) || profile.length === 0) return 0;
+  if (t <= profile[0][0]) return profile[0][axisIdx + 1];
+  for (let i = 0; i < profile.length - 1; i++) {
+    const p0 = profile[i];
+    const p1 = profile[i + 1];
+    if (t > p1[0]) continue;
+    const dt = p1[0] - p0[0];
+    if (Math.abs(dt) < PRES_ZERO) return p0[axisIdx + 1];
+    const r = (t - p0[0]) / dt;
+    return p0[axisIdx + 1] + r * (p1[axisIdx + 1] - p0[axisIdx + 1]);
+  }
+  return profile[profile.length - 1][axisIdx + 1];
+}
+
+function profileLoadVector(profile, elem, t, isGlobal) {
+  const wx = profileAxisValue(profile, 0, t);
+  const wy = profileAxisValue(profile, 1, t);
+  const wz = profileAxisValue(profile, 2, t);
+  return elementLoadVector([wx, wy, wz, wx, wy, wz], 0, elem, isGlobal);
 }
 
 function formatReactionValue(val) {
@@ -1288,7 +1779,7 @@ function createLabelTexture(canvas, opaqueText) {
 function buildLabelCanvas(text, span, opts) {
   opts = opts || {};
   const bgSpecified = Object.prototype.hasOwnProperty.call(opts, "bg");
-  const bg = bgSpecified ? opts.bg : "rgba(0,0,0,0.55)";
+  const bg = bgSpecified ? opts.bg : "rgba(0,0,0," + ALPHA.labelDefaultBg + ")";
   const fg = opts.fg || "#ffffff";
   const pad = opts.pad != null ? opts.pad : 4;
   const factor = opts.scaleFactor != null ? opts.scaleFactor : 0.06;
@@ -1317,7 +1808,7 @@ function buildLabelCanvas(text, span, opts) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   ctx.fillStyle = fg;
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = ALPHA.opaque;
   ctx.fillText(text, padPx, quality * (baseFs + pad - 2));
 
   const opaqueText = opts.opaque && (bg == null || bg === "transparent");
@@ -1339,7 +1830,7 @@ function makeTextPlaneMesh(text, span, opts) {
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
-    opacity: 1,
+    opacity: ALPHA.opaque,
     premultipliedAlpha: opaqueText,
     alphaTest: opaqueText ? 0.01 : 0,
   });
@@ -1470,12 +1961,13 @@ function addReactionValueLabel(text, point, span, scaleFactor, group, fgColor) {
   group.add(sprite);
 }
 
-function addElemLabel(text, point, span, scaleFactor, group, bg) {
+function addElemLabel(text, point, span, scaleFactor, group, bg, transparent) {
   const sprite = makeTextSprite(text, span, {
     bg: bg || LABEL_BG.elem,
     fg: "#ffffff",
     pad: 4,
     scaleFactor: scaleFactor,
+    transparent: transparent !== false,
   });
   sprite.position.copy(point);
   sprite.renderOrder = 15;
@@ -1497,12 +1989,13 @@ function arrowPerpendicular(dir) {
   return new THREE.Vector3().crossVectors(d, ref).normalize();
 }
 
-function addDirectedArrow(tail, head, group, color, lineWidthPx) {
+function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale) {
   const d = head.clone().sub(tail);
   const length = d.length();
   if (length < 1e-12) return head.clone();
   const dir = d.clone().normalize();
-  const headLen = Math.max(length * 0.22, length * 0.08);
+  const hs = (headScale != null && isFinite(headScale) && headScale > 0) ? headScale : 1.0;
+  const headLen = Math.max(length * 0.22 * hs, length * 0.08 * hs);
   const headWide = headLen * 0.55;
   const wingBase = head.clone().addScaledVector(dir, -headLen);
   const perp = arrowPerpendicular(dir);
@@ -1541,49 +2034,50 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx) {
   return head.clone();
 }
 
-function addDirectionArrow(origin, dir, length, group, color, lineWidthPx) {
+function addDirectionArrow(origin, dir, length, group, color, lineWidthPx, headScale) {
   const d = dir.clone().normalize();
   const tip = origin.clone().addScaledVector(d, length);
-  return addDirectedArrow(origin, tip, group, color, lineWidthPx);
+  return addDirectedArrow(origin, tip, group, color, lineWidthPx, headScale);
 }
 
 function addLoadArrow(origin, dir, length, group) {
-  return addDirectionArrow(origin, dir, length, group, COLORS.load);
+  // Slightly slimmer load arrows for better readability on dense scenes.
+  return addDirectionArrow(origin, dir, length, group, COLORS.load, loadLineWidthPx(), 0.75);
 }
 
 function nodeLabelScaleFactor() {
   const v = parseFloat(viewerOptions.nodeLabelSize);
-  if (!isFinite(v) || v < 1) return 0.03;
+  if (!isFinite(v) || v <= 0) return 0.03;
   return v / 100;
 }
 
 function elemLabelScaleFactor() {
   const v = parseFloat(viewerOptions.elemLabelSize);
-  if (!isFinite(v) || v < 1) return 0.03;
+  if (!isFinite(v) || v <= 0) return 0.03;
   return v / 100;
 }
 
 function materialLabelScaleFactor() {
   const v = parseFloat(viewerOptions.materialLabelSize);
-  if (!isFinite(v) || v < 1) return 0.04;
+  if (!isFinite(v) || v <= 0) return 0.04;
   return v / 100;
 }
 
 function sectionLabelScaleFactor() {
   const v = parseFloat(viewerOptions.sectionLabelSize);
-  if (!isFinite(v) || v < 1) return 0.03;
+  if (!isFinite(v) || v <= 0) return 0.03;
   return v / 100;
 }
 
 function loadLabelScaleFactor() {
   const v = parseFloat(viewerOptions.loadLabelSize);
-  if (!isFinite(v) || v < 1) return 0.03;
+  if (!isFinite(v) || v <= 0) return 0.03;
   return v / 100;
 }
 
 function reactionLabelScaleFactor() {
   const v = parseFloat(viewerOptions.reactionLabelSize);
-  if (!isFinite(v) || v < 1) return 0.03;
+  if (!isFinite(v) || v <= 0) return 0.03;
   return v / 100;
 }
 
@@ -1617,7 +2111,7 @@ function setDispContourControlsEnabled(enabled) {
 
 function forceLabelScaleFactor() {
   const v = parseFloat(viewerOptions.forceLabelSize);
-  if (!isFinite(v) || v < 1) return 0.06;
+  if (!isFinite(v) || v <= 0) return 0.06;
   return v / 100;
 }
 
@@ -1684,35 +2178,23 @@ function modelHasForceData(model, lcKey) {
 }
 
 function addForceStemAndSpline(stemPts, splinePts, group) {
+  const w = forceLineWidthPx();
   if (stemPts.length >= 6) {
-    const stemGeo = new THREE.BufferGeometry();
-    stemGeo.setAttribute("position", new THREE.Float32BufferAttribute(stemPts, 3));
-    stemGeo.computeBoundingSphere();
-    const stems = new THREE.LineSegments(
-      stemGeo,
-      new THREE.LineBasicMaterial({ color: COLORS.force, depthTest: true })
-    );
-    stems.frustumCulled = false;
-    stems.renderOrder = 10;
-    group.add(stems);
+    addWideLineSegmentsFromPts(stemPts, COLORS.force, group, 10, w, 1.0);
   }
   if (splinePts.length >= 2) {
-    const lineGeo = new THREE.BufferGeometry().setFromPoints(splinePts);
-    lineGeo.computeBoundingSphere();
-    const spline = new THREE.Line(
-      lineGeo,
-      new THREE.LineBasicMaterial({ color: COLORS.force, depthTest: true })
-    );
-    spline.frustumCulled = false;
-    spline.renderOrder = 11;
-    group.add(spline);
+    const linePts = [];
+    for (let i = 0; i < splinePts.length - 1; i++) {
+      addLinePair(splinePts[i], splinePts[i + 1], linePts);
+    }
+    addWideLineSegmentsFromPts(linePts, COLORS.force, group, 11, w, 1.0);
   }
 }
 
 function addForceValueLabel(text, point, model, group) {
   const span = modelSpan(model);
   const sprite = makeTextSprite(text, span, {
-    bg: "rgba(0, 71, 171, 0.82)",
+    bg: "rgba(0, 71, 171, " + ALPHA.forceValueBg + ")",
     fg: "#ffffff",
     pad: 6,
     scaleFactor: forceLabelScaleFactor(),
@@ -1784,7 +2266,7 @@ function buildForceDiagrams(model) {
       const wyi = lds[1], wyj = lds[4];
       const qyi = f[1], qyj = f[7];
       const wXc = wyi + (wyj - wyi) * 0.5;
-      const qXc = qyi + 0.5 * (wyi + wXc) * 0.5 * e.len;
+      const qXc = -qyi - 0.5 * (wyi + wXc) * 0.5 * e.len;
       const mp = new THREE.Vector3().lerpVectors(p0, p1, 0.5).addScaledVector(vy, dispFac * qXc);
 
       for (let i = 0; i <= divNum; i++) {
@@ -1792,7 +2274,7 @@ function buildForceDiagrams(model) {
         const x = t * e.len;
         const pt = new THREE.Vector3().lerpVectors(p0, p1, t);
         const wX = wyi + (wyj - wyi) * t;
-        const qX = qyi + 0.5 * (wyi + wX) * x;
+        const qX = -qyi - 0.5 * (wyi + wX) * x;
         const ptF = pt.clone().addScaledVector(vy, dispFac * qX);
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
@@ -1907,14 +2389,15 @@ function premultiplyCanvasAlpha(canvas) {
 function makeTextSprite(text, span, opts) {
   const { canvas, opaqueText, worldW, worldH } = buildLabelCanvas(text, span, opts);
   const tex = createLabelTexture(canvas, opaqueText);
+  const useTransparent = !(opts && opts.transparent === false);
   const mat = new THREE.SpriteMaterial({
     map: tex,
     depthTest: false,
     depthWrite: false,
-    transparent: true,
-    opacity: 1,
+    transparent: useTransparent,
+    opacity: ALPHA.opaque,
     premultipliedAlpha: opaqueText,
-    alphaTest: opaqueText ? 0.01 : 0,
+    alphaTest: useTransparent ? (opaqueText ? 0.01 : 0) : 0,
   });
   const sp = new THREE.Sprite(mat);
   sp.scale.set(worldW, worldH, 1);
@@ -1962,6 +2445,7 @@ function outputFileName(path) {
 
 function showTextDocumentWindow(text, title) {
   const pdfName = title.replace(/\.dat$/i, ".pdf");
+  const saveName = title;
   const w = window.open("", "_blank", "width=920,height=720,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
@@ -1987,6 +2471,7 @@ function showTextDocumentWindow(text, title) {
   doc.write("}");
   doc.write("</style></head><body>");
   doc.write("<div class=\"toolbar no-print\">");
+  doc.write("<button type=\"button\" id=\"btnSaveTxt\">Save text</button>");
   doc.write("<button type=\"button\" id=\"btnPdf\">Save as PDF (A4 landscape)</button>");
   doc.write("</div>");
   doc.write("<header class=\"doc-title\">");
@@ -1994,6 +2479,17 @@ function showTextDocumentWindow(text, title) {
   doc.write("</header><pre></pre></body></html>");
   doc.close();
   doc.querySelector("pre").textContent = text;
+  doc.getElementById("btnSaveTxt").onclick = function () {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = doc.createElement("a");
+    a.href = url;
+    a.download = saveName;
+    doc.body.appendChild(a);
+    a.click();
+    doc.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  };
   doc.getElementById("btnPdf").onclick = function () {
     doc.title = pdfName;
     w.print();
@@ -2014,6 +2510,78 @@ async function fetchInputText(path) {
   return res.text();
 }
 
+async function saveInputText(path, text) {
+  const url = "/api/input?path=" + encodeURIComponent(path);
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: text }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+function showInputEditorWindow(text, path) {
+  const w = window.open("", "_blank", "width=980,height=760,scrollbars=yes,resizable=yes");
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  const doc = w.document;
+  doc.open();
+  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>");
+  doc.write(path);
+  doc.write("</title><style>");
+  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
+  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;}");
+  doc.write(".toolbar button{background:#5eff4d;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+  doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
+  doc.write(".status{margin-left:auto;color:#aaa;font-size:12px;}");
+  doc.write("textarea{width:100%;height:calc(100vh - 52px);box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:12px;line-height:1.25;resize:none;}");
+  doc.write("</style></head><body>");
+  doc.write("<div class=\"toolbar\"><button id=\"btnSave\">Save</button><button id=\"btnReload\" class=\"secondary\">Reload</button><span id=\"status\" class=\"status\">ready</span></div>");
+  doc.write("<textarea id=\"txt\"></textarea>");
+  doc.write("</body></html>");
+  doc.close();
+
+  const textarea = doc.getElementById("txt");
+  const statusEl = doc.getElementById("status");
+  textarea.value = text;
+
+  function setWinStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
+  }
+
+  doc.getElementById("btnSave").addEventListener("click", async () => {
+    try {
+      setWinStatus("saving...");
+      await saveInputText(path, textarea.value);
+      setWinStatus("saved");
+      setStatus(path + " — input file saved");
+      if (el.modelSelect.value === path) await loadSelectedModel(false);
+    } catch (ex) {
+      setWinStatus("save failed");
+      setStatus("Error: " + ex.message);
+      alert("Save failed: " + ex.message);
+    }
+  });
+
+  doc.getElementById("btnReload").addEventListener("click", async () => {
+    try {
+      setWinStatus("reloading...");
+      const latest = await fetchInputText(path);
+      textarea.value = latest;
+      setWinStatus("reloaded");
+    } catch (ex) {
+      setWinStatus("reload failed");
+      alert("Reload failed: " + ex.message);
+    }
+  });
+}
+
 async function openInputWindow() {
   const path = el.modelSelect.value;
   if (!path) return;
@@ -2021,8 +2589,8 @@ async function openInputWindow() {
   setStatus("Loading " + path + "…");
   try {
     const text = await fetchInputText(path);
-    showTextDocumentWindow(text, path);
-    setStatus(path + " — input file opened in new window");
+    showInputEditorWindow(text, path);
+    setStatus(path + " — input file opened (editable)");
   } catch (ex) {
     setStatus("Error: " + ex.message);
   }
@@ -2239,36 +2807,48 @@ el.chkForceValues.addEventListener("change", () => {
 
 function readOptionsFromUi() {
   viewerOptions.loadArrowSize = clampViewerOption(
-    "loadArrowSize", parseInt(el.optLoadArrow.value, 10) || OPTIONS_DEFAULTS.loadArrowSize);
+    "loadArrowSize", parseFloat(el.optLoadArrow.value) || OPTIONS_DEFAULTS.loadArrowSize);
   viewerOptions.supportGizmoSize = clampViewerOption(
     "supportGizmoSize", parseInt(el.optSupportGizmo.value, 10) || OPTIONS_DEFAULTS.supportGizmoSize);
   viewerOptions.supportLineWidth = clampViewerOption(
     "supportLineWidth", parseFloat(el.optSupportLineWidth.value) || OPTIONS_DEFAULTS.supportLineWidth);
   viewerOptions.dispContourLineWidth = clampViewerOption(
     "dispContourLineWidth", parseFloat(el.optDispContourLineWidth.value) || OPTIONS_DEFAULTS.dispContourLineWidth);
+  viewerOptions.elementLineWidth = clampViewerOption(
+    "elementLineWidth", parseFloat(el.optElementLineWidth.value) || OPTIONS_DEFAULTS.elementLineWidth);
+  viewerOptions.loadLineWidth = clampViewerOption(
+    "loadLineWidth", parseFloat(el.optLoadLineWidth.value) || OPTIONS_DEFAULTS.loadLineWidth);
+  viewerOptions.forceLineWidth = clampViewerOption(
+    "forceLineWidth", parseFloat(el.optForceLineWidth.value) || OPTIONS_DEFAULTS.forceLineWidth);
   viewerOptions.nodeLabelSize = clampViewerOption(
-    "nodeLabelSize", parseInt(el.optNodeLabel.value, 10) || OPTIONS_DEFAULTS.nodeLabelSize);
+    "nodeLabelSize", parseFloat(el.optNodeLabel.value) || OPTIONS_DEFAULTS.nodeLabelSize);
   viewerOptions.elemLabelSize = clampViewerOption(
-    "elemLabelSize", parseInt(el.optElemLabel.value, 10) || OPTIONS_DEFAULTS.elemLabelSize);
+    "elemLabelSize", parseFloat(el.optElemLabel.value) || OPTIONS_DEFAULTS.elemLabelSize);
   viewerOptions.materialLabelSize = clampViewerOption(
-    "materialLabelSize", parseInt(el.optMaterialLabel.value, 10) || OPTIONS_DEFAULTS.materialLabelSize);
+    "materialLabelSize", parseFloat(el.optMaterialLabel.value) || OPTIONS_DEFAULTS.materialLabelSize);
   viewerOptions.sectionLabelSize = clampViewerOption(
-    "sectionLabelSize", parseInt(el.optSectionLabel.value, 10) || OPTIONS_DEFAULTS.sectionLabelSize);
+    "sectionLabelSize", parseFloat(el.optSectionLabel.value) || OPTIONS_DEFAULTS.sectionLabelSize);
   viewerOptions.loadLabelSize = clampViewerOption(
-    "loadLabelSize", parseInt(el.optLoadLabel.value, 10) || OPTIONS_DEFAULTS.loadLabelSize);
+    "loadLabelSize", parseFloat(el.optLoadLabel.value) || OPTIONS_DEFAULTS.loadLabelSize);
   viewerOptions.reactionLabelSize = clampViewerOption(
-    "reactionLabelSize", parseInt(el.optReactionLabel.value, 10) || OPTIONS_DEFAULTS.reactionLabelSize);
+    "reactionLabelSize", parseFloat(el.optReactionLabel.value) || OPTIONS_DEFAULTS.reactionLabelSize);
   viewerOptions.forceLabelSize = clampViewerOption(
-    "forceLabelSize", parseInt(el.optForceLabel.value, 10) || OPTIONS_DEFAULTS.forceLabelSize);
+    "forceLabelSize", parseFloat(el.optForceLabel.value) || OPTIONS_DEFAULTS.forceLabelSize);
+  if (el.loadTypeFilter) {
+    viewerOptions.inputLoadType = el.loadTypeFilter.value || OPTIONS_DEFAULTS.inputLoadType;
+  }
 }
 
 function applyOptionsToUi() {
   el.optLoadArrow.value = String(viewerOptions.loadArrowSize);
-  el.optLoadArrowVal.textContent = String(viewerOptions.loadArrowSize);
+  el.optLoadArrowVal.textContent = Number(viewerOptions.loadArrowSize).toFixed(1);
   el.optSupportGizmo.value = String(viewerOptions.supportGizmoSize);
   el.optSupportGizmoVal.textContent = String(viewerOptions.supportGizmoSize);
   el.optSupportLineWidth.value = String(viewerOptions.supportLineWidth);
   el.optDispContourLineWidth.value = String(viewerOptions.dispContourLineWidth);
+  if (el.optElementLineWidth) el.optElementLineWidth.value = String(viewerOptions.elementLineWidth);
+  if (el.optLoadLineWidth) el.optLoadLineWidth.value = String(viewerOptions.loadLineWidth);
+  if (el.optForceLineWidth) el.optForceLineWidth.value = String(viewerOptions.forceLineWidth);
   el.optNodeLabel.value = String(viewerOptions.nodeLabelSize);
   el.optNodeLabelVal.textContent = String(viewerOptions.nodeLabelSize);
   el.optElemLabel.value = String(viewerOptions.elemLabelSize);
@@ -2283,6 +2863,9 @@ function applyOptionsToUi() {
   el.optReactionLabelVal.textContent = String(viewerOptions.reactionLabelSize);
   el.optForceLabel.value = String(viewerOptions.forceLabelSize);
   el.optForceLabelVal.textContent = String(viewerOptions.forceLabelSize);
+  if (el.loadTypeFilter) {
+    el.loadTypeFilter.value = loadTypeFilterValue();
+  }
 }
 
 function saveViewerOptions() {
@@ -2300,6 +2883,9 @@ function loadViewerOptions() {
     if (typeof st.supportGizmoSize === "number") viewerOptions.supportGizmoSize = st.supportGizmoSize;
     if (typeof st.supportLineWidth === "number") viewerOptions.supportLineWidth = st.supportLineWidth;
     if (typeof st.dispContourLineWidth === "number") viewerOptions.dispContourLineWidth = st.dispContourLineWidth;
+    if (typeof st.elementLineWidth === "number") viewerOptions.elementLineWidth = st.elementLineWidth;
+    if (typeof st.loadLineWidth === "number") viewerOptions.loadLineWidth = st.loadLineWidth;
+    if (typeof st.forceLineWidth === "number") viewerOptions.forceLineWidth = st.forceLineWidth;
     if (typeof st.nodeLabelSize === "number") viewerOptions.nodeLabelSize = st.nodeLabelSize;
     if (typeof st.elemLabelSize === "number") viewerOptions.elemLabelSize = st.elemLabelSize;
     if (typeof st.materialLabelSize === "number") viewerOptions.materialLabelSize = st.materialLabelSize;
@@ -2307,6 +2893,7 @@ function loadViewerOptions() {
     if (typeof st.loadLabelSize === "number") viewerOptions.loadLabelSize = st.loadLabelSize;
     if (typeof st.reactionLabelSize === "number") viewerOptions.reactionLabelSize = st.reactionLabelSize;
     if (typeof st.forceLabelSize === "number") viewerOptions.forceLabelSize = st.forceLabelSize;
+    if (typeof st.inputLoadType === "string") viewerOptions.inputLoadType = st.inputLoadType;
     clampAllViewerOptions();
   } catch (e) { /* ignore */ }
 }
@@ -2321,7 +2908,7 @@ function initViewerOptions() {
   loadViewerOptions();
   applyOptionsToUi();
   el.optLoadArrow.addEventListener("input", () => {
-    el.optLoadArrowVal.textContent = el.optLoadArrow.value;
+    el.optLoadArrowVal.textContent = Number(el.optLoadArrow.value).toFixed(1);
     onOptionsChanged();
   });
   el.optSupportGizmo.addEventListener("input", () => {
@@ -2332,6 +2919,18 @@ function initViewerOptions() {
   el.optSupportLineWidth.addEventListener("change", onOptionsChanged);
   el.optDispContourLineWidth.addEventListener("input", onOptionsChanged);
   el.optDispContourLineWidth.addEventListener("change", onOptionsChanged);
+  if (el.optElementLineWidth) {
+    el.optElementLineWidth.addEventListener("input", onOptionsChanged);
+    el.optElementLineWidth.addEventListener("change", onOptionsChanged);
+  }
+  if (el.optLoadLineWidth) {
+    el.optLoadLineWidth.addEventListener("input", onOptionsChanged);
+    el.optLoadLineWidth.addEventListener("change", onOptionsChanged);
+  }
+  if (el.optForceLineWidth) {
+    el.optForceLineWidth.addEventListener("input", onOptionsChanged);
+    el.optForceLineWidth.addEventListener("change", onOptionsChanged);
+  }
   el.optNodeLabel.addEventListener("input", () => {
     el.optNodeLabelVal.textContent = el.optNodeLabel.value;
     onOptionsChanged();
@@ -2360,6 +2959,9 @@ function initViewerOptions() {
     el.optForceLabelVal.textContent = el.optForceLabel.value;
     onOptionsChanged();
   });
+  if (el.loadTypeFilter) {
+    el.loadTypeFilter.addEventListener("change", onOptionsChanged);
+  }
 }
 
 function initDraggablePanel(cfg) {

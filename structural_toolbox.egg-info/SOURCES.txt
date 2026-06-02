@@ -16,6 +16,7 @@ structural_toolbox.egg-info/dependency_links.txt
 structural_toolbox.egg-info/entry_points.txt
 structural_toolbox.egg-info/requires.txt
 structural_toolbox.egg-info/top_level.txt
+tests/test_area_load.py
 tests/test_cli.py
 tests/test_data_models.py
 tests/test_engine.py

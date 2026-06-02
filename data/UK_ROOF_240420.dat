@@ -240,7 +240,7 @@ PLOD,     31,    0,   0.00,   0.00,   0.00,   0.00,   0.00,   0.00
 # --- GRAVITY LOAD(GLOD) ---
 #         LC,     Vec X,     Vec Y,     Vec Z
 #                 (m/s2)     (m/s2)     (m/s2)
-GLOD,      0,  0.000000,  0.000000, -98.066500
+GLOD,      0,  0.000000,  0.000000,  -9.806650
 
 # --- AXIS (AXIS) ---
 #         ID,       NAME,    V/H,    NID,  x-DIR(if V)

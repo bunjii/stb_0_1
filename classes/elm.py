@@ -470,6 +470,8 @@ class Elm1D:
         
         if e.glds is not None: lds += e.glds[:, self.clc]
 
+        if e.alds is not None: lds += e.alds[:, self.clc]
+
         vz = e.pln.vz.v # drawing direction of the element
 
         if e.isVxZ: vz = -1 * vz

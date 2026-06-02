@@ -1,0 +1,49 @@
+# --- HEADER INPUT ---
+# Area-load (ALOD) verification model.
+# A 4 m x 4 m horizontal panel (16 m2) at z = 4 m, supported by four
+# columns whose bases (nodes 4-7) are fully fixed.
+#   LC 0: vertical pressure  pz = -5 kN/m2  -> total Fz = -80 kN
+#   LC 1: horizontal pressure px =  3 kN/m2 -> total Fx = +48 kN
+# (LC 1 exercises the member-axial pressure component.)
+
+### <INPUT DATA> ###
+
+# TYPE OF ANALYSIS: 3D LINEAR STATIC
+
+# --- MATERIAL(MATE) ---
+MATE,      0,  SS400,   205000,    79000,     78.5,  1.2e-05,      235
+
+# --- SECTION(SECT) ---
+SECT,      0,     G1,      0,      2,  400.0,  200.0,    8.0,   13.0
+
+# --- NODE ---
+NODE,      0,       0.0,       0.0,       4.0,
+NODE,      1,       4.0,       0.0,       4.0,
+NODE,      2,       4.0,       4.0,       4.0,
+NODE,      3,       0.0,       4.0,       4.0,
+NODE,      4,       0.0,       0.0,       0.0,      *
+NODE,      5,       4.0,       0.0,       0.0,      *
+NODE,      6,       4.0,       4.0,       0.0,      *
+NODE,      7,       0.0,       4.0,       0.0,      *
+
+# --- ELEMENT(ELEM) ---
+ELEM,      0,      0,      1,      0,      0.0
+ELEM,      1,      1,      2,      0,      0.0
+ELEM,      2,      2,      3,      0,      0.0
+ELEM,      3,      3,      0,      0,      0.0
+ELEM,      4,      4,      0,      0,      0.0
+ELEM,      5,      5,      1,      0,      0.0
+ELEM,      6,      6,      2,      0,      0.0
+ELEM,      7,      7,      3,      0,      0.0
+
+# --- CONSTRAINT(CONS) ---
+CONS,      4,    1,    1,    1,    1,    1,    1
+CONS,      5,    1,    1,    1,    1,    1,    1
+CONS,      6,    1,    1,    1,    1,    1,    1
+CONS,      7,    1,    1,    1,    1,    1,    1
+
+# --- AREA LOAD(ALOD) ---
+#         LC,     PX,     PY,     PZ,  ELEM1,  ELEM2,  ELEM3,  ELEM4
+#               (kN/m2) (kN/m2) (kN/m2)
+ALOD,      0,   0.00,   0.00,  -5.00,      0,      1,      2,      3
+ALOD,      1,   3.00,   0.00,   0.00,      0,      1,      2,      3

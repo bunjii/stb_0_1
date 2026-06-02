@@ -17,7 +17,7 @@ _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 def create_app(default_model=None):
     default_model = normalize_model_relpath(default_model)
     try:
-        from fastapi import FastAPI, HTTPException, Query
+        from fastapi import FastAPI, HTTPException, Query, Body
         from fastapi.responses import FileResponse, JSONResponse
     except ImportError:
         raise ImportError(
@@ -87,6 +87,21 @@ def create_app(default_model=None):
             raise HTTPException(status_code=400, detail=str(ex))
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(txt, media_type="text/plain; charset=utf-8")
+
+    @app.put("/api/input")
+    def api_input_save(
+        path: str = Query(..., description="Relative path under project root"),
+        text: str = Body(..., embed=True, description="Input file content"),
+    ):
+        try:
+            full = resolve_model_path(path)
+            with open(full, "w", encoding="utf-8") as f:
+                f.write(text)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
+        return JSONResponse({"ok": True, "path": normalize_model_relpath(path)})
 
     return app
 

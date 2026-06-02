@@ -33,13 +33,12 @@ def main():
         sys.stderr.write(str(ex) + "\n")
         sys.exit(1)
 
-    try:
-        run_server(
-            host=args.host,
-            port=args.port,
-            default_model=normalize_model_relpath(args.file),
-            open_browser=(not args.no_browser),
-        )
+    run_server(
+        host=args.host,
+        port=args.port,
+        default_model=normalize_model_relpath(args.file),
+        open_browser=(not args.no_browser),
+    )
 
 
 if __name__ == "__main__":

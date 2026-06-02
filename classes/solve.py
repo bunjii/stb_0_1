@@ -196,8 +196,7 @@ class Solve:
                 disps.append(disp) 
             
             e.edisps = disps 
-            
-        print("SetElemDisps: finished")
+
         return
 
     def SetNodalDisps(self, _disps):
@@ -222,8 +221,6 @@ class Solve:
   
             cnt += 1 
 
-        print("SetNodalDisps: finished")
-
         return
     
     def CalcElemForces(self): 
@@ -240,14 +237,7 @@ class Solve:
             e.forces = np.matmul(e.ek, np.matmul(e.tm, e_disp)) # 12x(num_lcs)
 
             if e.elds is not None: # elds are defined already with ECS
-                print(f"e.forces: \n {e.forces} \n e.elds: \n {e.elds}")
                 e.forces = e.forces - e.elds
-
-                print(f"resulting e.forces: \n {e.forces}")
-
-                ###
-                ###
-                ###
 
             # extend force matrix to 14x to store my_center and mz_center
             # added on 2025-01-22
@@ -294,8 +284,6 @@ class Solve:
                     #     # Nj , Qyj', Qzj', Mxj , Myj', Mzj
                     #     #forces[j] = -forces[j]
                     #     e.forces[j, i] = -e.forces[j, i]
-                        
-        print("CalcElemForces: finished")
 
         # adding central forces # on 2025-01-20
 
@@ -317,7 +305,7 @@ class Solve:
 
                 if e.glds is not None: lds += e.glds[:, i]
 
-                # if e.alds is not None: lds += e.alds[:, i]
+                if e.alds is not None: lds += e.alds[:, i]
 
                 wzi, wzj = lds[2], lds[5]
                 qzi = e.forces[2][i]
@@ -398,110 +386,72 @@ class Solve:
         self.num_lcs = self.mdl.max_clc
 
         #
-        # for area load as element load
-        # added on 2025-01-15
+        # Area loads (ALOD) -- tributary-area method.
+        #
+        # The panel pressure is distributed to its boundary members as an
+        # equivalent linearly-varying member load that reproduces the exact
+        # tributary resultant and its centroid (hence exact global equilibrium
+        # and reactions), including the member-axial pressure component.
+        # The equivalent intensities are accumulated in e.alds (ECS, N/m) and
+        # the corresponding consistent fixed-end forces in e.elds (ECS).
+        #
         for al in self.mdl.alds:
 
-            fwe     = np.zeros((self.ndof*2, 1), dtype = np.float64)
-
-            col     = al.clc # should have been set at mdl 
-
-            nds = al.nds
-            nds_areas = al.nds_areas
+            col  = al.clc # should have been set at mdl
             elms = al.elms
-            elms_areas = al.elms_areas
 
-            # area's point loads
-            for n in nds:
+            if elms is None:
+                continue
 
-                area = nds_areas[nds.index(n)]
-                area_ld = area * np.array(al.lds) # self.lds = [_px, _py, _pz]
-                pld = PLd(n.id,  al.lc, 
-                             area_ld[0], area_ld[1], area_ld[2], 0, 0, 0,
-                             True)
-                pld.nd = n
+            for idx, e in enumerate(elms):
 
-                ### apply clc
-                pld.clc = al.clc #self.mdl.max_clc
-                #self.mdl.max_clc += 1
+                area = al.elms_areas[idx]  # tributary area [m^2]
+                dc   = al.elms_dc[idx]     # centroid distance [m] from e.n0
+                L    = e.len
 
-                self.mdl.lds.append(pld)
+                if area <= 0.0 or L <= 0.0:
+                    continue
 
-            # self.num_lcs = self.mdl.max_clc
+                # pressure vector in ECS [N/m^2]
+                p_ecs = e.tm[0:3, 0:3] @ np.array(al.lds)
 
-            # area's element loads
-            for e in elms:
-                
-                areas = elms_areas[elms.index(e)]
-                lds = e.tm[0:3, 0:3] @ np.array(al.lds) # GCS to ECS
-                # [_px_ecs, _py_ecs, _pz_ecs]
-                #print(f"CreateLoadMx: e.id: {e.id}, lc: {al.lc}, lds_ecs: {lds}")
+                # equivalent linear tributary width [m] at the two ends so that
+                #   integral(w) = area, centroid(w) = dc
+                S  = 2.0 * area / L
+                wi = S * (2.0 - 3.0 * dc / L)
+                wj = S * (3.0 * dc / L - 1.0)
 
-                # i: division number
-                for i in range(len(areas)):
+                # ECS line-load intensities [N/m] at i (n0) and j (n1)
+                wxi, wyi, wzi = wi * p_ecs
+                wxj, wyj, wzj = wj * p_ecs
 
-                    a = (i+1) / (len(areas)+1) * e.len 
-                    b = e.len - a
-                    pnt_lds = areas[i] * lds # self.lds = [_px, _py, _pz]
-                    
-                    #if i==3:
-                    #    print(f"CreateLoadMx: e.id: {e.id}, lc: {al.lc}, i=3, pnt_lds: {pnt_lds}")
+                # consistent fixed-end forces for a linearly-varying load (ECS),
+                # same convention as ELOD/gravity (axial included).
+                fwe = np.zeros((self.ndof * 2, 1), dtype=np.float64)
+                fwe[ 0] =  L / 6.0  * (2.0 * wxi + 1.0 * wxj)       # fxi
+                fwe[ 1] =  L / 20.0 * (7.0 * wyi + 3.0 * wyj)       # fyi
+                fwe[ 2] =  L / 20.0 * (7.0 * wzi + 3.0 * wzj)       # fzi
+                fwe[ 3] =  0.0                                      # mxi
+                fwe[ 4] = -L**2 / 60.0 * (3.0 * wzi + 2.0 * wzj)    # myi
+                fwe[ 5] =  L**2 / 60.0 * (3.0 * wyi + 2.0 * wyj)    # mzi
 
-                    px = pnt_lds[0]
-                    py = pnt_lds[1]
-                    pz = pnt_lds[2]
+                fwe[ 6] =  L / 6.0  * (1.0 * wxi + 2.0 * wxj)       # fxj
+                fwe[ 7] =  L / 20.0 * (3.0 * wyi + 7.0 * wyj)       # fyj
+                fwe[ 8] =  L / 20.0 * (3.0 * wzi + 7.0 * wzj)       # fzj
+                fwe[ 9] =  0.0                                      # mxj
+                fwe[10] =  L**2 / 60.0 * (2.0 * wzi + 3.0 * wzj)    # myj
+                fwe[11] = -L**2 / 60.0 * (2.0 * wyi + 3.0 * wyj)    # mzj
 
-                    Rax = 0 #px * b ** 2 / e.len **3 * (3 * a + b)
-                    Ray = py * b ** 2 / e.len **3 * (3 * a + b)
-                    Raz = pz * b ** 2 / e.len **3 * (3 * a + b)
+                if e.elds is None:
+                    e.elds = np.zeros((self.ndof * 2, self.num_lcs), dtype=np.float64)
+                e.elds[:, col] += fwe.reshape(-1)  ### ECS
 
-                    Rbx = 0 #px * a ** 2 / e.len **3 * (3 * b + a)
-                    Rby = py * a ** 2 / e.len **3 * (3 * b + a)
-                    Rbz = pz * a ** 2 / e.len **3 * (3 * b + a) 
-
-                    Max  = 0 #px * a * b ** 2 / e.len **2
-                    May  = pz * a * b ** 2 / e.len **2
-                    Maz  = py * a * b ** 2 / e.len **2
-
-                    Mbx  = 0 #px * a ** 2 * b / e.len **2
-                    Mby  = pz * a ** 2 * b / e.len **2
-                    Mbz  = py * a ** 2 * b / e.len **2
-
-                    f_lds = np.array([Rax, Ray, Raz, Max, May, Maz, Rbx, Rby, Rbz, Mbx, Mby, Mbz]) # GCS to ECS
-
-                    #print(f"CreateLoadMx: e.id: {e.id}, lc: {al.lc}, i: {i}, fwe: \n{lds}")
-
-                    # all lds are now in ECS
-                    fwe[ 0] =  0.0       # fxi
-                    fwe[ 1] =  f_lds[1]       # fyi
-                    fwe[ 2] =  f_lds[2]       # fzi
-                    fwe[ 3] =  0.0       # mxi
-                    fwe[ 4] = -f_lds[4]    #+ # myi
-                    fwe[ 5] =  f_lds[5]       # mzi -
-
-                    fwe[ 6] =  0.0       # fxj
-                    fwe[ 7] =  f_lds[7]       # fyj
-                    fwe[ 8] =  f_lds[8]       # fzj
-                    fwe[ 9] =  0.0       # mxj
-                    fwe[10] =  f_lds[10]   #- # myj
-                    fwe[11] = -f_lds[11]      # mzj +
-                    
-                    if e.elds is None:
-                        e.elds = np.zeros((self.ndof*2, self.num_lcs), dtype = np.float64)
-                    e.elds[:, col] += fwe.reshape(-1)  ### ECS 
-
-                    if e.alds is None:
-                        e.alds = np.zeros((6, self.num_lcs), dtype = np.float64)
-                    
-                    e.alds[:, col] += lds  ### ECS 
-        ###
-        ### wip till here on 2025-01-15
-        ###
+                if e.alds is None:
+                    e.alds = np.zeros((6, self.num_lcs), dtype=np.float64)
+                e.alds[:, col] += np.array([wxi, wyi, wzi, wxj, wyj, wzj])  ### ECS
 
         nr= self.num_row  # self.num_row = ndof * nsize @ stiffness matrix
         lm = np.zeros((nr, self.num_lcs), dtype = np.float64)
-
-        print(f"lm size: {lm.shape}")
 
         #
         # for point load

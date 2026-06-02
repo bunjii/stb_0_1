@@ -180,10 +180,16 @@ ALOD, LC, PX, PY, PZ, ELEM1, ELEM2, ELEM3, ELEM4
 
 | Field | Unit | Description |
 |-------|------|-------------|
-| PX, PY, PZ | kN/m² | Pressure components |
+| PX, PY, PZ | kN/m² | Pressure components (global axes) |
 | ELEM1…ELEM4 | — | Member IDs bounding the loaded panel (triangle: use 3 IDs; 4th optional) |
 
-Load is distributed to members using a Voronoi-style division in the solver.
+The pressure is distributed to the bounding members with the **tributary-area
+method**: the panel surface is partitioned by nearest boundary edge
+(medial-axis / 45° rule), and each member receives an equivalent
+linearly-varying line load that reproduces the exact tributary resultant and
+its centroid. This preserves global equilibrium and support reactions exactly,
+including the member-axial pressure component. The bounding members must form a
+single closed triangular or quadrilateral loop.
 
 Short alias: `al`.
 
