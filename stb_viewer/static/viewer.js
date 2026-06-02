@@ -444,11 +444,8 @@ function formatDispInputValue(v) {
 }
 
 function formatDispAbsValue(v) {
-  const av = Math.abs(v);
-  if (av < 1e-9) return "0";
-  if (av < 0.01) return v.toFixed(5);
-  if (av < 1) return v.toFixed(4);
-  return v.toFixed(3);
+  if (Math.abs(v) < 1e-9) return "0";
+  return v.toFixed(1);
 }
 
 function dispContourGradientCss() {
@@ -567,7 +564,7 @@ function addMaxDisplacementMarker(model, lc, defFac, span, deformed, group, labe
   if (dlen < 1e-12) return;
   const udir = dir.clone().multiplyScalar(1 / dlen);
 
-  const r = Math.max(span * 0.01, 0.02);
+  const r = Math.max(span * 0.01, 0.02) * 0.4;
   const sphere = new THREE.Mesh(
     new THREE.SphereGeometry(r, 18, 12),
     new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: true })
@@ -589,12 +586,12 @@ function addMaxDisplacementMarker(model, lc, defFac, span, deformed, group, labe
   dashed.renderOrder = 13;
   group.add(dashed);
 
-  const labelPos = p1.clone().addScaledVector(udir, span * 0.03);
+  const labelPos = p1.clone().addScaledVector(udir, span * 0.012);
   addReactionValueLabel(
     formatDispAbsValue(info.mag),
     labelPos,
     span,
-    Math.max(reactionLabelScaleFactor(), 0.03),
+    Math.max(reactionLabelScaleFactor(), 0.03) * 0.4,
     labelGroup,
     "#ff0000"
   );

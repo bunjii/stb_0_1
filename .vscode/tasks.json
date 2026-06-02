@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "docs: build stiffness matrix HTML",
+      "type": "shell",
+      "command": "python3 docs/build_stiffness_doc_html.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "docs: open stiffness matrix HTML preview",
+      "dependsOn": "docs: build stiffness matrix HTML",
+      "type": "shell",
+      "command": "xdg-open docs/element_stiffness_matrix.html",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
