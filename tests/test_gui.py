@@ -9,9 +9,11 @@ if _STB_ROOT not in sys.path:
 from stb_gui.model_json import (
     load_model_dict,
     list_model_files,
+    mdl_to_dict,
     normalize_model_relpath,
     resolve_model_path,
 )
+from stb_engine import parse_input, solve_model
 
 
 class TestGuiModelJson(unittest.TestCase):
@@ -98,6 +100,28 @@ class TestGuiModelJson(unittest.TestCase):
     def test_resolve_model_path_accepts_backslashes(self):
         full = resolve_model_path(r"data\UK_ROOF_240420.dat")
         self.assertTrue(full.endswith("UK_ROOF_240420.dat"))
+
+    def test_membrane_elements_in_model_json(self):
+        lines = [
+            "DMAT, 1, D1, 1000, 1000, 384.6153846, 0.3, 0, 0",
+            "NODE, 1, 0, 0, 0",
+            "NODE, 2, 1, 0, 0",
+            "NODE, 3, 0, 1, 0",
+            "DIAP, 1, F1, SEMI, DMAT=1, T=100, THETA=0",
+            "DMEM, 1, 1, 1, 2, 3",
+            "CONS, 1, 1, 1, 1, 1, 1, 1",
+            "CONS, 2, 0, 1, 1, 1, 1, 1",
+            "CONS, 3, 1, 0, 1, 1, 1, 1",
+            "PLOD, 2, 0, 1.0, 0, 0, 0, 0, 0",
+        ]
+        mdl = parse_input(lines)
+        solve_model(mdl)
+        data = mdl_to_dict(mdl, relpath="inline.dat", solved=True)
+
+        self.assertEqual(len(data["diaphragm_materials"]), 1)
+        self.assertEqual(len(data["diaphragms"]), 1)
+        self.assertEqual(len(data["membrane_elements"]), 1)
+        self.assertTrue("0" in data["membrane_elements"][0]["stresses"])
 
 
 class TestGuiApi(unittest.TestCase):

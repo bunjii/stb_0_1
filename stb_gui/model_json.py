@@ -82,7 +82,23 @@ def _elem_local_wloads(elem, mdl, lc_idx):
     if elem.alds is not None and lc_idx < elem.alds.shape[1]:
         lds += elem.alds[:, lc_idx]
 
+    if _is_connected_boundary_member(elem, mdl):
+        lds[1] = 0.0
+        lds[4] = 0.0
+
     return lds
+
+
+def _is_connected_boundary_member(elem, mdl):
+    for a in getattr(mdl, "dassocs", []):
+        if a.member_id != elem.id:
+            continue
+        if a.connection_type != "CONNECTED_RIGID":
+            continue
+        if a.association_type != "boundary_member":
+            continue
+        return True
+    return False
 
 
 def _gravity_element_load_entries(mdl):
@@ -233,6 +249,11 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
                 ]
         nodes.append(item)
 
+    explicit_ejnt_ids = set()
+    if getattr(mdl, "ejnts", None) is not None:
+        for j in mdl.ejnts:
+            explicit_ejnt_ids.add(j.eid)
+
     elements = []
     for e in sorted(mdl.elms, key=lambda x: x.id):
         sec = e.sec
@@ -248,10 +269,17 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "section_id": sec_id,
             "material_name": mat_name,
             "material_id": mat_id,
+            "ejnt_defined": bool(e.id in explicit_ejnt_ids),
         }
         if e.pln != None:
             item["len"] = float(e.len)
             item["is_vxz"] = bool(e.isVxZ)
+            item["lyi"] = float(e.lyi) if e.lyi is not None else None
+            item["lyj"] = float(e.lyj) if e.lyj is not None else None
+            item["lzi"] = float(e.lzi) if e.lzi is not None else None
+            item["lzj"] = float(e.lzj) if e.lzj is not None else None
+            item["PHIy"] = float(e.PHIy) if e.PHIy is not None else None
+            item["PHIz"] = float(e.PHIz) if e.PHIz is not None else None
             item["vx"] = [
                 float(e.pln.vx.v[0]), float(e.pln.vx.v[1]), float(e.pln.vx.v[2]),
             ]
@@ -337,6 +365,48 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
     element_loads.extend(_gravity_element_load_entries(mdl))
     element_loads.extend(_area_load_element_load_entries(mdl))
 
+    diaphragm_materials = []
+    for dm in getattr(mdl, "dmats", []):
+        diaphragm_materials.append({
+            "id": dm.id,
+            "name": dm.name,
+            "Ex": float(dm.Ex) * 1e-6,
+            "Ey": float(dm.Ey) * 1e-6,
+            "Gxy": float(dm.Gxy) * 1e-6,
+            "nuxy": float(dm.nuxy),
+            "gamma": float(dm.gamma) * 1e-3,
+            "alpha": float(dm.alpha),
+        })
+
+    diaphragms = []
+    for d in getattr(mdl, "diaps", []):
+        diaphragms.append({
+            "id": d.id,
+            "name": d.name,
+            "type": d.type,
+            "material_id": d.mat.id,
+            "thickness": float(d.t),
+            "theta": float(d.theta),
+        })
+
+    membrane_elements = []
+    for m in getattr(mdl, "dmems", []):
+        item = {
+            "id": m.id,
+            "diaphragm_id": m.diap.id,
+            "nodes": [m.n0.id, m.n1.id, m.n2.id],
+            "area": float(m.area),
+        }
+        if solved and m.strains is not None and mdl.lcs != None:
+            item["strains"] = {}
+            item["stresses"] = {}
+            item["membrane_forces"] = {}
+            for i, lc in enumerate(mdl.lcs):
+                item["strains"][str(lc)] = [float(v) for v in m.strains[:, i]]
+                item["stresses"][str(lc)] = [float(v) * 1e-6 for v in m.stresses[:, i]]
+                item["membrane_forces"][str(lc)] = [float(v) * 1e-3 for v in m.mforces[:, i]]
+        membrane_elements.append(item)
+
     bounds = None
     if mdl.bounds != None:
         bounds = [
@@ -358,6 +428,9 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
         "reactions": reactions,
         "point_loads": point_loads,
         "element_loads": element_loads,
+        "diaphragm_materials": diaphragm_materials,
+        "diaphragms": diaphragms,
+        "membrane_elements": membrane_elements,
     }
 
 

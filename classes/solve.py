@@ -28,11 +28,21 @@ class Solve:
         # register date analysis
         self.mdl.date_analysis = str(datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
 
-        # global stiffness matrix 
-        kG  = self.CreateGlobalStiffMX()
+        # global stiffness and load matrices before support constraints
+        kG  = self.CreateGlobalStiffMX(apply_constraints=False)
 
-        # load matrix 
-        lm  = self.CreateLoadMx()
+        lm  = self.CreateLoadMx(apply_constraints=False)
+        self.InitConstrainedReactions(lm)
+
+        mpcs = getattr(self.mdl, "mpcs", [])
+        if mpcs:
+            T, reduced_dofs = self.BuildMPCTransformation()
+            kG = T.T @ kG @ T
+            lm = T.T @ lm
+            kG, lm = self.ApplySupportConstraints(kG, lm, reduced_dofs)
+        else:
+            T = None
+            kG, lm = self.ApplySupportConstraints(kG, lm)
 
         # Solve
         kG = csc_matrix(kG)
@@ -40,12 +50,25 @@ class Solve:
         
         x  = spsolve(kG, lm, use_umfpack=True) # scipy sparce matrix
                 # x = np.linalg.solve(kG, lm)
+
+        if T is not None:
+            if np.ndim(x) == 1:
+                x = T @ x
+            else:
+                x = T @ x
         
         self.SetNodalDisps(x) 
         self.CalcElemForces()
+        self.CalcMembraneForces()
         self.CalcReactions(x)
 
         self.isModelSolved = True
+
+        return
+
+    def CalcMembraneForces(self):
+        for m in getattr(self.mdl, "dmems", []):
+            m.CalcResults(self.num_lcs)
 
         return
     
@@ -292,20 +315,7 @@ class Solve:
 
             for i in range(len(self.mdl.lcs)): 
 
-                els = list(filter(lambda el: (el.clc == i) and (el.eid == e.id), elds)) # element loads
-                lds = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
-                for el in els: 
-                    el_lds = np.array(el.lds).reshape(6, 1)
-
-                    if el.isGlobal == True: 
-                        el_lds = e.tm[0:6, 0:6] @ el_lds
-                        
-                    for j in range(6): lds[j] += el_lds[j, 0]
-
-                if e.glds is not None: lds += e.glds[:, i]
-
-                if e.alds is not None: lds += e.alds[:, i]
+                lds = self.EffectiveElemLocalWLoads(e, i)
 
                 wzi, wzj = lds[2], lds[5]
                 qzi = e.forces[2][i]
@@ -328,8 +338,108 @@ class Solve:
         ###
 
         return
+
+    def EffectiveElemLocalWLoads(self, _e, _lc_idx):
+        """Element local distributed loads after diaphragm boundary transfer."""
+
+        lds = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+        for el in self.mdl.elds:
+            if (el.clc != _lc_idx) or (el.eid != _e.id):
+                continue
+            el_lds = np.array(el.lds, dtype=np.float64).reshape(6, 1)
+            if el.isGlobal == True:
+                el_lds = _e.tm[0:6, 0:6] @ el_lds
+            lds += el_lds.reshape(6)
+
+        if _e.glds is not None and _lc_idx < _e.glds.shape[1]:
+            lds += _e.glds[:, _lc_idx]
+
+        if _e.alds is not None and _lc_idx < _e.alds.shape[1]:
+            lds += _e.alds[:, _lc_idx]
+
+        if self._connected_boundary_assoc(_e) is not None:
+            # The in-plane transverse member load is carried by the diaphragm.
+            # Keep axial and vertical components on the member.
+            lds[1] = 0.0
+            lds[4] = 0.0
+
+        return lds
     
-    def CreateGlobalStiffMX(self):
+    def InitConstrainedReactions(self, _lm):
+
+        for c in self.mdl.cons:
+            reacts = np.zeros((self.num_lcs, self.ndof))
+            ind = c.nd.cid * self.ndof
+            for i in range(self.ndof):
+                if c.csts[i] == False:
+                    continue
+                for j in range(self.num_lcs):
+                    reacts[j, i] = -1 * _lm[ind + i, j]
+            c.nd.reacts = reacts
+
+        return
+
+    def ApplySupportConstraints(self, _kG, _lm, _reduced_dofs=None):
+
+        kG = _kG
+        lm = _lm
+        row_map = None
+        if _reduced_dofs is not None:
+            row_map = {dof: i for i, dof in enumerate(_reduced_dofs)}
+
+        for c in self.mdl.cons:
+            ind = c.nd.cid * self.ndof
+
+            for i in range(self.ndof):
+                if c.csts[i] == False:
+                    continue
+
+                full_dof = ind + i
+                if row_map is None:
+                    row = full_dof
+                else:
+                    row = row_map.get(full_dof)
+                    if row is None:
+                        continue
+
+                for j in range(kG.shape[0]):
+                    if row == j:
+                        kG[row, j] = 1
+                    else:
+                        kG[row, j] = 0
+                        kG[j, row] = 0
+                lm[row, :] = 0
+
+        return kG, lm
+
+    def BuildMPCTransformation(self):
+
+        mpcs = getattr(self.mdl, "mpcs", [])
+        slave_dofs = set([m.slave_dof for m in mpcs])
+        reduced_dofs = [i for i in range(self.num_row) if i not in slave_dofs]
+        reduced_index = {dof: i for i, dof in enumerate(reduced_dofs)}
+
+        T = np.zeros((self.num_row, len(reduced_dofs)), dtype=np.float64)
+        for dof in reduced_dofs:
+            T[dof, reduced_index[dof]] = 1.0
+
+        for m in mpcs:
+            if abs(getattr(m, "constant_term", 0.0)) > common.PRES_ZERO:
+                raise ValueError("MPC constant terms are not supported yet")
+            if m.slave_dof not in slave_dofs:
+                continue
+            for mdof, coeff in zip(m.master_dofs, m.coefficients):
+                if mdof in slave_dofs:
+                    raise ValueError("Nested MPC master DOF is not supported")
+                ridx = reduced_index.get(mdof)
+                if ridx is None:
+                    continue
+                T[m.slave_dof, ridx] += coeff
+
+        return T, reduced_dofs
+
+    def CreateGlobalStiffMX(self, apply_constraints=True):
 
         mdl   = self.mdl
         ndof  = self.ndof 
@@ -352,30 +462,28 @@ class Solve:
                     kG[eid + i, sid + j] += e.ekG[ndof + i, j]          # K21'
                     kG[eid + i, eid + j] += e.ekG[ndof + i, ndof + j]   # K22'
 
+        for m in getattr(mdl, "dmems", []):
+            nodes = [m.n0, m.n1, m.n2]
+            dofs = []
+            for n in nodes:
+                base = ndof * n.cid
+                dofs += [base, base + 1, base + 2]
+
+            for i in range(9):
+                for j in range(9):
+                    kG[dofs[i], dofs[j]] += m.ekG[i, j]
+
         self.kG_orig = kG.copy() # this is for calculating reactions later.
 
         # apply constraints
-        for c in self.mdl.cons:
-
-            ind = c.nd.cid * self.ndof
-
-            for i in range(self.ndof):
-
-                if c.csts[i] == False:
-                    continue
-                
-                for j in range(self.num_row): 
-
-                    if ind + i == j:
-                        kG[ind + i, j] = 1
-
-                    else:
-                        kG[ind + i, j] = 0
-                        kG[j, ind + i] = 0
+        if apply_constraints:
+            kG, _ = self.ApplySupportConstraints(
+                kG, np.zeros((self.num_row, max(self.num_lcs or 1, 1)), dtype=np.float64)
+            )
 
         return kG
     
-    def CreateLoadMx(self):
+    def CreateLoadMx(self, apply_constraints=True):
 
         # max_clc_pld  = max(list(map(lambda l: l.clc, self.mdl.lds))) if self.mdl.lds else 0
         # max_clc_eld  = max(list(map(lambda l: l.clc, self.mdl.elds))) if self.mdl.elds else 0
@@ -559,25 +667,76 @@ class Solve:
                     row = e.n1.cid * self.ndof
                     f = e.elds[self.ndof:2*self.ndof, :]
 
-                lm[row:row+self.ndof, :] += e.tm[0:6, 0:6].T @ f
+                f_gcs = e.tm[0:6, 0:6].T @ f
+                self.RedirectConnectedBoundaryMemberLoads(e, i, f, f_gcs, lm)
+                lm[row:row+self.ndof, :] += f_gcs
             
             #print(f"e.elds: \n{e.elds}")
 
-        # apply constraints and prep reaction forces
-        for c in self.mdl.cons: 
-
-            reacts = np.zeros((self.num_lcs, self.ndof))
-            ind = c.nd.cid * self.ndof 
-
-            for i in range(self.ndof): # each of 6 dof
-
-                if c.csts[i] == False: continue
-
-                for j in range(self.num_lcs): # each load case
-
-                    reacts[j, i] = -1 * lm[ind + i, j]
-                    lm[ind + i, j] = 0
-
-            c.nd.reacts = reacts
+        if apply_constraints:
+            self.InitConstrainedReactions(lm)
+            _, lm = self.ApplySupportConstraints(
+                np.eye(self.num_row, dtype=np.float64), lm
+            )
 
         return lm
+
+    def _connected_boundary_assoc(self, _e):
+        for a in getattr(self.mdl, "dassocs", []):
+            if a.member_id != _e.id:
+                continue
+            if a.connection_type != "CONNECTED_RIGID":
+                continue
+            if a.association_type != "boundary_member":
+                continue
+            return a
+        return None
+
+    def RedirectConnectedBoundaryMemberLoads(self, _e, _end_index, _f_ecs, _f_gcs, _lm):
+        """For connected boundary members, transfer horizontal line-load resultants
+        from member end DOFs to diaphragm host nodes.
+
+        This suppresses spurious weak-axis beam bending due façade/wind line loads
+        when the diaphragm tie is intended to carry the in-plane action.
+        """
+
+        assoc = self._connected_boundary_assoc(_e)
+        if assoc is None:
+            return
+
+        end_node = _e.n0 if _end_index == 0 else _e.n1
+        cp = None
+        for p in assoc.generated_constraint_points:
+            if getattr(p, "target_node", None) is end_node:
+                cp = p
+                break
+        if cp is None:
+            return
+
+        # Transfer only horizontal force components (global ux, uy).
+        transferred = False
+        for dof in [0, 1]:
+            vals = _f_gcs[dof, :].copy()
+            if np.max(np.abs(vals)) < common.PRES_ZERO:
+                continue
+
+            for n, w in zip(cp.host_nodes, cp.shape_function_weights):
+                if abs(w) < common.PRES_ZERO:
+                    continue
+                host_row = n.cid * self.ndof + dof
+                _lm[host_row, :] += w * vals
+
+            _f_gcs[dof, :] = 0.0
+            transferred = True
+
+        if not transferred:
+            return
+
+        # Drop global Rz nodal couple from redirected horizontal line loads.
+        # This is an MVP approximation to avoid keeping weak-axis member bending
+        # while in-plane forces are redirected to diaphragm nodes.
+        _f_gcs[5, :] = 0.0
+        # Also drop associated local weak-axis force/moment components so
+        # member-force postprocessing does not retain redirected load effects.
+        _f_ecs[1, :] = 0.0
+        _f_ecs[5, :] = 0.0

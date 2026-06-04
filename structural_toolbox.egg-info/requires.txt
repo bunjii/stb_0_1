@@ -2,7 +2,7 @@ numpy
 scipy
 shapely
 
-[viewer]
+[gui]
 fastapi
 uvicorn[standard]
 httpx

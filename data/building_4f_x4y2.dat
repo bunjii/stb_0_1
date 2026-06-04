@@ -1,5 +1,7 @@
 # --- 4F building: X 4x5.5m (lines 1-5), Y AB=9m BC=3.2m (A-C) ---
 # 1F foundation beams @ z=0; columns; frame beams @ 2F-R levels
+# 2F slab: FC24 t=150mm diaphragm (DMAT/DIAP/DMEM @ z=3.8, 8 bays, 16 CST)
+# 2F perimeter frame (ELEM 22-25,30-33,34,38,39,43) -> DIAP 1 via DCON
 # Units: m, kN, kN/m, N/mm2
 
 # --- MATERIAL(MATE) ---
@@ -344,3 +346,60 @@ ALOD,      1,   0.00,  -2.00,   0.00,     69,    167,     91,    164
 #         LC,     GX,     GY,     GZ
 #               (m/s2) (m/s2) (m/s2)  acceleration; multiply member mass (kg/m) for self-weight
 GLOD,      0,  0.000000,  0.000000,  -9.806650
+
+# --- DIAPHRAGM MATERIAL(DMAT) ---
+# FC24 slab t=150mm: E=25500 N/mm2 (MATE FC24), nu=0.2, G=E/(2(1+nu))=10625 N/mm2
+#         ID,       NAME,        Ex,        Ey,       Gxy,      Nuxy,    Gamma,    Alpha
+#                           (N/mm2)   (N/mm2)   (N/mm2)       (-)  (kN/m3)       (-)
+DMAT,     10,  FC24_SLAB,   25500,   25500, 10625.0, 0.20, 0.0, 0.0
+
+# --- DIAPHRAGM REGION(DIAP) ---
+#         ID,       NAME,    TYPE,     DMAT,        T,    THETA
+#                                             (mm)     (deg)
+DIAP,     1,  2F_RC_SLAB,     SEMI,  DMAT=10,  T=150,  THETA=0
+
+# --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---
+# 2F full slab: nodes 100-142 @ z=3.8, 4x2 bays (5.5m x 9m / 3.2m), 2 triangles each
+#         ID,    DIAP,     N1,     N2,     N3
+DMEM,    1, 1,    100,    110,    111
+DMEM,    2, 1,    100,    111,    101
+DMEM,    3, 1,    101,    111,    112
+DMEM,    4, 1,    101,    112,    102
+DMEM,    5, 1,    110,    120,    121
+DMEM,    6, 1,    110,    121,    111
+DMEM,    7, 1,    111,    121,    122
+DMEM,    8, 1,    111,    122,    112
+DMEM,    9, 1,    120,    130,    131
+DMEM,   10, 1,    120,    131,    121
+DMEM,   11, 1,    121,    131,    132
+DMEM,   12, 1,    121,    132,    122
+DMEM,   13, 1,    130,    140,    141
+DMEM,   14, 1,    130,    141,    131
+DMEM,   15, 1,    131,    141,    142
+DMEM,   16, 1,    131,    142,    132
+
+# --- DIAPHRAGM CONNECTION(DCON) ---
+# 2F perimeter beams (z=3.8) rigid in-plane tie to DIAP 1; interior 2F beams unchanged
+#         DIAP,  TARGET,  MEMBER,  TYPE,  TOL
+DCON,     1,  MEMBER,      22,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      23,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      24,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      25,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      30,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      31,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      32,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      33,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      34,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      38,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      39,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      43,  CONNECTED_RIGID,  TOL=0.01
+DCON,     1,  MEMBER,      26,  DISCONNECTED
+DCON,     1,  MEMBER,      27,  DISCONNECTED
+DCON,     1,  MEMBER,      28,  DISCONNECTED
+DCON,     1,  MEMBER,      29,  DISCONNECTED
+DCON,     1,  MEMBER,      35,  DISCONNECTED
+DCON,     1,  MEMBER,      36,  DISCONNECTED
+DCON,     1,  MEMBER,      37,  DISCONNECTED
+DCON,     1,  MEMBER,      40,  DISCONNECTED
+DCON,     1,  MEMBER,      41,  DISCONNECTED
+DCON,     1,  MEMBER,      42,  DISCONNECTED
