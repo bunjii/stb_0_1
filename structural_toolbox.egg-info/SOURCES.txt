@@ -6,10 +6,10 @@ stb_cli/main.py
 stb_engine/__init__.py
 stb_engine/errors.py
 stb_engine/run.py
-stb_viewer/__init__.py
-stb_viewer/__main__.py
-stb_viewer/model_json.py
-stb_viewer/server.py
+stb_gui/__init__.py
+stb_gui/__main__.py
+stb_gui/model_json.py
+stb_gui/server.py
 structural_toolbox.egg-info/PKG-INFO
 structural_toolbox.egg-info/SOURCES.txt
 structural_toolbox.egg-info/dependency_links.txt
@@ -19,5 +19,7 @@ structural_toolbox.egg-info/top_level.txt
 tests/test_area_load.py
 tests/test_cli.py
 tests/test_data_models.py
+tests/test_diaphragm_connection.py
 tests/test_engine.py
-tests/test_viewer.py
+tests/test_gui.py
+tests/test_membrane_cst.py
