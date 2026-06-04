@@ -15,6 +15,10 @@ python3 -m venv .venv
 
 Multi-machine / Dropbox notes: [docs/setup_venv.md](docs/setup_venv.md).
 
+### Student distribution (Windows 11, policy B)
+
+For classroom/home use without Git: build a ZIP on Linux with [student/build_student_zip.sh](student/build_student_zip.sh) (bundles **Windows embeddable Python**). Students run `Install_once.bat` once, then `Start Structural Toolbox.bat` — no separate Python install. Guide: [docs/学生用_はじめ方_Windows.md](docs/学生用_はじめ方_Windows.md). Instructor notes: [student/README.md](student/README.md).
+
 ## Command-line interface (Phase 1)
 
 Install the `stb` command (once per virtual environment):

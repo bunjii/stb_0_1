@@ -40,6 +40,9 @@ Old files may still contain `LOAD` lines (e.g. `data/input01.dat`); those lines 
 | Gravity (GLOD) | m/s² | Components gx, gy, gz |
 | EJNT spring values | kNm/rad | Optional; blank = default rigid offsets |
 | Element beta (ELEM) | degrees | |
+| Diaphragm material Ex, Ey, Gxy | N/mm² | Converted internally to N/m² |
+| Diaphragm thickness T | mm | Converted internally to m |
+| Diaphragm material axis THETA | degrees | In-plane angle from each membrane element local x axis |
 
 Load case IDs (`LC`) are integers you choose (e.g. `0`, `1`, `2`). Every load record must include an `LC` field.
 
@@ -122,6 +125,105 @@ EJNT, ELEM_ID, Ryi, Rzi, Ryj, Rzj
 If no `EJNT` line exists for an element, default joint stiffness is assigned in the model builder.
 
 Short alias: `ej`.
+
+---
+
+### `DMAT` — diaphragm material
+
+```
+DMAT, ID, NAME, Ex, Ey, Gxy, Nuxy, Gamma, Alpha
+```
+
+Plane-stress material used by diaphragm membrane elements. This is the low-level
+input for verification and advanced use. Ordinary preset inputs will be added on
+top of this in later phases.
+
+| Field | Unit | Description |
+|-------|------|-------------|
+| Ex, Ey, Gxy | N/mm² | Orthotropic in-plane elastic constants |
+| Nuxy | — | Major Poisson ratio |
+| Gamma | kN/m³ | Weight density, stored for future use |
+| Alpha | — | Thermal expansion coefficient, stored for future use |
+
+For isotropic behavior, use `Ex = Ey = E`, `Gxy = E / (2(1 + nu))`, `Nuxy = nu`.
+
+---
+
+### `DIAP` — diaphragm region
+
+```
+DIAP, ID, NAME, TYPE, DMAT=MAT_ID, T=THICKNESS, THETA=ANGLE
+```
+
+Defines a floor/roof diaphragm region. Phase 1 supports `TYPE = SEMI` with
+manual `DMEM` triangles. `RIGID` and `FLEX` are reserved for future diaphragm
+strategy switching.
+
+| Field | Unit | Description |
+|-------|------|-------------|
+| TYPE | — | `SEMI`, `RIGID`, or `FLEX` |
+| DMAT | — | Diaphragm material ID |
+| T | mm | Membrane thickness |
+| THETA | degrees | Material axis angle in the membrane plane |
+
+Positional form is also accepted for the MVP:
+
+```
+DIAP, ID, NAME, SEMI, MAT_ID, T, THETA
+```
+
+---
+
+### `DMEM` — 3-node CST membrane element
+
+```
+DMEM, ID, DIAP_ID, NODE1, NODE2, NODE3
+```
+
+Adds a 3-node constant-strain membrane element to a diaphragm. The element uses
+local in-plane `u, v` displacement components and contributes stiffness to the
+global translational DOFs `ux, uy, uz` of the three referenced nodes. Rotational
+DOFs are not used by this element.
+
+---
+
+### `DCON` — diaphragm-to-member connection
+
+```
+DCON, DIAP_ID, AUTO, CONNECTION_TYPE, TOL=...
+DCON, DIAP_ID, MEMBER, ELEM_ID, CONNECTION_TYPE, TOL=...
+```
+
+Associates existing frame members with a diaphragm mesh. The MVP supports
+`CONNECTED_RIGID` and `DISCONNECTED`. `CONNECTED_RIGID` generates MPC
+constraints for the member end nodes found on the diaphragm boundary or inside
+the diaphragm triangles. Only horizontal `ux, uy` DOFs are constrained.
+
+| Field | Unit | Description |
+|-------|------|-------------|
+| TARGET | — | `AUTO` for all members, or `MEMBER` for one element |
+| CONNECTION_TYPE | — | `CONNECTED_RIGID`, `DISCONNECTED`; `LOAD_TRANSFER_ONLY` and `CONNECTED_SPRING` are reserved |
+| TOL | m | Geometry tolerance for edge/triangle matching |
+
+Examples:
+
+```
+DCON, 1, AUTO, CONNECTED_RIGID, TOL=0.01
+DCON, 1, MEMBER, 201, DISCONNECTED
+```
+
+---
+
+### `DREG` / `DOPN` — diaphragm region and opening polygons (reserved)
+
+```
+DREG, DIAP_ID, NODE1, NODE2, NODE3, ...
+DOPN, DIAP_ID, NODE1, NODE2, NODE3, ...
+```
+
+These records are reserved for future automatic diaphragm meshing. `DREG`
+defines an outer polygon and `DOPN` defines an opening polygon. Phase 1 keeps
+these records as metadata; analysis uses manually supplied `DMEM` triangles.
 
 ---
 

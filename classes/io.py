@@ -10,7 +10,37 @@ from ld   import PLd, ELd, ALd, GLd, Lcase, Lcmb
 from mdl  import Mdl
 from axis import Axis
 from plt  import Plt 
+from diaphragm import (
+    DiaphragmMaterial, DiaphragmRegion, DiaphragmPolygon, DiaphragmOpening,
+    CSTMembrane3, DiaphragmConnection
+)
 import common
+
+
+def _clean_items(line):
+    return [item.strip() for item in line.split(',')]
+
+
+def _kv_items(items):
+    out = {}
+    positional = []
+    for item in items:
+        s = item.strip()
+        if not s:
+            continue
+        if "=" in s:
+            k, v = s.split("=", 1)
+            out[k.strip().upper()] = v.strip()
+        else:
+            positional.append(s)
+    return out, positional
+
+
+def _find_by_id(seq, id_value, label):
+    found = list(filter(lambda x: x.id == id_value, seq))
+    if not found:
+        raise ValueError("{0} id not found: {1}".format(label, id_value))
+    return found[0]
 
 
 def ReadLines(_lns):
@@ -29,6 +59,12 @@ def ReadLines(_lns):
     plts  = []
     lcases= []
     lcmbs = []
+    dmats = []
+    diaps = []
+    dregs = []
+    dopns = []
+    dcons = []
+    dmem_specs = []
 
     for i in range(len(_lns)):
 
@@ -36,7 +72,8 @@ def ReadLines(_lns):
 
         if l.startswith('#'): continue
 
-        items = l.split(',')
+        items = _clean_items(l)
+        key = items[0].upper() if items and items[0] else ""
 
         if l.startswith("MATE") or l.startswith("m") :
 
@@ -49,6 +86,19 @@ def ReadLines(_lns):
             fy   = float(items[7]) * 1e6  # [N/mm2] -> [N/m2] 
 
             mats.append(Mat(id, name, e, g, gm, al, fy))
+
+        elif key == "DMAT" or key == "DM":
+
+            id    = int(items[1])
+            name  = str(items[2]).strip()
+            ex    = float(items[3]) * 1e6  # [N/mm2] -> [N/m2]
+            ey    = float(items[4]) * 1e6  # [N/mm2] -> [N/m2]
+            gxy   = float(items[5]) * 1e6  # [N/mm2] -> [N/m2]
+            nuxy  = float(items[6])
+            gamma = float(items[7]) * 1e3 if len(items) > 7 and items[7] != "" else 0.0
+            alpha = float(items[8]) if len(items) > 8 and items[8] != "" else 0.0
+
+            dmats.append(DiaphragmMaterial(id, name, ex, ey, gxy, nuxy, gamma, alpha))
 
         elif l.startswith("SECT")  or l.startswith("s") :
 
@@ -95,6 +145,86 @@ def ReadLines(_lns):
                     jnts[i] = None  
 
             ejnts.append(EJnt(eid, jnts))
+
+        elif key == "DIAP" or key == "DI":
+
+            id   = int(items[1])
+            name = str(items[2]).strip()
+            type = str(items[3]).strip().upper()
+            kv, pos = _kv_items(items[4:])
+
+            mat_id = None
+            if "DMAT" in kv:
+                mat_id = int(kv["DMAT"])
+            elif len(pos) > 0:
+                mat_id = int(pos[0])
+
+            if "T" in kv:
+                thick = float(kv["T"]) * 1e-3  # [mm] -> [m]
+            elif "THICK" in kv:
+                thick = float(kv["THICK"]) * 1e-3
+            elif len(pos) > 1:
+                thick = float(pos[1]) * 1e-3
+            else:
+                raise ValueError("DIAP thickness is required")
+
+            if "THETA" in kv:
+                theta = float(kv["THETA"])
+            elif len(pos) > 2:
+                theta = float(pos[2])
+            else:
+                theta = 0.0
+
+            mat = _find_by_id(dmats, mat_id, "DMAT")
+            diaps.append(DiaphragmRegion(id, name, type, mat, thick, theta))
+
+        elif key == "DREG" or key == "DR":
+
+            diap_id = int(items[1])
+            node_ids = [int(v) for v in items[2:] if v != ""]
+            dregs.append(DiaphragmPolygon(diap_id, node_ids))
+
+        elif key == "DOPN" or key == "DO":
+
+            diap_id = int(items[1])
+            node_ids = [int(v) for v in items[2:] if v != ""]
+            dopns.append(DiaphragmOpening(diap_id, node_ids))
+
+        elif key == "DMEM" or key == "DME":
+
+            id = int(items[1])
+            diap_id = int(items[2])
+            nids = [int(items[3]), int(items[4]), int(items[5])]
+            dmem_specs.append((id, diap_id, nids))
+
+        elif key == "DCON" or key == "DC":
+
+            diap_id = int(items[1])
+            target_type = str(items[2]).strip().upper()
+            kv, pos = _kv_items(items[3:])
+
+            target_id = None
+            connection_type = "CONNECTED_RIGID"
+            if target_type in ["MEMBER", "ELEM", "ELEMENT"]:
+                if len(pos) < 2:
+                    raise ValueError("DCON MEMBER needs member id and connection type")
+                target_id = int(pos[0])
+                connection_type = str(pos[1]).strip().upper()
+            else:
+                if len(pos) > 0:
+                    connection_type = str(pos[0]).strip().upper()
+
+            tolerance = float(kv["TOL"]) if "TOL" in kv else common.PRES_LEN
+            spacing = None
+            if "SPACING" in kv:
+                spacing = float(kv["SPACING"])
+            elif "HMAX" in kv:
+                spacing = float(kv["HMAX"])
+
+            dcons.append(DiaphragmConnection(
+                diap_id, target_type, target_id, connection_type,
+                tolerance, spacing
+            ))
 
         elif l.startswith("CONS") or l.startswith("c"):
 
@@ -223,9 +353,19 @@ def ReadLines(_lns):
 
             plts.append(Plt(id, name, axis, type, lc, scale, deffac))
       
+    dmems = []
+    for id, diap_id, nids in dmem_specs:
+        diap = _find_by_id(diaps, diap_id, "DIAP")
+        ns = [_find_by_id(nds, nid, "NODE") for nid in nids]
+        dmems.append(CSTMembrane3(id, diap, ns[0], ns[1], ns[2]))
+
     date_input = str(datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
                      
-    mdl = Mdl(nds, elms, ejnts, mats, secs, cons, lds, elds, alds, glds, lcases, lcmbs, axes, plts, date_input)
+    mdl = Mdl(
+        nds, elms, ejnts, mats, secs, cons, lds, elds, alds, glds,
+        lcases, lcmbs, axes, plts, date_input,
+        dmats, diaps, dregs, dopns, dmems, dcons
+    )
 
     return mdl
 
@@ -236,6 +376,12 @@ def RegisterInputData(_mdl: Mdl):
     ejnts= sorted(_mdl.ejnts, key=lambda e: e.eid)
     mats = sorted(_mdl.mats,  key=lambda m: m.id)
     secs = sorted(_mdl.secs,  key=lambda s: s.id)
+    dmats= sorted(_mdl.dmats, key=lambda m: m.id)
+    diaps= sorted(_mdl.diaps, key=lambda d: d.id)
+    dregs= list(_mdl.dregs)
+    dopns= list(_mdl.dopns)
+    dmems= sorted(_mdl.dmems, key=lambda m: m.id)
+    dcons= list(getattr(_mdl, "dcons", []))
     cons = sorted(_mdl.cons,  key=lambda c: c.nid)
 
     lds_w_o_combi = [l for l in _mdl.lds if not l.combi]
@@ -262,6 +408,7 @@ def RegisterInputData(_mdl: Mdl):
     lns += "# DATE OF INPUT DATA: " + _mdl.date_input 
     lns += "\n"
     lns += "# NUM. OF MATERIALS: " + str(len(mats)) + "\n"
+    lns += "# NUM. OF DIAPHRAGM MATERIALS: " + str(len(dmats)) + "\n"
     lns += "# NUM. OF CROSS-SECTIONS " + str(len(secs)) + "\n" 
     lns += "# NUM. OF NODES: " + str(len(nds)) + "\n"
     lns += "# NUM. OF ELEMENTS: " + str(len(elms)) + "\n"
@@ -282,6 +429,14 @@ def RegisterInputData(_mdl: Mdl):
     lns += "#                           (N/mm2)   (N/mm2)   (kN/m3)       (-)   (N/mm2)\n"
     for m in mats:
         lns += m.OutputMatInfo()
+    lns += "\n"
+
+    ## diaphragm material
+    lns += "# --- DIAPHRAGM MATERIAL(DMAT) ---\n"
+    lns += "#         ID,       NAME,        Ex,        Ey,       Gxy,      Nuxy,    Gamma,    Alpha\n"
+    lns += "#                           (N/mm2)   (N/mm2)   (N/mm2)       (-)  (kN/m3)       (-)\n"
+    for m in dmats:
+        lns += m.OutputDMatInfo()
     lns += "\n"
 
     ## cross section
@@ -307,6 +462,44 @@ def RegisterInputData(_mdl: Mdl):
     lns += "#                                         (deg)\n"
     for e in elms:
         lns += e.OutputElmInfo()
+    lns += "\n"
+
+    ## diaphragms and membrane elements
+    lns += "# --- DIAPHRAGM REGION(DIAP) ---\n"
+    lns += "#         ID,       NAME,    TYPE,     DMAT,        T,    THETA\n"
+    lns += "#                                             (mm)     (deg)\n"
+    for d in diaps:
+        lns += d.OutputDiapInfo()
+    lns += "\n"
+
+    lns += "# --- DIAPHRAGM OUTER POLYGON(DREG) ---\n"
+    lns += "#    DIAP ID,  NODE1,  NODE2,  NODE3, ...\n"
+    for r in dregs:
+        lns += "DREG, {0: >6}".format(r.diap_id)
+        for nid in r.node_ids:
+            lns += ", {0: >6}".format(nid)
+        lns += "\n"
+    lns += "\n"
+
+    lns += "# --- DIAPHRAGM OPENING(DOPN) ---\n"
+    lns += "#    DIAP ID,  NODE1,  NODE2,  NODE3, ...\n"
+    for o in dopns:
+        lns += "DOPN, {0: >6}".format(o.diap_id)
+        for nid in o.node_ids:
+            lns += ", {0: >6}".format(nid)
+        lns += "\n"
+    lns += "\n"
+
+    lns += "# --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---\n"
+    lns += "#         ID,    DIAP,     N1,     N2,     N3\n"
+    for m in dmems:
+        lns += m.OutputDMemInfo()
+    lns += "\n"
+
+    lns += "# --- DIAPHRAGM CONNECTION(DCON) ---\n"
+    lns += "#    DIAP ID,  TARGET,  [MEMBER ID],  TYPE,  TOL=...\n"
+    for dc in dcons:
+        lns += dc.OutputDConInfo()
     lns += "\n"
 
     ## element joints
@@ -548,5 +741,35 @@ def RegisterResultData(_mdl: Mdl):
             lns += ','.join(props) + "\n"
 
     lns += "\n"
+
+    ## membrane element strains, stresses and membrane forces
+    if getattr(_mdl, "dmems", None):
+        lns += "# --- MEMBRANE ELEMENT STRESS ---\n"
+        lns += "#        LC,  DMEM,       EXX,       EYY,      GXY,        SX,        SY,       TXY,        NX,        NY,       NXY\n"
+        lns += "#                           (-)       (-)       (-)   (N/mm2)   (N/mm2)   (N/mm2)    (kN/m)    (kN/m)    (kN/m)\n"
+        for lc in lcs:
+            clc = _mdl.lcs.index(lc)
+            for m in _mdl.dmems:
+                if m.strains is None or m.stresses is None or m.mforces is None:
+                    continue
+                strain = m.strains[:, clc]
+                stress = m.stresses[:, clc]
+                mforce = m.mforces[:, clc]
+                props = [
+                    "MSTR",
+                    "{: >6}".format(lc),
+                    "{: >6}".format(m.id),
+                    "{:10.3e}".format(strain[0]),
+                    "{:10.3e}".format(strain[1]),
+                    "{:10.3e}".format(strain[2]),
+                    "{:10.3e}".format(stress[0] * 1e-6),
+                    "{:10.3e}".format(stress[1] * 1e-6),
+                    "{:10.3e}".format(stress[2] * 1e-6),
+                    "{:10.3e}".format(mforce[0] * 1e-3),
+                    "{:10.3e}".format(mforce[1] * 1e-3),
+                    "{:10.3e}".format(mforce[2] * 1e-3),
+                ]
+                lns += ','.join(props) + "\n"
+        lns += "\n"
 
     return lns

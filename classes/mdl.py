@@ -7,6 +7,7 @@ from axis import Axis
 import ld
 import common
 import math
+from diaphragm import build_diaphragm_mpcs
 class Mdl:
 
     def __init__(self, 
@@ -24,7 +25,13 @@ class Mdl:
                  _lcmbs = None,
                  _axes  = None,  
                  _plts  = None,
-                 _date_i= None):
+                 _date_i= None,
+                 _dmats = None,
+                 _diaps = None,
+                 _dregs = None,
+                 _dopns = None,
+                 _dmems = None,
+                 _dcons = None):
 
         self.nds        = _nds
         self.elms       = _elms
@@ -41,6 +48,14 @@ class Mdl:
         self.lcases     = _lcases # added 250104
         self.lcmbs      = _lcmbs  # added 250104
         self.alds       = _alds   # added 250113
+        self.dmats      = _dmats if _dmats is not None else []
+        self.diaps      = _diaps if _diaps is not None else []
+        self.dregs      = _dregs if _dregs is not None else []
+        self.dopns      = _dopns if _dopns is not None else []
+        self.dmems      = _dmems if _dmems is not None else []
+        self.dcons      = _dcons if _dcons is not None else []
+        self.dassocs    = []
+        self.mpcs       = []
         self.lcs        =  None
         self.bounds     =  None
         self.max_clc    =  0      # added 250125
@@ -66,9 +81,16 @@ class Mdl:
         # find elements for each area load
         self.FindElmsForAld()
 
+        self.BuildDiaphragmConnections()
+
         self.SetBounds()
 
         self.SetPlnToAxis()
+
+        return
+
+    def BuildDiaphragmConnections(self):
+        build_diaphragm_mpcs(self)
 
         return
     
@@ -273,6 +295,22 @@ class Mdl:
                 self.max_clc += 1
             else:
                 al.clc = lcs.index(al.lc)
+
+        # diaphragm materials, regions and membrane elements
+        cid = 0
+        for dm in self.dmats:
+            dm.cid = cid
+            cid += 1
+
+        cid = 0
+        for d in self.diaps:
+            d.cid = cid
+            cid += 1
+
+        cid = 0
+        for m in self.dmems:
+            m.cid = cid
+            cid += 1
         
         self.lcs = lcs
 
@@ -339,6 +377,14 @@ class Mdl:
 
         self.nds  = []
         self.elms = []
+        self.dmems = []
+        self.dmats = []
+        self.diaps = []
+        self.dregs = []
+        self.dopns = []
+        self.dcons = []
+        self.dassocs = []
+        self.mpcs = []
         self.mats = []
         self.secs = []
         self.cons = []

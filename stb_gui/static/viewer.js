@@ -14,7 +14,10 @@ const COLORS = {
   load: 0xd45087,
   reaction: 0x0d9488,
   reactionMoment: 0x9333ea,
+  ejnt: 0xff8c00,
   deform: 0x4E8AC6,
+  membraneFill: 0x6b8f71,
+  membraneEdge: 0x2f5d3a,
   nodeLabel: 0x000000,
   force: 0x4D829E,
 };
@@ -33,6 +36,8 @@ const ALPHA = {
   labelDefaultBg: 1.0,
   forceValueBg: 1.0,
   elementGhost: 1.0,
+  membraneFill: 0.32,
+  membraneEdge: 0.9,
   opaque: 1.0,
 };
 
@@ -116,6 +121,7 @@ const el = {
   dispContourMax: document.getElementById("dispContourMax"),
   btnDispContourAuto: document.getElementById("btnDispContourAuto"),
   chkSupports: document.getElementById("chkSupports"),
+  chkEJnt: document.getElementById("chkEJnt"),
   chkLoads: document.getElementById("chkLoads"),
   loadTypeFilter: document.getElementById("loadTypeFilter"),
   chkLoadValues: document.getElementById("chkLoadValues"),
@@ -125,6 +131,7 @@ const el = {
   chkElemLabels: document.getElementById("chkElemLabels"),
   chkMaterial: document.getElementById("chkMaterial"),
   chkSection: document.getElementById("chkSection"),
+  chkMembrane: document.getElementById("chkMembrane"),
   chkForceValues: document.getElementById("chkForceValues"),
   forceSelect: document.getElementById("forceSelect"),
   frcDiv: document.getElementById("frcDiv"),
@@ -372,10 +379,15 @@ function updateViewerInfoOverlay(model) {
   if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
   if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
   if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
+  if (el.chkEJnt && el.chkEJnt.checked) displayLines.push("EJNT markers");
   if (el.chkLabels && el.chkLabels.checked) displayLines.push("node IDs");
   if (el.chkElemLabels && el.chkElemLabels.checked) displayLines.push("element IDs");
   if (el.chkMaterial && el.chkMaterial.checked) displayLines.push("material labels");
   if (el.chkSection && el.chkSection.checked) displayLines.push("section labels");
+  if (el.chkMembrane && el.chkMembrane.checked) {
+    const nmem = model.membrane_elements ? model.membrane_elements.length : 0;
+    displayLines.push("DMEM (" + nmem + ")");
+  }
   if (forceComp !== "None") {
     displayLines.push(
       "force diagram: " + forceComp +
@@ -394,6 +406,7 @@ function updateViewerInfoOverlay(model) {
     "LC: " + lc,
     "nodes: " + (model.nodes ? model.nodes.length : 0),
     "elements: " + (model.elements ? model.elements.length : 0),
+    "DMEM: " + (model.membrane_elements ? model.membrane_elements.length : 0),
     "supports: " + supports,
     "point loads: " + pointLoads,
     "element loads: " + elemLoads,
@@ -558,9 +571,9 @@ function globalVecToLocal(v, elem) {
 
 function beamDispLocalAtT(dl, L, t) {
   const u1 = dl[0], v1 = dl[1], w1 = dl[2];
-  const ry1 = dl[4], rz1 = dl[5];
+  let ry1 = dl[4], rz1 = dl[5];
   const u2 = dl[6], v2 = dl[7], w2 = dl[8];
-  const ry2 = dl[10], rz2 = dl[11];
+  let ry2 = dl[10], rz2 = dl[11];
 
   const N1 = 1 - t;
   const N2 = t;
@@ -573,6 +586,87 @@ function beamDispLocalAtT(dl, L, t) {
   const v = H1 * v1 + H2 * rz1 + H3 * v2 + H4 * rz2;
   const w = H1 * w1 - H2 * ry1 + H3 * w2 - H4 * ry2;
   return new THREE.Vector3(u, v, w);
+}
+
+function applyJointEffectiveEndRotations(dl, e, lcKey) {
+  if (!e || !isFinite(e.len) || e.len <= 1e-12) return dl;
+  const keys = ["lyi", "lyj", "lzi", "lzj", "PHIy", "PHIz"];
+  for (const k of keys) {
+    if (!isFinite(e[k])) return dl;
+  }
+
+  const L = e.len;
+  const lyi = e.lyi;
+  const lyj = e.lyj;
+  const lzi = e.lzi;
+  const lzj = e.lzj;
+  const PHIy = e.PHIy;
+  const PHIz = e.PHIz;
+  const rlyi = 1 - lyi;
+  const rlyj = 1 - lyj;
+  const rlzi = 1 - lzi;
+  const rlzj = 1 - lzj;
+
+  const denV = 2 + (2 + PHIy) * lzi + (2 + PHIy) * lzj + 4 * PHIy * lzi * lzj;
+  const denW = 2 + (2 + PHIz) * lyi + (2 + PHIz) * lyj + 4 * PHIz * lyi * lyj;
+  if (Math.abs(denV) < 1e-12 || Math.abs(denW) < 1e-12) return dl;
+
+  const Av = (1 + PHIy) / denV;
+  const Aw = (1 + PHIz) / denW;
+  const v1 = dl[1], rz1 = dl[5], v2 = dl[7], rz2 = dl[11];
+  const w1 = dl[2], ry1 = dl[4], w2 = dl[8], ry2 = dl[10];
+
+  const rz1Eff = Av * (
+    (-2 * rlzi * (1 + 2 * lzj) / L) * v1 +
+    ((4 + PHIy + (2 + 5 * PHIy) * lzj) * lzi) * rz1 +
+    (2 * rlzi * (1 + 2 * lzj) / L) * v2 +
+    (-(2 - PHIy) * rlzi * lzj) * rz2
+  );
+  const rz2Eff = Av * (
+    (-2 * rlzj * (1 + 2 * lzi) / L) * v1 +
+    (-(2 - PHIy) * rlzj * lzi) * rz1 +
+    (2 * rlzj * (1 + 2 * lzi) / L) * v2 +
+    ((4 + PHIy + (2 + 5 * PHIy) * lzi) * lzj) * rz2
+  );
+
+  const ry1Eff = Aw * (
+    (2 * rlyi * (1 + 2 * lyj) / L) * w1 +
+    ((4 + PHIz + (2 + 5 * PHIz) * lyj) * lyi) * ry1 +
+    (-2 * rlyi * (1 + 2 * lyj) / L) * w2 +
+    (-(2 - PHIz) * rlyi * lyj) * ry2
+  );
+  const ry2Eff = Aw * (
+    (2 * rlyj * (1 + 2 * lyi) / L) * w1 +
+    (-(2 - PHIz) * rlyj * lyi) * ry1 +
+    (-2 * rlyj * (1 + 2 * lyi) / L) * w2 +
+    ((4 + PHIz + (2 + 5 * PHIz) * lyi) * lyj) * ry2
+  );
+
+  const out = dl.slice();
+  out[4] = ry1Eff;
+  out[5] = rz1Eff;
+  out[10] = ry2Eff;
+  out[11] = rz2Eff;
+
+  // If end moments are effectively zero at both ends, the member should
+  // deform linearly in that bending plane (no curvature from end moments).
+  const fs = e && e.forces && e.forces[lcKey];
+  if (fs && fs.length >= 13) {
+    const MOM_TOL = 1e-6;
+    const v1 = dl[1], v2 = dl[7];
+    const w1 = dl[2], w2 = dl[8];
+    if (Math.abs(fs[5]) <= MOM_TOL && Math.abs(fs[12]) <= MOM_TOL) {
+      const rzLin = (v2 - v1) / L;
+      out[5] = rzLin;
+      out[11] = rzLin;
+    }
+    if (Math.abs(fs[4]) <= MOM_TOL && Math.abs(fs[11]) <= MOM_TOL) {
+      const ryLin = -(w2 - w1) / L;
+      out[4] = ryLin;
+      out[10] = ryLin;
+    }
+  }
+  return out;
 }
 
 function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv) {
@@ -603,12 +697,13 @@ function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv) {
     t0l.x, t0l.y, t0l.z, r0l.x, r0l.y, r0l.z,
     t1l.x, t1l.y, t1l.z, r1l.x, r1l.y, r1l.z,
   ];
+  const dlEff = applyJointEffectiveEndRotations(dl, e, lcKey);
 
   const pts = [];
   const mags = [];
   for (let i = 0; i <= nDiv; i++) {
     const t = i / nDiv;
-    const pl = beamDispLocalAtT(dl, e.len, t);
+    const pl = beamDispLocalAtT(dlEff, e.len, t);
     const pg = localVecToGlobal(pl, e);
     const pBase = elemPointAlong(p0u, p1u, t);
     pts.push(pBase.clone().addScaledVector(pg, defFac));
@@ -642,13 +737,14 @@ function maxDispPointInfo(model, lc, defFac, nm) {
       t0l.x, t0l.y, t0l.z, r0l.x, r0l.y, r0l.z,
       t1l.x, t1l.y, t1l.z, r1l.x, r1l.y, r1l.z,
     ];
+    const dlEff = applyJointEffectiveEndRotations(dl, e, String(lc));
 
     const p0u = nodePosition(n0, model, lc, defFac, false);
     const p1u = nodePosition(n1, model, lc, defFac, false);
 
     for (let i = 1; i < nDiv; i++) {
       const t = i / nDiv;
-      const pl = beamDispLocalAtT(dl, e.len, t);
+      const pl = beamDispLocalAtT(dlEff, e.len, t);
       const pg = localVecToGlobal(pl, e);
       const mag = pg.length();
       if (!best || mag > best.mag) {
@@ -890,6 +986,7 @@ function buildModelScene(model) {
   const deformed = el.chkDeformed.checked && complete;
   const showDispContour = el.chkDispContour && el.chkDispContour.checked && complete;
   const showSupports = !el.chkSupports || el.chkSupports.checked;
+  const showEJnt = !!(el.chkEJnt && el.chkEJnt.checked);
   const showLoads = el.chkLoads.checked;
   const showLoadValues = el.chkLoadValues.checked;
   const showReactionValues = el.chkReactionValues && el.chkReactionValues.checked && complete;
@@ -897,6 +994,7 @@ function buildModelScene(model) {
   const showElemLabels = el.chkElemLabels.checked;
   const showMaterial = el.chkMaterial.checked;
   const showSection = el.chkSection.checked;
+  const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
   const nm = nodeMap(model);
   const em = elemMap(model);
   const span = modelSpan(model);
@@ -988,8 +1086,13 @@ function buildModelScene(model) {
     );
   }
 
+  const supportNodeIds = new Set();
+  for (const s of model.supports || []) {
+    supportNodeIds.add(s.node);
+  }
   const nodePts = [];
   for (const n of model.nodes) {
+    if (supportNodeIds.has(n.id)) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
     nodePts.push(p.x, p.y, p.z);
   }
@@ -1014,6 +1117,25 @@ function buildModelScene(model) {
       const p = nodePosition(n, model, lc, defFac, deformed);
       addSupportDisc(p, s.fixed, supSize, modelGroup);
     }
+  }
+  if (showEJnt) {
+    drawEJntMarkers(model, {
+      lc,
+      defFac,
+      deformed,
+      nm,
+      group: modelGroup,
+    });
+  }
+
+  if (showMembrane) {
+    drawMembraneElements(model, {
+      lc,
+      defFac,
+      deformed,
+      nm,
+      group: modelGroup,
+    });
   }
 
   if (showLoads) {
@@ -1141,6 +1263,106 @@ function supportGizmoSize(model) {
   const pct = parseFloat(viewerOptions.supportGizmoSize);
   if (!isFinite(pct) || pct < 1) return base;
   return base * (pct / 100);
+}
+
+function ejntMarkerRadius(model) {
+  const span = modelSpan(model);
+  const supHalf = supportGizmoSize(model);
+  return Math.max(supHalf * 0.3, span * 0.004, 0.012);
+}
+
+function drawMembraneElements(model, opts) {
+  const { lc, defFac, deformed, nm, group } = opts;
+  const items = model.membrane_elements || [];
+  if (!items.length) return;
+
+  const fillPos = [];
+  const edgePts = [];
+
+  for (const mem of items) {
+    const ids = mem.nodes;
+    if (!ids || ids.length !== 3) continue;
+    const n0 = nm[ids[0]];
+    const n1 = nm[ids[1]];
+    const n2 = nm[ids[2]];
+    if (!n0 || !n1 || !n2) continue;
+    const p0 = nodePosition(n0, model, lc, defFac, deformed);
+    const p1 = nodePosition(n1, model, lc, defFac, deformed);
+    const p2 = nodePosition(n2, model, lc, defFac, deformed);
+    fillPos.push(
+      p0.x, p0.y, p0.z,
+      p1.x, p1.y, p1.z,
+      p2.x, p2.y, p2.z
+    );
+    edgePts.push(
+      p0.x, p0.y, p0.z, p1.x, p1.y, p1.z,
+      p1.x, p1.y, p1.z, p2.x, p2.y, p2.z,
+      p2.x, p2.y, p2.z, p0.x, p0.y, p0.z
+    );
+  }
+
+  if (fillPos.length === 0) return;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(fillPos, 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({
+    color: COLORS.membraneFill,
+    transparent: true,
+    opacity: ALPHA.membraneFill,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 4;
+  group.add(mesh);
+
+  addWideLineSegmentsFromPts(
+    edgePts,
+    COLORS.membraneEdge,
+    group,
+    5,
+    Math.max(elementLineWidthPx() * 0.85, 0.5),
+    ALPHA.membraneEdge
+  );
+}
+
+function drawEJntMarkers(model, opts) {
+  const { lc, defFac, deformed, nm, group } = opts;
+  const r = ejntMarkerRadius(model);
+  const supportHalf = supportGizmoSize(model);
+  const geo = new THREE.SphereGeometry(r, 16, 12);
+  const mat = new THREE.MeshBasicMaterial({ color: COLORS.ejnt, depthTest: true });
+
+  for (const e of model.elements || []) {
+    if (!e || !e.ejnt_defined) continue;
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1) continue;
+    const p0 = nodePosition(n0, model, lc, defFac, deformed);
+    const p1 = nodePosition(n1, model, lc, defFac, deformed);
+    const len = p0.distanceTo(p1);
+    if (len < 1e-12) continue;
+
+    const offset = supportHalf + r;
+    let t0 = offset / len;
+    let t1 = 1 - offset / len;
+    if (!(t0 < t1)) {
+      t0 = 0.35;
+      t1 = 0.65;
+    }
+
+    const c0 = elemPointAlong(p0, p1, t0);
+    const c1 = elemPointAlong(p0, p1, t1);
+    const m0 = new THREE.Mesh(geo, mat);
+    const m1 = new THREE.Mesh(geo, mat);
+    m0.position.copy(c0);
+    m1.position.copy(c1);
+    m0.renderOrder = 9;
+    m1.renderOrder = 9;
+    group.add(m0);
+    group.add(m1);
+  }
 }
 
 function axisPerpendiculars(d) {
@@ -2188,8 +2410,15 @@ function computeDispFac(model, forceId, lcKey, frcFactor) {
   const b = model.bounds;
   if (!b) return 1;
   const span = Math.max(b[1] - b[0], b[3] - b[2], b[5] - b[4], 1);
-  const knRows = forceId <= 3;
-  const rows = knRows ? [0, 1, 2, 6, 7, 8] : [3, 4, 5, 9, 10, 11];
+  const rowMap = {
+    1: [0, 6],
+    2: [1, 7],
+    3: [2, 8],
+    4: [3, 9],
+    5: [4, 10, 12],
+    6: [5, 11, 13],
+  };
+  const rows = rowMap[forceId] || [];
   let overallMax = 0;
 
   for (const e of model.elements) {
@@ -2200,20 +2429,24 @@ function computeDispFac(model, forceId, lcKey, frcFactor) {
     }
   }
 
-  if (!knRows) {
+  if (forceId === 5 || forceId === 6) {
     for (const e of model.elements) {
       const f = e.forces && e.forces[lcKey];
       const lds = e.local_wloads && e.local_wloads[lcKey];
       if (!f || !lds) continue;
       const len = e.len || 1;
       const wzi = lds[2], wzj = lds[5], wyi = lds[1], wyj = lds[4];
-      const qzi = f[2], myi = f[4], qyi = f[1], mzi = f[5];
-      let wXc = wzi + (wzj - wzi) * 0.5;
-      let mXc = myi + qzi * 0.5 * len + (1 / 6) * (wzi + 2 * wXc) * (0.5 * len) ** 2;
-      overallMax = Math.max(overallMax, Math.abs(mXc));
-      wXc = wyi + (wyj - wyi) * 0.5;
-      mXc = mzi - qyi * 0.5 * len - (1 / 6) * (wyi + 2 * wXc) * (0.5 * len) ** 2;
-      overallMax = Math.max(overallMax, Math.abs(mXc));
+      if (forceId === 5) {
+        const qzi = f[2], myi = f[4];
+        const wXc = wzi + (wzj - wzi) * 0.5;
+        const mXc = myi + qzi * 0.5 * len + (1 / 6) * (wzi + 2 * wXc) * (0.5 * len) ** 2;
+        overallMax = Math.max(overallMax, Math.abs(mXc));
+      } else if (forceId === 6) {
+        const qyi = f[1], mzi = f[5];
+        const wXc = wyi + (wyj - wyi) * 0.5;
+        const mXc = mzi - qyi * 0.5 * len - (1 / 6) * (wyi + 2 * wXc) * (0.5 * len) ** 2;
+        overallMax = Math.max(overallMax, Math.abs(mXc));
+      }
     }
   }
 
@@ -2824,6 +3057,11 @@ if (el.btnDispContourAuto) {
 el.chkSupports.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });
+if (el.chkEJnt) {
+  el.chkEJnt.addEventListener("change", () => {
+    if (currentModel) rebuildScene();
+  });
+}
 el.chkLoads.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });
@@ -2848,6 +3086,11 @@ el.chkMaterial.addEventListener("change", () => {
 el.chkSection.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });
+if (el.chkMembrane) {
+  el.chkMembrane.addEventListener("change", () => {
+    if (currentModel) rebuildScene();
+  });
+}
 el.forceSelect.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });

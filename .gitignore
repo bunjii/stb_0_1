@@ -33,6 +33,10 @@ Thumbs.db
 tests/_tmp_out/
 *.log
 
+# Student distribution builds
+student/dist/
+python-embed/
+
 # VS Code (keep shared workspace settings)
 .vscode/*
 !.vscode/settings.json
