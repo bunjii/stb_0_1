@@ -31,6 +31,9 @@ class TestGuiModelJson(unittest.TestCase):
         self.assertTrue("section_id" in elem)
         self.assertTrue("material_name" in elem)
         self.assertTrue("material_id" in elem)
+        self.assertIn("materials", data)
+        self.assertIn("sections", data)
+        self.assertIn("element_joints", data)
         self.assertEqual(len(data["point_loads"]), 1)
         self.assertAlmostEqual(data["point_loads"][0]["pz"], -5.0, places=3)
 
@@ -192,6 +195,10 @@ class TestGuiApi(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertTrue("Structural Toolbox" in r.text)
+        self.assertIn("btnToggleSelect", r.text)
+        self.assertIn("selectionPanel", r.text)
+        self.assertIn("selectionMarquee", r.text)
+        self.assertIn("elemContextMenu", r.text)
 
     def test_gui_open_url(self):
         from stb_gui.server import gui_open_url

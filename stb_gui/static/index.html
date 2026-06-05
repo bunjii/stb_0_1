@@ -19,9 +19,33 @@
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
+    <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode: left drag = box pick, right drag = rotate, Ctrl+click = toggle">Pick mode</button>
+    <button id="btnToggleSelectionPanel" type="button" class="btn-secondary" title="Show/hide list of picked elements">Picked list</button>
     <span id="status">Loading…</span>
   </div>
   <div id="viewport">
+    <div id="selectionMarquee" class="selection-marquee" hidden></div>
+    <div id="elemContextMenu" class="context-menu" hidden>
+      <div id="contextMenuTitle" class="context-menu-title"></div>
+      <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
+      <button type="button" id="contextMenuDeleteNodes" class="context-menu-item context-menu-danger" data-action="delete-nodes">Delete nodes…</button>
+      <div id="contextMenuElemEdits" class="context-menu-elem-edits">
+      <div class="context-menu-group">
+        <div class="context-menu-label">Change section</div>
+        <div id="contextMenuSections" class="context-menu-scroll"></div>
+      </div>
+      <div class="context-menu-group">
+        <div class="context-menu-label">Change material (SECT MAT)</div>
+        <div id="contextMenuMaterials" class="context-menu-scroll"></div>
+      </div>
+      <div class="context-menu-group">
+        <div class="context-menu-label">Joint (EJNT)</div>
+        <button type="button" class="context-menu-item" data-action="ejnt-pin">Pin ends (0)</button>
+        <button type="button" class="context-menu-item" data-action="ejnt-spring">Soft spring (1e-6)</button>
+        <button type="button" class="context-menu-item" data-action="ejnt-rigid">Rigid (remove EJNT)</button>
+      </div>
+      </div>
+    </div>
     <div id="dispLegendOverlay" class="viewport-disp-legend" hidden>
       <div id="dispLegendTitle" class="viewport-disp-legend-title">|u|</div>
       <div id="dispLegendLc" class="viewport-disp-legend-lc"></div>
@@ -139,6 +163,19 @@
         </label>
         <div id="forceLegend" class="force-legend"></div>
       </section>
+    </div>
+  </div>
+
+  <div id="selectionPanel" class="float-panel float-panel-selection">
+    <div id="selectionPanelHeader" class="float-panel-header">
+      <span class="float-panel-title">Picked elements</span>
+      <button type="button" id="btnSelectionCollapse" class="btn-icon" title="Collapse">−</button>
+    </div>
+    <div id="selectionPanelBody" class="float-panel-body">
+      <p class="panel-hint">Pick mode: left drag = box pick (nodes + elements), click = nearest, right-click = edit menu. Ctrl+click toggles. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <div id="selectionSummary" class="selection-summary">Nothing picked</div>
+      <ul id="selectionList" class="selection-list"></ul>
+      <button id="btnClearSelection" type="button" class="btn-block btn-secondary">Clear picked</button>
     </div>
   </div>
 

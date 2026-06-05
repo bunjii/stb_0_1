@@ -223,6 +223,125 @@ html, body {
   left: 12px;
 }
 
+.float-panel-selection {
+  left: 12px;
+  right: auto;
+  top: 56px;
+  width: 260px;
+}
+
+.selection-marquee {
+  position: absolute;
+  z-index: 25;
+  border: 1px dashed #ffb347;
+  background: rgba(255, 179, 71, 0.12);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.selection-summary {
+  font-size: 12px;
+  color: #ddd;
+  margin-bottom: 0.45rem;
+}
+
+.selection-list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: "Liberation Mono", "DejaVu Sans Mono", monospace;
+  font-size: 11px;
+}
+
+.selection-list li {
+  padding: 0.2rem 0.35rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.selection-list li:hover {
+  background: #353540;
+}
+
+.selection-list li.selected-row {
+  background: rgba(255, 140, 0, 0.22);
+}
+
+.selection-list .selection-more {
+  color: #9a9aaa;
+  font-style: italic;
+  cursor: default;
+}
+
+.selection-list .selection-more:hover {
+  background: transparent;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 220px;
+  max-width: 320px;
+  background: rgba(37, 37, 48, 0.98);
+  border: 1px solid #5a5a68;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  padding: 0.35rem 0;
+  font-size: 12px;
+}
+
+.context-menu-title {
+  padding: 0.45rem 0.75rem 0.35rem;
+  font-weight: 600;
+  color: #ffb347;
+  border-bottom: 1px solid #3a3a48;
+}
+
+.context-menu-group {
+  padding: 0.35rem 0 0.2rem;
+  border-bottom: 1px solid #3a3a48;
+}
+
+.context-menu-group:last-child {
+  border-bottom: none;
+}
+
+.context-menu-label {
+  padding: 0.2rem 0.75rem 0.25rem;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9a9aaa;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #e8e6ed;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.context-menu-item:hover {
+  background: #353540;
+}
+
+.context-menu-item.context-menu-danger {
+  color: #ff8a8a;
+}
+
+.context-menu-scroll {
+  max-height: 140px;
+  overflow-y: auto;
+}
+
 #optionsPanel.hidden {
   display: none;
 }

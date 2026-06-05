@@ -415,6 +415,40 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             float(mdl.bounds[4]), float(mdl.bounds[5]),
         ]
 
+    materials = []
+    for m in sorted(mdl.mats, key=lambda x: x.id):
+        materials.append({
+            "id": m.id,
+            "name": m.name,
+        })
+
+    sections = []
+    for s in sorted(mdl.secs, key=lambda x: x.id):
+        dims = [float(d) * 1e3 for d in s.dims] if s.dims is not None else []
+        sections.append({
+            "id": s.id,
+            "name": s.name,
+            "material_id": s.mat.id if s.mat is not None else None,
+            "material_name": s.mat.name if s.mat is not None else "",
+            "type": int(s.type),
+            "dims": dims,
+        })
+
+    element_joints = []
+    for j in sorted(getattr(mdl, "ejnts", []) or [], key=lambda x: x.eid):
+        def _ejnt_out(val):
+            if val is None:
+                return None
+            return float(val) * 1e-3
+
+        element_joints.append({
+            "elem_id": j.eid,
+            "ryi": _ejnt_out(j.ryi),
+            "rzi": _ejnt_out(j.rzi),
+            "ryj": _ejnt_out(j.ryj),
+            "rzj": _ejnt_out(j.rzj),
+        })
+
     return {
         "path": relpath,
         "solved": solved,
@@ -424,6 +458,9 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
         "bounds": bounds,
         "nodes": nodes,
         "elements": elements,
+        "materials": materials,
+        "sections": sections,
+        "element_joints": element_joints,
         "supports": supports,
         "reactions": reactions,
         "point_loads": point_loads,

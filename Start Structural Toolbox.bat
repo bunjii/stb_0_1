@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+title Structural Toolbox
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\stb.exe" (
@@ -17,19 +18,24 @@ echo  Structural Toolbox
 echo ========================================
 echo.
 echo ブラウザが開きます。
-echo この黒い画面は閉じないでください。
-echo 終了するときは Ctrl+C を押すか、この画面を閉じてください。
+echo この黒い画面は閉じないでください（ログが表示されます）。
+echo 終了するときはこの画面を閉じてください。
+echo デバッグ用: 「Start Structural Toolbox (debug).bat」
 echo.
 
-".venv\Scripts\stb.exe" gui
+call ".venv\Scripts\stb.exe" gui
 set "RC=%ERRORLEVEL%"
 
-if %RC% neq 0 (
-    echo.
-    echo [エラー] 起動に失敗しました（コード %RC%）。
-    echo Install_once.bat を再実行するか、docs\学生用_はじめ方_Windows.md を参照してください。
-    echo.
-    pause
+echo.
+if %RC% equ 10 (
+    echo [お知らせ] すでに別の画面でサーバーが動いています。
+    echo ログを見るには、その黒い画面を探してください。
+    echo 完全に終了するには、その画面を閉じてから再度起動してください。
+) else if %RC% neq 0 (
+    echo [注意] 終了コード %RC%
+) else (
+    echo サーバーを終了しました。
 )
-
+echo.
+pause
 exit /b %RC%

@@ -1,4 +1,6 @@
-# Structural Toolbox — 学生用（Windows 11）
+# Structural Toolbox — 学生用（Windows 11・ZIP 版）
+
+> **教員から Setup.exe をもらった場合**は、こちらではなく [学生用_インストール_Windows.md](学生用_インストール_Windows.md) を読んでください（.bat は不要です）。
 
 プログラミングの知識は不要です。**Python の別途インストールも不要**です（ZIP に同梱されています）。
 

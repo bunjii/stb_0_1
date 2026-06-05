@@ -8,6 +8,7 @@ _STB_VERSION = "0.1.0"
 EXIT_OK = 0
 EXIT_INPUT = 1
 EXIT_SOLVE = 2
+EXIT_GUI_ALREADY = 10
 
 
 def _ensure_project_root_on_path():
@@ -123,6 +124,58 @@ def cmd_solve(args):
     return EXIT_OK
 
 
+def cmd_report(args):
+    _ensure_project_root_on_path()
+    from stb_engine import parse_input, format_results
+    from stb_engine.errors import StbParseError, StbSolveError
+    from stb_project import load_project_file, load_project_for_dat
+    from stb_reports import write_confirmation_draft
+
+    try:
+        input_path = os.path.abspath(args.input)
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(os.path.dirname(input_path), dat_path)
+        else:
+            dat_path = input_path
+            project = load_project_for_dat(dat_path, required=True)
+
+        lines = _read_lines(dat_path)
+        mdl = parse_input(lines)
+        mdl.filepath = dat_path
+        _solve_with_stdout_control(mdl, args.quiet)
+        txt = format_results(mdl)
+        draft = write_confirmation_draft(
+            args.output,
+            mdl,
+            project,
+            output_format=args.format,
+            analysis_text=txt,
+            program_version=_STB_VERSION,
+        )
+    except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except StbParseError as ex:
+        _stderr("Parse error: " + str(ex))
+        return EXIT_INPUT
+    except StbSolveError as ex:
+        _stderr("Analysis error: " + str(ex))
+        return EXIT_SOLVE
+    except ValueError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+
+    if args.verbose:
+        print("Report written: " + args.output)
+        print("  format:      " + (args.format or project.report.format))
+        print("  warnings:    " + str(len(draft.warnings)))
+
+    return EXIT_OK
+
+
 def cmd_gui(args):
     _ensure_project_root_on_path()
     try:
@@ -133,13 +186,16 @@ def cmd_gui(args):
         return EXIT_INPUT
 
     try:
-        run_server(
+        result = run_server(
             host=args.host,
             port=args.port,
             open_browser=(not args.no_browser),
+            log_file=getattr(args, "log_file", None),
         )
     except KeyboardInterrupt:
-        pass
+        return EXIT_OK
+    if result == "already_running":
+        return EXIT_GUI_ALREADY
     return EXIT_OK
 
 
@@ -186,6 +242,28 @@ def _build_parser():
     )
     p_sol.set_defaults(func=cmd_solve)
 
+    p_rep = sub.add_parser(
+        "report",
+        parents=[common],
+        help="Generate a confirmation application draft report",
+    )
+    p_rep.add_argument(
+        "input",
+        help="Project JSON or input model file with a .project.json sidecar",
+    )
+    p_rep.add_argument(
+        "-o", "--output",
+        required=True,
+        help="Output report file (.md or .html)",
+    )
+    p_rep.add_argument(
+        "--format",
+        choices=["markdown", "html"],
+        default=None,
+        help="Report format (default: project.report.format)",
+    )
+    p_rep.set_defaults(func=cmd_report)
+
     p_gui = sub.add_parser(
         "gui",
         parents=[common],
@@ -202,6 +280,11 @@ def _build_parser():
     p_gui.add_argument(
         "--no-browser", action="store_true",
         help="Do not open a browser",
+    )
+    p_gui.add_argument(
+        "--log-file",
+        default=None,
+        help="Also write server logs to this file (debug)",
     )
     p_gui.set_defaults(func=cmd_gui)
 

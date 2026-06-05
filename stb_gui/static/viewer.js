@@ -15,6 +15,8 @@ const COLORS = {
   reaction: 0x0d9488,
   reactionMoment: 0x9333ea,
   ejnt: 0xff8c00,
+  selected: 0xff8c00,
+  selectedNode: 0xe85d5d,
   deform: 0x4E8AC6,
   membraneFill: 0x6b8f71,
   membraneEdge: 0x2f5d3a,
@@ -148,6 +150,22 @@ const el = {
   btnOptionsCollapse: document.getElementById("btnOptionsCollapse"),
   btnToggleOptions: document.getElementById("btnToggleOptions"),
   btnToggleAxes: document.getElementById("btnToggleAxes"),
+  btnToggleSelect: document.getElementById("btnToggleSelect"),
+  btnToggleSelectionPanel: document.getElementById("btnToggleSelectionPanel"),
+  selectionMarquee: document.getElementById("selectionMarquee"),
+  selectionPanel: document.getElementById("selectionPanel"),
+  selectionPanelHeader: document.getElementById("selectionPanelHeader"),
+  btnSelectionCollapse: document.getElementById("btnSelectionCollapse"),
+  selectionSummary: document.getElementById("selectionSummary"),
+  selectionList: document.getElementById("selectionList"),
+  btnClearSelection: document.getElementById("btnClearSelection"),
+  elemContextMenu: document.getElementById("elemContextMenu"),
+  contextMenuTitle: document.getElementById("contextMenuTitle"),
+  contextMenuSections: document.getElementById("contextMenuSections"),
+  contextMenuMaterials: document.getElementById("contextMenuMaterials"),
+  contextMenuDeleteElems: document.getElementById("contextMenuDeleteElems"),
+  contextMenuDeleteNodes: document.getElementById("contextMenuDeleteNodes"),
+  contextMenuElemEdits: document.getElementById("contextMenuElemEdits"),
   optLoadArrow: document.getElementById("optLoadArrow"),
   optLoadArrowVal: document.getElementById("optLoadArrowVal"),
   optSupportGizmo: document.getElementById("optSupportGizmo"),
@@ -175,8 +193,21 @@ const el = {
 };
 
 let scene, camera, renderer, controls;
-let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup;
+let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup;
 let currentModel = null;
+let selectionModeActive = false;
+let selectedElementIds = new Set();
+let selectedNodeIds = new Set();
+let selectionDrag = null;
+const _worldProj = new THREE.Vector3();
+const SELECTION_PICK_PX = 10;
+const SELECTION_NODE_PICK_PX = 14;
+const SELECTION_DRAG_MIN_PX = 4;
+const SELECTION_LIST_LIMIT = 80;
+const MAX_EDIT_UNDO = 50;
+let editUndoStack = [];
+let editRedoStack = [];
+let editHistoryBusy = false;
 let currentResultsText = null;
 let viewerOptions = Object.assign({}, OPTIONS_DEFAULTS);
 let wideLineMaterials = new Set();
@@ -327,6 +358,799 @@ function rebuildScene() {
   }
 }
 
+function getSceneDisplayState() {
+  const lc = el.lcSelect.value;
+  const defFac = parseFloat(el.defFactor.value) || 0;
+  const complete = currentModel && analysisComplete(currentModel);
+  const deformed = !!(el.chkDeformed && el.chkDeformed.checked && complete);
+  return { lc, defFac, deformed };
+}
+
+function applySelectionModeControls() {
+  if (!controls) return;
+  if (selectionModeActive) {
+    // Left drag = box select; right drag = orbit (left is disabled, not enableRotate).
+    controls.mouseButtons.LEFT = null;
+    controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+    controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+  } else {
+    controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+    controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+  }
+  controls.enableRotate = true;
+}
+
+function setSelectionMode(active) {
+  selectionModeActive = !!active;
+  if (el.btnToggleSelect) {
+    el.btnToggleSelect.classList.toggle("active", selectionModeActive);
+  }
+  applySelectionModeControls();
+  if (selectionModeActive && el.selectionPanel) {
+    el.selectionPanel.classList.remove("hidden");
+  }
+}
+
+function hasPickSelection() {
+  return selectedElementIds.size > 0 || selectedNodeIds.size > 0;
+}
+
+function clearSelection() {
+  if (!hasPickSelection()) return;
+  selectedElementIds = new Set();
+  selectedNodeIds = new Set();
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function setSelectedElementIds(ids, mode) {
+  const next = mode === "replace" ? new Set() : new Set(selectedElementIds);
+  for (const id of ids) {
+    if (mode === "toggle") {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      next.add(id);
+    }
+  }
+  selectedElementIds = next;
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function setSelectedNodeIds(ids, mode) {
+  const next = mode === "replace" ? new Set() : new Set(selectedNodeIds);
+  for (const id of ids) {
+    if (mode === "toggle") {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      next.add(id);
+    }
+  }
+  selectedNodeIds = next;
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function replacePickSelection(nodeIds, elemIds) {
+  setSelectedNodeIds(nodeIds, "replace");
+  setSelectedElementIds(elemIds, "replace");
+}
+
+function addPickSelection(nodeIds, elemIds) {
+  setSelectedNodeIds(nodeIds, "add");
+  setSelectedElementIds(elemIds, "add");
+}
+
+function viewportMousePoint(ev) {
+  const rect = el.viewport.getBoundingClientRect();
+  return {
+    x: ev.clientX - rect.left,
+    y: ev.clientY - rect.top,
+  };
+}
+
+function worldToScreenPoint(worldVec) {
+  _worldProj.copy(worldVec).project(camera);
+  const w = el.viewport.clientWidth || 1;
+  const h = el.viewport.clientHeight || 1;
+  return {
+    x: (_worldProj.x * 0.5 + 0.5) * w,
+    y: (-_worldProj.y * 0.5 + 0.5) * h,
+  };
+}
+
+function distPointToSegment2d(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-12) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const qx = ax + t * dx;
+  const qy = ay + t * dy;
+  return Math.hypot(px - qx, py - qy);
+}
+
+function pointInRect(px, py, x0, y0, x1, y1) {
+  const minX = Math.min(x0, x1);
+  const maxX = Math.max(x0, x1);
+  const minY = Math.min(y0, y1);
+  const maxY = Math.max(y0, y1);
+  return px >= minX && px <= maxX && py >= minY && py <= maxY;
+}
+
+function segmentsIntersect2d(ax, ay, bx, by, cx, cy, dx, dy) {
+  function orient(px, py, qx, qy, rx, ry) {
+    return (qy - py) * (rx - qx) - (qx - px) * (ry - qy);
+  }
+  function onSeg(px, py, qx, qy, rx, ry) {
+    return Math.min(px, qx) <= rx && rx <= Math.max(px, qx) &&
+      Math.min(py, qy) <= ry && ry <= Math.max(py, qy);
+  }
+  const o1 = orient(ax, ay, bx, by, cx, cy);
+  const o2 = orient(ax, ay, bx, by, dx, dy);
+  const o3 = orient(cx, cy, dx, dy, ax, ay);
+  const o4 = orient(cx, cy, dx, dy, bx, by);
+  if (o1 * o2 < 0 && o3 * o4 < 0) return true;
+  if (Math.abs(o1) < 1e-9 && onSeg(ax, ay, bx, by, cx, cy)) return true;
+  if (Math.abs(o2) < 1e-9 && onSeg(ax, ay, bx, by, dx, dy)) return true;
+  if (Math.abs(o3) < 1e-9 && onSeg(cx, cy, dx, dy, ax, ay)) return true;
+  if (Math.abs(o4) < 1e-9 && onSeg(cx, cy, dx, dy, bx, by)) return true;
+  return false;
+}
+
+function segmentIntersectsRect(ax, ay, bx, by, x0, y0, x1, y1) {
+  if (pointInRect(ax, ay, x0, y0, x1, y1) || pointInRect(bx, by, x0, y0, x1, y1)) {
+    return true;
+  }
+  const minX = Math.min(x0, x1);
+  const maxX = Math.max(x0, x1);
+  const minY = Math.min(y0, y1);
+  const maxY = Math.max(y0, y1);
+  const edges = [
+    [minX, minY, maxX, minY],
+    [maxX, minY, maxX, maxY],
+    [maxX, maxY, minX, maxY],
+    [minX, maxY, minX, minY],
+  ];
+  for (const e of edges) {
+    if (segmentsIntersect2d(ax, ay, bx, by, e[0], e[1], e[2], e[3])) return true;
+  }
+  return false;
+}
+
+function elementScreenSegment(elem, nm, display) {
+  const n0 = nm[elem.n0];
+  const n1 = nm[elem.n1];
+  if (!n0 || !n1) return null;
+  const p0 = nodePosition(n0, currentModel, display.lc, display.defFac, display.deformed);
+  const p1 = nodePosition(n1, currentModel, display.lc, display.defFac, display.deformed);
+  const s0 = worldToScreenPoint(p0);
+  const s1 = worldToScreenPoint(p1);
+  return { s0, s1 };
+}
+
+function pickElementAtScreen(px, py, thresholdPx) {
+  if (!currentModel) return null;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  let bestId = null;
+  let bestDist = thresholdPx;
+  for (const e of currentModel.elements) {
+    const seg = elementScreenSegment(e, nm, display);
+    if (!seg) continue;
+    const d = distPointToSegment2d(px, py, seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y);
+    if (d < bestDist) {
+      bestDist = d;
+      bestId = e.id;
+    }
+  }
+  return bestId;
+}
+
+function elementsInScreenRect(x0, y0, x1, y1) {
+  const ids = [];
+  if (!currentModel) return ids;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  for (const e of currentModel.elements) {
+    const seg = elementScreenSegment(e, nm, display);
+    if (!seg) continue;
+    if (segmentIntersectsRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1)) {
+      ids.push(e.id);
+    }
+  }
+  return ids;
+}
+
+function nodesInScreenRect(x0, y0, x1, y1) {
+  const ids = [];
+  if (!currentModel) return ids;
+  const display = getSceneDisplayState();
+  const minX = Math.min(x0, x1);
+  const maxX = Math.max(x0, x1);
+  const minY = Math.min(y0, y1);
+  const maxY = Math.max(y0, y1);
+  for (const n of currentModel.nodes) {
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    const s = worldToScreenPoint(p);
+    if (s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY) {
+      ids.push(n.id);
+    }
+  }
+  return ids;
+}
+
+function pickTargetAtScreen(px, py) {
+  if (!currentModel) return null;
+  const display = getSceneDisplayState();
+  let bestNode = null;
+  let bestNodeDist = SELECTION_NODE_PICK_PX;
+  for (const n of currentModel.nodes) {
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    const s = worldToScreenPoint(p);
+    const d = Math.hypot(px - s.x, py - s.y);
+    if (d < bestNodeDist) {
+      bestNodeDist = d;
+      bestNode = n.id;
+    }
+  }
+  const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestNode != null && bestElem == null) return { kind: "node", id: bestNode };
+  if (bestElem != null && bestNode == null) return { kind: "elem", id: bestElem };
+  if (bestNode != null && bestElem != null) {
+    if (bestNodeDist <= SELECTION_PICK_PX) {
+      return { kind: "node", id: bestNode };
+    }
+    return { kind: "elem", id: bestElem };
+  }
+  return null;
+}
+
+function updateSelectionHighlight() {
+  clearGroup(selectionGroup);
+  if (!currentModel || !hasPickSelection()) return;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  const pts = [];
+  for (const e of currentModel.elements) {
+    if (!selectedElementIds.has(e.id)) continue;
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1) continue;
+    const p0 = nodePosition(n0, currentModel, display.lc, display.defFac, display.deformed);
+    const p1 = nodePosition(n1, currentModel, display.lc, display.defFac, display.deformed);
+    pts.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z);
+  }
+  if (pts.length > 0) {
+    addWideLineSegmentsFromPts(
+      pts,
+      COLORS.selected,
+      selectionGroup,
+      20,
+      elementLineWidthPx() + 2.5,
+      ALPHA.opaque
+    );
+  }
+  if (selectedNodeIds.size > 0) {
+    const nodePts = [];
+    for (const n of currentModel.nodes) {
+      if (!selectedNodeIds.has(n.id)) continue;
+      const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+      nodePts.push(p.x, p.y, p.z);
+    }
+    if (nodePts.length > 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(nodePts, 3));
+      const mat = new THREE.PointsMaterial({
+        color: COLORS.selectedNode,
+        size: 12,
+        sizeAttenuation: false,
+        depthTest: true,
+      });
+      const points = new THREE.Points(geo, mat);
+      points.renderOrder = 21;
+      selectionGroup.add(points);
+    }
+  }
+}
+
+function elementSummaryText(elem) {
+  const sec = elem.section || ("SEC " + (elem.section_id != null ? elem.section_id : "?"));
+  const mat = elem.material_name || "";
+  return mat ? sec + " / " + mat : sec;
+}
+
+function updateSelectionPanel() {
+  if (!el.selectionSummary || !el.selectionList) return;
+  const elemCount = selectedElementIds.size;
+  const nodeCount = selectedNodeIds.size;
+  if (!hasPickSelection()) {
+    el.selectionSummary.textContent = "Nothing picked";
+    el.selectionList.innerHTML = "";
+    return;
+  }
+  const parts = [];
+  if (elemCount > 0) {
+    parts.push(elemCount + " element" + (elemCount === 1 ? "" : "s"));
+  }
+  if (nodeCount > 0) {
+    parts.push(nodeCount + " node" + (nodeCount === 1 ? "" : "s"));
+  }
+  let summary = parts.join(", ") + " picked";
+  if (elemCount > 0 && currentModel) {
+    const byId = {};
+    for (const e of currentModel.elements) {
+      byId[e.id] = e;
+    }
+    const sectionCounts = {};
+    for (const id of selectedElementIds) {
+      const e = byId[id];
+      if (!e) continue;
+      const key = elementSummaryText(e);
+      sectionCounts[key] = (sectionCounts[key] || 0) + 1;
+    }
+    const breakdown = Object.keys(sectionCounts).sort().map(function (k) {
+      return sectionCounts[k] + "× " + k;
+    });
+    if (breakdown.length > 0 && breakdown.length <= 5) {
+      summary += " — " + breakdown.join(", ");
+    }
+  }
+  el.selectionSummary.textContent = summary;
+  el.selectionList.innerHTML = "";
+
+  const rows = [];
+  for (const id of Array.from(selectedNodeIds).sort((a, b) => a - b)) {
+    rows.push({ kind: "node", id: id });
+  }
+  for (const id of Array.from(selectedElementIds).sort((a, b) => a - b)) {
+    rows.push({ kind: "elem", id: id });
+  }
+  const byElem = {};
+  for (const e of currentModel ? currentModel.elements : []) {
+    byElem[e.id] = e;
+  }
+  const byNode = {};
+  for (const n of currentModel ? currentModel.nodes : []) {
+    byNode[n.id] = n;
+  }
+  const show = rows.slice(0, SELECTION_LIST_LIMIT);
+  for (const row of show) {
+    const li = document.createElement("li");
+    if (row.kind === "node") {
+      const n = byNode[row.id];
+      const pos = n
+        ? " (" + n.x.toFixed(2) + ", " + n.y.toFixed(2) + ", " + n.z.toFixed(2) + ")"
+        : "";
+      li.textContent = "NODE " + row.id + pos;
+      li.addEventListener("click", function () {
+        replacePickSelection([row.id], []);
+      });
+    } else {
+      const e = byElem[row.id];
+      li.textContent = "ELEM " + row.id + " — " + (e ? elementSummaryText(e) : "?");
+      li.addEventListener("click", function () {
+        replacePickSelection([], [row.id]);
+      });
+    }
+    el.selectionList.appendChild(li);
+  }
+  if (rows.length > SELECTION_LIST_LIMIT) {
+    const li = document.createElement("li");
+    li.className = "selection-more";
+    li.textContent = "... and " + (rows.length - SELECTION_LIST_LIMIT) + " more";
+    el.selectionList.appendChild(li);
+  }
+}
+
+function updateSelectionMarquee(x0, y0, x1, y1) {
+  if (!el.selectionMarquee) return;
+  const left = Math.min(x0, x1);
+  const top = Math.min(y0, y1);
+  const width = Math.abs(x1 - x0);
+  const height = Math.abs(y1 - y0);
+  el.selectionMarquee.style.left = left + "px";
+  el.selectionMarquee.style.top = top + "px";
+  el.selectionMarquee.style.width = width + "px";
+  el.selectionMarquee.style.height = height + "px";
+  el.selectionMarquee.hidden = width < 1 && height < 1;
+}
+
+function hideSelectionMarquee() {
+  if (!el.selectionMarquee) return;
+  el.selectionMarquee.hidden = true;
+  el.selectionMarquee.style.width = "0";
+  el.selectionMarquee.style.height = "0";
+}
+
+function finishSelectionDrag(ev) {
+  if (!selectionDrag) return;
+  const drag = selectionDrag;
+  selectionDrag = null;
+  hideSelectionMarquee();
+  if (controls) controls.enabled = true;
+
+  const end = viewportMousePoint(ev);
+  const dx = end.x - drag.startX;
+  const dy = end.y - drag.startY;
+  const extend = !!(ev.ctrlKey || ev.metaKey);
+
+  if (Math.hypot(dx, dy) < SELECTION_DRAG_MIN_PX) {
+    const picked = pickTargetAtScreen(end.x, end.y);
+    if (picked == null) {
+      if (!extend) clearSelection();
+    } else if (extend) {
+      if (picked.kind === "node") setSelectedNodeIds([picked.id], "toggle");
+      else setSelectedElementIds([picked.id], "toggle");
+    } else if (picked.kind === "node") {
+      replacePickSelection([picked.id], []);
+    } else {
+      replacePickSelection([], [picked.id]);
+    }
+    return;
+  }
+
+  const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
+  const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
+  if (elemIds.length === 0 && nodeIds.length === 0) {
+    if (!extend) clearSelection();
+    return;
+  }
+  if (extend) addPickSelection(nodeIds, elemIds);
+  else replacePickSelection(nodeIds, elemIds);
+}
+
+function initSelectionInteraction() {
+  if (!el.viewport) return;
+
+  el.viewport.addEventListener("mousedown", (ev) => {
+    if (!selectionModeActive) return;
+    if (ev.button !== 0) return;
+    if (isViewerOverlayTarget(ev.target)) return;
+    const pt = viewportMousePoint(ev);
+    selectionDrag = {
+      startX: pt.x,
+      startY: pt.y,
+      pointerId: ev.pointerId,
+    };
+    if (controls) controls.enabled = false;
+    updateSelectionMarquee(pt.x, pt.y, pt.x, pt.y);
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+
+  window.addEventListener("mousemove", (ev) => {
+    if (!selectionDrag) return;
+    const pt = viewportMousePoint(ev);
+    updateSelectionMarquee(selectionDrag.startX, selectionDrag.startY, pt.x, pt.y);
+  });
+
+  window.addEventListener("mouseup", (ev) => {
+    if (!selectionDrag) return;
+    if (ev.button !== 0) return;
+    finishSelectionDrag(ev);
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !isViewerTextInputTarget(ev.target)) {
+      clearSelection();
+    }
+  });
+}
+
+function isViewerOverlayTarget(target) {
+  if (!target || !el.viewport) return false;
+  if (target === el.viewport || target === renderer.domElement) return false;
+  return el.viewport.contains(target);
+}
+
+function selectedElementIdList() {
+  return Array.from(selectedElementIds).sort(function (a, b) { return a - b; });
+}
+
+function selectedNodeIdList() {
+  return Array.from(selectedNodeIds).sort(function (a, b) { return a - b; });
+}
+
+function hideContextMenu() {
+  if (el.elemContextMenu) el.elemContextMenu.hidden = true;
+}
+
+function populateContextMenuCatalog() {
+  if (!el.contextMenuSections || !el.contextMenuMaterials || !currentModel) return;
+  el.contextMenuSections.innerHTML = "";
+  el.contextMenuMaterials.innerHTML = "";
+
+  const sections = currentModel.sections || [];
+  for (const s of sections) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "context-menu-item";
+    const mat = s.material_name || ("MAT " + s.material_id);
+    btn.textContent = "SECT " + s.id + " — " + s.name + " (" + mat + ")";
+    btn.addEventListener("click", function () {
+      hideContextMenu();
+      applyModelEdit({ action: "set_section", section_id: s.id });
+    });
+    el.contextMenuSections.appendChild(btn);
+  }
+
+  const materials = currentModel.materials || [];
+  for (const m of materials) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "context-menu-item";
+    btn.textContent = "MATE " + m.id + " — " + m.name;
+    btn.addEventListener("click", function () {
+      hideContextMenu();
+      const ok = window.confirm(
+        "Change material to MATE " + m.id + " (" + m.name + ")?\n" +
+        "All elements sharing the same section will be affected."
+      );
+      if (!ok) return;
+      applyModelEdit({ action: "set_material", material_id: m.id });
+    });
+    el.contextMenuMaterials.appendChild(btn);
+  }
+}
+
+function showContextMenu(clientX, clientY) {
+  if (!el.elemContextMenu || !hasPickSelection()) return;
+  if (selectedElementIds.size > 0) populateContextMenuCatalog();
+  const elemCount = selectedElementIds.size;
+  const nodeCount = selectedNodeIds.size;
+  if (el.contextMenuDeleteElems) {
+    el.contextMenuDeleteElems.hidden = elemCount === 0;
+  }
+  if (el.contextMenuDeleteNodes) {
+    el.contextMenuDeleteNodes.hidden = nodeCount === 0;
+  }
+  if (el.contextMenuElemEdits) {
+    el.contextMenuElemEdits.hidden = elemCount === 0;
+  }
+  if (el.contextMenuTitle) {
+    const titleParts = [];
+    if (elemCount > 0) {
+      titleParts.push(elemCount + " element" + (elemCount === 1 ? "" : "s"));
+    }
+    if (nodeCount > 0) {
+      titleParts.push(nodeCount + " node" + (nodeCount === 1 ? "" : "s"));
+    }
+    el.contextMenuTitle.textContent = titleParts.join(", ") + " picked";
+  }
+  el.elemContextMenu.hidden = false;
+  const margin = 8;
+  const rect = el.elemContextMenu.getBoundingClientRect();
+  let left = clientX;
+  let top = clientY;
+  if (left + rect.width > window.innerWidth - margin) {
+    left = window.innerWidth - rect.width - margin;
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = window.innerHeight - rect.height - margin;
+  }
+  el.elemContextMenu.style.left = Math.max(margin, left) + "px";
+  el.elemContextMenu.style.top = Math.max(margin, top) + "px";
+}
+
+function resetEditHistory() {
+  editUndoStack = [];
+  editRedoStack = [];
+}
+
+function pushEditUndoSnapshot(path, text) {
+  if (!path || text == null) return;
+  editUndoStack.push({ path: path, text: text });
+  if (editUndoStack.length > MAX_EDIT_UNDO) {
+    editUndoStack.shift();
+  }
+  editRedoStack = [];
+}
+
+function pruneSelectionToModel() {
+  if (!currentModel) return;
+  const validElems = new Set(currentModel.elements.map(function (e) { return e.id; }));
+  const validNodes = new Set(currentModel.nodes.map(function (n) { return n.id; }));
+  selectedElementIds = new Set(
+    Array.from(selectedElementIds).filter(function (id) { return validElems.has(id); })
+  );
+  selectedNodeIds = new Set(
+    Array.from(selectedNodeIds).filter(function (id) { return validNodes.has(id); })
+  );
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+async function restoreEditHistoryEntry(snapshot, redoTarget) {
+  const path = el.modelSelect.value;
+  if (!snapshot || snapshot.path !== path) {
+    setStatus("Undo/redo history does not match the current model");
+    return false;
+  }
+  if (editHistoryBusy) return false;
+  editHistoryBusy = true;
+  hideContextMenu();
+  try {
+    const current = await fetchInputText(path);
+    redoTarget.push({ path: path, text: current });
+    await saveInputText(path, snapshot.text);
+    await loadSelectedModel(false, { keepSelection: true });
+    pruneSelectionToModel();
+    return true;
+  } catch (ex) {
+    redoTarget.pop();
+    setStatus("Undo/redo error: " + ex.message);
+    window.alert("Undo/redo failed: " + ex.message);
+    return false;
+  } finally {
+    editHistoryBusy = false;
+  }
+}
+
+async function undoModelEdit() {
+  if (editUndoStack.length === 0) {
+    setStatus("Nothing to undo");
+    return;
+  }
+  const snap = editUndoStack.pop();
+  const ok = await restoreEditHistoryEntry(snap, editRedoStack);
+  if (ok) {
+    setStatus((el.modelSelect.value || "") + " — undo (Ctrl+Z)");
+  } else if (snap) {
+    editUndoStack.push(snap);
+  }
+}
+
+async function redoModelEdit() {
+  if (editRedoStack.length === 0) {
+    setStatus("Nothing to redo");
+    return;
+  }
+  const snap = editRedoStack.pop();
+  const ok = await restoreEditHistoryEntry(snap, editUndoStack);
+  if (ok) {
+    setStatus((el.modelSelect.value || "") + " — redo (Ctrl+Y)");
+  } else if (snap) {
+    editRedoStack.push(snap);
+  }
+}
+
+function initEditHistoryShortcuts() {
+  document.addEventListener("keydown", function (ev) {
+    if (isViewerTextInputTarget(ev.target)) return;
+    const mod = ev.ctrlKey || ev.metaKey;
+    if (!mod) return;
+    const key = ev.key;
+    if (key === "z" || key === "Z") {
+      if (ev.shiftKey) return;
+      ev.preventDefault();
+      undoModelEdit();
+      return;
+    }
+    if (key === "y" || key === "Y") {
+      ev.preventDefault();
+      redoModelEdit();
+    }
+  });
+}
+
+async function applyModelEdit(extra) {
+  const path = el.modelSelect.value;
+  if (!path) return;
+  let payload;
+  if (extra.action === "delete_nodes") {
+    if (selectedNodeIds.size === 0) return;
+    payload = {
+      action: "delete_nodes",
+      node_ids: selectedNodeIdList(),
+    };
+  } else {
+    if (selectedElementIds.size === 0) return;
+    payload = Object.assign({ element_ids: selectedElementIdList() }, extra);
+  }
+  hideContextMenu();
+  setStatus("Applying edit…");
+  let undoPushed = false;
+  try {
+    const beforeText = await fetchInputText(path);
+    pushEditUndoSnapshot(path, beforeText);
+    undoPushed = true;
+    const url = "/api/model/edit?path=" + encodeURIComponent(path);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(function () { return {}; });
+      throw new Error(err.detail || res.statusText);
+    }
+    const body = await res.json();
+    const destructive = payload.action === "delete" || payload.action === "delete_nodes";
+    const prevElems = new Set(selectedElementIds);
+    const prevNodes = new Set(selectedNodeIds);
+    await loadSelectedModel(false, { keepSelection: !destructive });
+    if (!destructive) {
+      selectedElementIds = prevElems;
+      selectedNodeIds = prevNodes;
+      pruneSelectionToModel();
+    }
+    let msg = path + " — edit saved";
+    if (body.warnings && body.warnings.length) {
+      msg += " (" + body.warnings[0] + ")";
+    }
+    setStatus(msg);
+  } catch (ex) {
+    if (undoPushed) editUndoStack.pop();
+    setStatus("Edit error: " + ex.message);
+    window.alert("Edit failed: " + ex.message);
+  }
+}
+
+function initContextMenu() {
+  if (!el.elemContextMenu || !renderer) return;
+
+  renderer.domElement.addEventListener("mousedown", function (ev) {
+    if (!selectionModeActive || ev.button !== 2 || !hasPickSelection()) return;
+    ev.stopPropagation();
+  }, true);
+
+  renderer.domElement.addEventListener("contextmenu", function (ev) {
+    if (!selectionModeActive || !hasPickSelection()) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    showContextMenu(ev.clientX, ev.clientY);
+  });
+
+  el.elemContextMenu.addEventListener("click", function (ev) {
+    const btn = ev.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.getAttribute("data-action");
+    if (action === "delete") {
+      const count = selectedElementIds.size;
+      const ok = window.confirm("Delete " + count + " element" + (count === 1 ? "" : "s") + "?");
+      if (!ok) return;
+      applyModelEdit({ action: "delete" });
+      return;
+    }
+    if (action === "delete-nodes") {
+      const count = selectedNodeIds.size;
+      const ok = window.confirm(
+        "Delete " + count + " node" + (count === 1 ? "" : "s") +
+        " and all elements connected to them?"
+      );
+      if (!ok) return;
+      applyModelEdit({ action: "delete_nodes" });
+      return;
+    }
+    if (action === "ejnt-pin") {
+      applyModelEdit({ action: "set_ejnt", preset: "pin" });
+      return;
+    }
+    if (action === "ejnt-spring") {
+      applyModelEdit({ action: "set_ejnt", preset: "spring_soft" });
+      return;
+    }
+    if (action === "ejnt-rigid") {
+      applyModelEdit({ action: "remove_ejnt" });
+    }
+  });
+
+  document.addEventListener("mousedown", function (ev) {
+    if (!el.elemContextMenu || el.elemContextMenu.hidden) return;
+    if (el.elemContextMenu.contains(ev.target)) return;
+    hideContextMenu();
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") hideContextMenu();
+  });
+}
+
 function refreshDisplayStatus(model) {
   const path = model.path || el.modelSelect.value || "";
   const lcKey = String(el.lcSelect.value);
@@ -462,6 +1286,8 @@ function initThree() {
 
   modelGroup = new THREE.Group();
   scene.add(modelGroup);
+  selectionGroup = new THREE.Group();
+  scene.add(selectionGroup);
   labelGroup = new THREE.Group();
   scene.add(labelGroup);
   forceGroup = new THREE.Group();
@@ -472,6 +1298,7 @@ function initThree() {
   scene.add(axesGroup);
 
   window.addEventListener("resize", onResize);
+  applySelectionModeControls();
   animate();
 }
 
@@ -1244,6 +2071,7 @@ function buildModelScene(model) {
   updateWorldAxes(model);
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
+  updateSelectionHighlight();
 }
 
 function formatForceValue(val) {
@@ -2850,8 +3678,9 @@ function showInputEditorWindow(text, path) {
     try {
       setWinStatus("saving...");
       await saveInputText(path, textarea.value);
+      resetEditHistory();
       setWinStatus("saved");
-      setStatus(path + " — input file saved");
+      setStatus(path + " — input file saved (undo history cleared)");
       if (el.modelSelect.value === path) await loadSelectedModel(false);
     } catch (ex) {
       setWinStatus("save failed");
@@ -2921,9 +3750,11 @@ async function openResultsWindow() {
   setStatus(path + " — output opened in new window");
 }
 
-async function loadSelectedModel(solve) {
+async function loadSelectedModel(solve, options) {
+  options = options || {};
   const path = el.modelSelect.value;
   if (!path) return;
+  if (!options.keepSelection) clearSelection();
   if (solve) {
     setStatus("Solving " + path + "…");
   } else {
@@ -2960,6 +3791,17 @@ async function loadSelectedModel(solve) {
 async function bootstrap() {
   initThree();
   initViewerOptions();
+  initSelectionInteraction();
+  initContextMenu();
+  initEditHistoryShortcuts();
+  initDraggablePanel({
+    panel: el.selectionPanel,
+    header: el.selectionPanelHeader,
+    collapseBtn: el.btnSelectionCollapse,
+    toggleBtn: el.btnToggleSelectionPanel,
+    storageKey: "stb_gui_selection_panel",
+    defaultHidden: true,
+  });
   initDraggablePanel({
     panel: el.resultsPanel,
     header: el.resultsPanelHeader,
@@ -3021,9 +3863,22 @@ el.btnToggleAxes.addEventListener("click", () => {
   }
 });
 
+if (el.btnToggleSelect) {
+  el.btnToggleSelect.addEventListener("click", () => {
+    setSelectionMode(!selectionModeActive);
+  });
+}
+
+if (el.btnClearSelection) {
+  el.btnClearSelection.addEventListener("click", () => clearSelection());
+}
+
 el.btnInput.addEventListener("click", () => openInputWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
-el.modelSelect.addEventListener("change", () => loadSelectedModel(false));
+el.modelSelect.addEventListener("change", () => {
+  resetEditHistory();
+  loadSelectedModel(false);
+});
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
   if (currentModel) rebuildScene();

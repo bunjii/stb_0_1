@@ -1,5 +1,7 @@
 import os
+import socket
 
+from stb_gui.dat_edit import apply_edit_action, validate_dat_text
 from stb_gui.model_json import (
     project_root,
     list_model_files,
@@ -102,6 +104,30 @@ def create_app(default_model=None):
             raise HTTPException(status_code=500, detail=str(ex))
         return JSONResponse({"ok": True, "path": normalize_model_relpath(path)})
 
+    @app.post("/api/model/edit")
+    def api_model_edit(
+        path: str = Query(..., description="Relative path under project root"),
+        body: dict = Body(..., description="Edit action payload"),
+    ):
+        try:
+            full = resolve_model_path(path)
+            text = load_input_text(path)
+            new_text, warnings = apply_edit_action(text, body)
+            validate_dat_text(new_text)
+            with open(full, "w", encoding="utf-8") as f:
+                f.write(new_text)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
+        return JSONResponse({
+            "ok": True,
+            "path": normalize_model_relpath(path),
+            "warnings": warnings,
+            "element_ids": body.get("element_ids") or [],
+            "action": body.get("action"),
+        })
+
     return app
 
 
@@ -109,7 +135,21 @@ def gui_open_url(host, port):
     return "http://{0}:{1}/".format(host, port)
 
 
-def run_server(host="127.0.0.1", port=8765, default_model=None, open_browser=True):
+def _port_is_open(host, port):
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def run_server(
+    host="127.0.0.1",
+    port=8765,
+    default_model=None,
+    open_browser=True,
+    log_file=None,
+):
     try:
         import uvicorn
     except ImportError:
@@ -121,6 +161,19 @@ def run_server(host="127.0.0.1", port=8765, default_model=None, open_browser=Tru
     app = create_app(default_model=default_model)
     url = gui_open_url(host, port)
 
+    if _port_is_open(host, port):
+        print("Structural Toolbox: already running at {0}".format(url))
+        print("  project root: {0}".format(project_root()))
+        print("  Logs are in the other console window (do not close it while debugging).")
+        print("  Or end the old server: close that window, or stop python.exe in Task Manager.")
+        if open_browser:
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception:
+                pass
+        return "already_running"
+
     if open_browser:
         try:
             import webbrowser
@@ -130,6 +183,45 @@ def run_server(host="127.0.0.1", port=8765, default_model=None, open_browser=Tru
 
     print("Structural Toolbox: {0}".format(url))
     print("  project root: {0}".format(project_root()))
-    print("  Press Ctrl+C to stop.")
+    print("  Close this window to stop the server.")
+    if log_file:
+        print("  Log file: {0}".format(os.path.abspath(log_file)))
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    log_config = None
+    if log_file:
+        log_path = os.path.abspath(log_file)
+        log_config = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "format": "%(asctime)s %(levelname)s %(message)s",
+                },
+            },
+            "handlers": {
+                "file": {
+                    "class": "logging.FileHandler",
+                    "filename": log_path,
+                    "encoding": "utf-8",
+                    "formatter": "default",
+                },
+                "console": {
+                    "class": "logging.StreamHandler",
+                    "formatter": "default",
+                },
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["file", "console"], "level": "INFO"},
+                "uvicorn.error": {"handlers": ["file", "console"], "level": "INFO"},
+                "uvicorn.access": {"handlers": ["file", "console"], "level": "INFO"},
+            },
+        }
+
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        log_config=log_config,
+    )
+    return "stopped"

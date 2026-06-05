@@ -1,65 +1,109 @@
-# 学生配布用（方針 B + 同梱 Python）
+# 学生配布用（同梱 Python + インストーラ）
 
-教員（Linux 開発環境）が **Windows 11 学生向け ZIP** を作るためのメモです。
+教員が **Windows 11 学生**向けに配布物を作るためのメモです。
 
-## 特徴
+## 配布方式（2通り）
 
-- **Windows embeddable Python**（既定 3.12.10, 64-bit）を ZIP に同梱
-- 学生 PC の **システム Python は使わない** → バージョンと環境を揃えやすい
-- 初回 `Install_once.bat` で **同梱 Python から `.venv` を作成**（`virtualenv` 使用。embed には標準 `venv` が無い）し、パッケージをインストール
+| 方式 | 学生が受け取るもの | 体感 |
+| --- | --- | --- |
+| **推奨: インストーラ** | `StructuralToolbox_Setup_YYYYMMDD.exe` | 通常の Windows ソフトと同様 |
+| ZIP + .bat | `StructuralToolbox_Windows_YYYYMMDD.zip` | 解凍 → `.bat` 実行 |
 
-バージョン変更: `student/PYTHON_EMBED_VERSION` を編集してから ZIP を再ビルド。
+中身は同じ（同梱 Python + `.venv` + `stb gui`）。
 
-## Linux から ZIP を作る
+---
+
+## 推奨: Setup.exe の作り方
+
+### 1. Linux で ZIP を作る
 
 ```bash
 cd /path/to/stb_0_1
 ./student/build_student_zip.sh
 ```
 
+出力: `student/dist/StructuralToolbox_Windows_YYYYMMDD.zip`
+
+### 2. Windows で ZIP + インストーラを作る（Linux が無い場合）
+
+ZIP だけ作る:
+
+```powershell
+.\student\build_student_zip.ps1
+```
+
+インストーラ（要 [Inno Setup 6](https://jrsoftware.org/isdl.php)）:
+
+```powershell
+.\student\build_student_installer.ps1
+# または
+.\student\build_student_installer.ps1 -SourceDir student\dist\_build\StructuralToolbox_Windows_YYYYMMDD
+```
+
+Linux で ZIP を作った場合は、その ZIP を Windows にコピーして `.\student\build_student_installer.ps1` でも可。
+
+出力: `student/dist/StructuralToolbox_Setup_YYYYMMDD.exe`
+
+詳細: [docs/教員用_インストーラ作成_Windows.md](../docs/教員用_インストーラ作成_Windows.md)
+
+### 3. 学生への配布
+
+- **Setup.exe** のみ渡す
+- 手順: [docs/学生用_インストール_Windows.md](../docs/学生用_インストール_Windows.md)
+
+インストール先（既定）: `%LOCALAPPDATA%\StructuralToolbox`  
+起動: スタートメニュー / デスクトップの **Structural Toolbox**
+
+---
+
+## ZIP 方式（従来）
+
+### 特徴
+
+- **Windows embeddable Python**（既定 3.12.10, 64-bit）を ZIP に同梱
+- 学生 PC の **システム Python は使わない**
+- 初回 `Install_once.bat` で `.venv` を作成（`virtualenv` 使用）
+
+バージョン変更: `student/PYTHON_EMBED_VERSION` を編集してから ZIP を再ビルド。
+
+### Linux から ZIP を作る
+
+```bash
+./student/build_student_zip.sh
+```
+
 - **初回はインターネット必須**（python.org から embed パッケージを取得）
-- キャッシュ: `student/dist/_cache/`（2 回目以降は高速）
-- 出力: `student/dist/StructuralToolbox_Windows_YYYYMMDD.zip`（約 12〜15 MB + プロジェクト）
+- キャッシュ: `student/dist/_cache/`
+- 出力: `student/dist/StructuralToolbox_Windows_YYYYMMDD.zip`
 
-## ZIP に含まれるもの
-
-| 内容 | 説明 |
-| --- | --- |
-| `python-embed/` | 公式 embeddable package + `get-pip.py` |
-| `Install_once.bat` | pip 導入 → `.venv` 作成 → `pip install -e ".[gui]"` |
-| `Start Structural Toolbox.bat` | `stb gui` 起動 |
-| `classes/`, `stb_*`, `examples/`, `data/`, … | プログラム本体 |
-| `はじめ方_Windows.md` | 学生向け手順 |
-
-## ZIP に含めないもの
-
-- `.git/`, `.venv/`（学生 PC で初回作成）
-- 教員用のローカル `python-embed`（リポジトリ直下に置かない）
-
-## 学生 PC 上の流れ
+### 学生 PC 上の流れ（ZIP）
 
 1. ZIP をローカルに解凍
 2. `Install_once.bat`（初回のみ・要ネット）
 3. `Start Structural Toolbox.bat`（毎回）
 
-フォルダ構成のイメージ:
+手順: [docs/学生用_はじめ方_Windows.md](../docs/学生用_はじめ方_Windows.md)
 
-```
-StructuralToolbox_Windows_20260604/
-  python-embed/          ← 同梱 Python（触らない）
-  .venv/                 ← 初回セットアップで自動作成
-  Install_once.bat
-  Start Structural Toolbox.bat
-  examples/
-  data/
-  ...
-```
+---
+
+## 関連ファイル
+
+| ファイル | 説明 |
+| --- | --- |
+| `student/StructuralToolbox.iss` | Inno Setup 定義 |
+| `student/build_student_installer.ps1` | ZIP → Setup.exe |
+| `student/build_student_zip.sh` | Linux → ZIP |
+| `Install_once.bat` | 初回セットアップ（`/silent` でインストーラから実行） |
+| `Start Structural Toolbox.bat` | ZIP 版の毎回起動 |
+
+---
 
 ## Mac 学生
 
-Windows 用 ZIP は使えません。Mac 用は別パッケージ（未整備）または教員サーバ方式を検討してください。
+Windows 用 ZIP / Setup.exe は使えません。Mac 用は別途検討してください。
 
 ## 更新時
 
-- 新 ZIP を配布
-- 学生は **上書きまたは新フォルダ** に解凍し、`Install_once.bat` を再実行（推奨）
+- 新しい ZIP / Setup.exe を配布
+- インストーラ版: 再インストール（上書き可）
+- ZIP 版: 新フォルダに解凍し `Install_once.bat` を再実行

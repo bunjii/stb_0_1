@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "model": {
+    "dat": "practice_wood_single_story.dat"
+  },
+  "building": {
+    "name": "Practice Wood Single-Story Sample",
+    "location": "Sample site",
+    "use": "residential practice",
+    "structure": "wood",
+    "calculation_route": "practice-mvp",
+    "designer": {
+      "name": "Structural Toolbox",
+      "qualification": "",
+      "license_number": "",
+      "contact": ""
+    }
+  },
+  "grids": [
+    {
+      "name": "X1",
+      "direction": "x",
+      "coordinate": 0.0
+    },
+    {
+      "name": "X2",
+      "direction": "x",
+      "coordinate": 3.64
+    },
+    {
+      "name": "Y1",
+      "direction": "y",
+      "coordinate": 0.0
+    },
+    {
+      "name": "Y2",
+      "direction": "y",
+      "coordinate": 3.64
+    }
+  ],
+  "stories": [
+    {
+      "name": "1",
+      "elevation": 0.0,
+      "height": 3.0
+    }
+  ],
+  "member_classes": [
+    {
+      "name": "roof_beams",
+      "kind": "beam",
+      "element_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "story": "1",
+      "use": "roof perimeter beams",
+      "notes": ""
+    },
+    {
+      "name": "wood_columns",
+      "kind": "column",
+      "element_ids": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "story": "1",
+      "use": "lateral resisting columns",
+      "notes": "Used by stb_practice as rigidity sources."
+    },
+    {
+      "name": "wood_braces",
+      "kind": "brace",
+      "element_ids": [
+        9,
+        10
+      ],
+      "story": "1",
+      "use": "sample diagonal braces",
+      "notes": "Used by stb_practice as rigidity sources."
+    }
+  ],
+  "design_checks": {
+    "wood": {
+      "enabled": true,
+      "load_cases": [
+        1,
+        2,
+        3
+      ],
+      "deflection_limit_ratio": 250.0,
+      "allowable_stresses": {
+        "bending": 8.0,
+        "shear": 0.8,
+        "compression": 6.0,
+        "tension": 4.0
+      }
+    }
+  },
+  "report": {
+    "title": "Practice Wood Single-Story Summary",
+    "mode": "practice",
+    "language": "ja",
+    "format": "markdown",
+    "include_manual_items": true,
+    "include_warnings": true
+  }
+}

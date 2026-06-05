@@ -127,6 +127,10 @@ print('load cases:', mdl.lcs)
 Input and output use the same comma-separated text format (editable in the GUI).  
 **Input reference:** [docs/input_format.md](docs/input_format.md) (`PLOD`, `ELOD`, `ALOD`, `GLOD`, … — not `LOAD`).
 
+Project-level building metadata can be added without changing `.dat` files by
+placing `model.project.json` next to the model.  
+**Project reference:** [docs/project_format.md](docs/project_format.md).
+
 ### Tests
 
 ```bash

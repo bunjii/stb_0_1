@@ -26,4 +26,4 @@ stb = "stb_cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["stb_engine*", "stb_cli*", "stb_gui*"]
+include = ["stb_engine*", "stb_cli*", "stb_gui*", "stb_project*", "stb_practice*", "stb_checks*", "stb_reports*"]
