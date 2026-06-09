@@ -12,7 +12,20 @@ from axis import Axis
 from plt  import Plt 
 from diaphragm import (
     DiaphragmMaterial, DiaphragmRegion, DiaphragmPolygon, DiaphragmOpening,
-    CSTMembrane3, DiaphragmConnection
+    CSTMembrane3, DiaphragmConnection, DiaphragmLoad,
+    TIMBER_FLOOR, TIMBER_ROOF, TIMBER_REFERENCE_DRIFT,
+    DIAP_RIGID, DIAP_FLEXIBLE,
+    DIAP_SRC_DMAT, DIAP_SRC_TIMBER_FLOOR, DIAP_SRC_TIMBER_ROOF,
+    make_timber_diaphragm_material,
+    diap_type_from_code, diap_src_from_code,
+    dcon_trgt_from_code, dcon_conn_from_code,
+    dlod_type_from_code,
+)
+from wood_wall import (
+    WoodRatedWall,
+    WOOD_WALL_MODEL_SHEAR_PANEL,
+    WWLL_LAYO_X,
+    wwll_model_from_code, wwll_dir_from_code, wwll_layo_from_code,
 )
 import common
 
@@ -21,19 +34,24 @@ def _clean_items(line):
     return [item.strip() for item in line.split(',')]
 
 
-def _kv_items(items):
-    out = {}
-    positional = []
-    for item in items:
-        s = item.strip()
-        if not s:
-            continue
-        if "=" in s:
-            k, v = s.split("=", 1)
-            out[k.strip().upper()] = v.strip()
-        else:
-            positional.append(s)
-    return out, positional
+def _opt_val(items, idx, default=None):
+    if len(items) <= idx or items[idx] == "":
+        return default
+    return items[idx]
+
+
+def _opt_int(items, idx, default=None):
+    v = _opt_val(items, idx)
+    if v is None:
+        return default
+    return int(v)
+
+
+def _opt_float(items, idx, default=None):
+    v = _opt_val(items, idx)
+    if v is None:
+        return default
+    return float(v)
 
 
 def _find_by_id(seq, id_value, label):
@@ -41,6 +59,11 @@ def _find_by_id(seq, id_value, label):
     if not found:
         raise ValueError("{0} id not found: {1}".format(label, id_value))
     return found[0]
+
+
+def _next_dmat_id(dmats, used_ids):
+    ids = [m.id for m in dmats] + list(used_ids)
+    return (max(ids) + 1) if ids else 1
 
 
 def ReadLines(_lns):
@@ -64,7 +87,11 @@ def ReadLines(_lns):
     dregs = []
     dopns = []
     dcons = []
+    dloads = []
+    wwalls = []
+    wshears = []
     dmem_specs = []
+    auto_dmat_ids = set()
 
     for i in range(len(_lns)):
 
@@ -75,7 +102,7 @@ def ReadLines(_lns):
         items = _clean_items(l)
         key = items[0].upper() if items and items[0] else ""
 
-        if l.startswith("MATE") or l.startswith("m") :
+        if key == "MATE":
 
             id   =   int(items[1])
             name =   str(items[2]).strip()
@@ -87,7 +114,7 @@ def ReadLines(_lns):
 
             mats.append(Mat(id, name, e, g, gm, al, fy))
 
-        elif key == "DMAT" or key == "DM":
+        elif key == "DMAT":
 
             id    = int(items[1])
             name  = str(items[2]).strip()
@@ -100,7 +127,7 @@ def ReadLines(_lns):
 
             dmats.append(DiaphragmMaterial(id, name, ex, ey, gxy, nuxy, gamma, alpha))
 
-        elif l.startswith("SECT")  or l.startswith("s") :
+        elif key == "SECT":
 
             id   = int(items[1])
             name = str(items[2]).strip()
@@ -110,7 +137,7 @@ def ReadLines(_lns):
             
             secs.append(Sec(id, name, mat, type, dims))
 
-        elif l.startswith("NODE") or l.startswith("n"):
+        elif key == "NODE":
 
             id =   int(items[1]) 
             x  = float(items[2]) # [m]
@@ -119,7 +146,7 @@ def ReadLines(_lns):
 
             nds.append(Nd(id, x, y, z))
 
-        elif l.startswith("ELEM") or l.startswith("ele"):
+        elif key == "ELEM":
 
             id  = int(items[1])
             n0  = list(filter(lambda n: n.id == int(items[2]), nds))[0]
@@ -132,7 +159,7 @@ def ReadLines(_lns):
 
             elms.append(Elm1D(id, n0, n1, sec, theta)) 
 
-        elif l.startswith("EJNT") or l.startswith("ej"):
+        elif key == "EJNT":
 
             eid  = int(items[1])
             jnts = [0.0] * 4
@@ -146,87 +173,151 @@ def ReadLines(_lns):
 
             ejnts.append(EJnt(eid, jnts))
 
-        elif key == "DIAP" or key == "DI":
+        elif key == "DIAP":
 
             id   = int(items[1])
             name = str(items[2]).strip()
-            type = str(items[3]).strip().upper()
-            kv, pos = _kv_items(items[4:])
+            dtype = diap_type_from_code(items[3])
+            src = int(items[4])
+            mag_raw = _opt_val(items, 5)
+            thick_mm = _opt_float(items, 6)
+            theta = _opt_float(items, 7, 0.0)
+            reference_drift = _opt_float(items, 8, TIMBER_REFERENCE_DRIFT)
+            hmax_mm = _opt_float(items, 9)
+            hmax = hmax_mm * 1e-3 if hmax_mm is not None else None
 
-            mat_id = None
-            if "DMAT" in kv:
-                mat_id = int(kv["DMAT"])
-            elif len(pos) > 0:
-                mat_id = int(pos[0])
+            if src in [DIAP_SRC_TIMBER_FLOOR, DIAP_SRC_TIMBER_ROOF]:
+                if mag_raw is None:
+                    raise ValueError("DIAP timber source requires MAG/ID multiplier")
+                source = diap_src_from_code(src)
+                timber_multiplier = float(mag_raw)
+                thick = thick_mm * 1e-3 if thick_mm is not None else 1.0
+                mat_id = _next_dmat_id(dmats, auto_dmat_ids)
+                auto_dmat_ids.add(mat_id)
+                mat = make_timber_diaphragm_material(
+                    mat_id, "{0}_{1}".format(name, source), source,
+                    timber_multiplier, reference_drift, 0.0, thick
+                )
+                dmats.append(mat)
+                diaps.append(DiaphragmRegion(
+                    id, name, dtype, mat, thick, theta,
+                    source, hmax, reference_drift, timber_multiplier
+                ))
+                continue
 
-            if "T" in kv:
-                thick = float(kv["T"]) * 1e-3  # [mm] -> [m]
-            elif "THICK" in kv:
-                thick = float(kv["THICK"]) * 1e-3
-            elif len(pos) > 1:
-                thick = float(pos[1]) * 1e-3
-            else:
+            if src != DIAP_SRC_DMAT:
+                raise ValueError("Unknown DIAP SRC code: {0}".format(src))
+
+            if dtype in [DIAP_RIGID, DIAP_FLEXIBLE]:
+                thick = thick_mm * 1e-3 if thick_mm is not None else None
+                diaps.append(DiaphragmRegion(
+                    id, name, dtype, None, thick, theta, "DMAT", hmax, None, None
+                ))
+                continue
+
+            if mag_raw is None:
+                raise ValueError("DIAP DMAT source requires MAG/ID (DMAT id)")
+            if thick_mm is None:
                 raise ValueError("DIAP thickness is required")
 
-            if "THETA" in kv:
-                theta = float(kv["THETA"])
-            elif len(pos) > 2:
-                theta = float(pos[2])
-            else:
-                theta = 0.0
-
+            mat_id = int(mag_raw)
+            thick = thick_mm * 1e-3
             mat = _find_by_id(dmats, mat_id, "DMAT")
-            diaps.append(DiaphragmRegion(id, name, type, mat, thick, theta))
+            diaps.append(DiaphragmRegion(id, name, dtype, mat, thick, theta))
 
-        elif key == "DREG" or key == "DR":
+        elif key == "DREG":
 
             diap_id = int(items[1])
             node_ids = [int(v) for v in items[2:] if v != ""]
             dregs.append(DiaphragmPolygon(diap_id, node_ids))
 
-        elif key == "DOPN" or key == "DO":
+        elif key == "DOPN":
 
             diap_id = int(items[1])
             node_ids = [int(v) for v in items[2:] if v != ""]
             dopns.append(DiaphragmOpening(diap_id, node_ids))
 
-        elif key == "DMEM" or key == "DME":
+        elif key == "DMEM":
 
             id = int(items[1])
             diap_id = int(items[2])
             nids = [int(items[3]), int(items[4]), int(items[5])]
             dmem_specs.append((id, diap_id, nids))
 
-        elif key == "DCON" or key == "DC":
+        elif key == "DCON":
 
             diap_id = int(items[1])
-            target_type = str(items[2]).strip().upper()
-            kv, pos = _kv_items(items[3:])
-
-            target_id = None
-            connection_type = "CONNECTED_RIGID"
-            if target_type in ["MEMBER", "ELEM", "ELEMENT"]:
-                if len(pos) < 2:
-                    raise ValueError("DCON MEMBER needs member id and connection type")
-                target_id = int(pos[0])
-                connection_type = str(pos[1]).strip().upper()
-            else:
-                if len(pos) > 0:
-                    connection_type = str(pos[0]).strip().upper()
-
-            tolerance = float(kv["TOL"]) if "TOL" in kv else common.PRES_LEN
-            spacing = None
-            if "SPACING" in kv:
-                spacing = float(kv["SPACING"])
-            elif "HMAX" in kv:
-                spacing = float(kv["HMAX"])
+            target_type = dcon_trgt_from_code(items[2])
+            target_id = _opt_int(items, 3)
+            conn_code = _opt_int(items, 4, 0)
+            connection_type = dcon_conn_from_code(conn_code)
+            tolerance = _opt_float(items, 5, common.PRES_LEN)
+            spacing = _opt_float(items, 6)
 
             dcons.append(DiaphragmConnection(
                 diap_id, target_type, target_id, connection_type,
                 tolerance, spacing
             ))
 
-        elif l.startswith("CONS") or l.startswith("c"):
+        elif key == "DLOD":
+
+            diap_id = int(items[1])
+            lc = int(items[2])
+            load_type = dlod_type_from_code(items[3])
+
+            if load_type == DiaphragmLoad.AREA:
+                px = float(items[4])
+                py = float(items[5])
+                dloads.append(DiaphragmLoad(diap_id, lc, load_type, px * 1e3, py * 1e3))
+            elif load_type == DiaphragmLoad.LINE:
+                node_ids = [int(items[4]), int(items[5])]
+                px = float(items[6])
+                py = float(items[7])
+                dloads.append(DiaphragmLoad(diap_id, lc, load_type, px * 1e3, py * 1e3, node_ids))
+            elif load_type == DiaphragmLoad.MEMBER_TRANSFER:
+                member_id = int(items[4])
+                px = float(items[5])
+                py = float(items[6])
+                dloads.append(DiaphragmLoad(diap_id, lc, load_type, px * 1e3, py * 1e3, None, member_id))
+            elif load_type == DiaphragmLoad.MASS:
+                mass = float(items[4])
+                ax = float(items[5])
+                ay = float(items[6])
+                dloads.append(DiaphragmLoad(
+                    diap_id, lc, load_type, 0.0, 0.0, None, None, mass, 0.0, ax, ay
+                ))
+            elif load_type == DiaphragmLoad.WEIGHT:
+                weight = float(items[4])
+                ax = float(items[5])
+                ay = float(items[6])
+                dloads.append(DiaphragmLoad(
+                    diap_id, lc, load_type, 0.0, 0.0, None, None, 0.0, weight * 1e3, ax, ay
+                ))
+
+        elif key == "WWLL":
+
+            wid = int(items[1])
+            name = str(items[2]).strip()
+            model = wwll_model_from_code(items[3])
+            multiplier = float(items[4])
+            length = float(items[5])
+            height = float(items[6])
+            direction = wwll_dir_from_code(items[7])
+            ra = _opt_float(items, 8, 1.0 / 120.0)
+            n1 = _opt_int(items, 9)
+            n2 = _opt_int(items, 10)
+            n3 = _opt_int(items, 11)
+            n4 = _opt_int(items, 12)
+            diap_id = _opt_int(items, 13)
+            layo = _opt_int(items, 14, WWLL_LAYO_X)
+            brace_layout = wwll_layo_from_code(layo)
+
+            wwalls.append(WoodRatedWall(
+                wid, name, multiplier, length, height, direction, ra, model,
+                n1, n2, n3, n4, brace_layout, diap_id, common.PRES_LEN
+            ))
+
+        elif key == "CONS":
 
             nid =      int(items[1])
             tx  = bool(int(items[2]))
@@ -238,7 +329,7 @@ def ReadLines(_lns):
 
             cons.append(Cons(nid, tx, ty, tz, rx, ry, rz))
 
-        elif l.startswith("PLOD") or l.startswith("plo"):
+        elif key == "PLOD":
 
             nid =   int(items[1])
             lc  =   int(items[2])
@@ -251,7 +342,7 @@ def ReadLines(_lns):
 
             lds.append(PLd(nid, lc, px, py, pz, mx, my, mz)) 
 
-        elif l.startswith("ELOD") or l.startswith("elo"):
+        elif key == "ELOD":
 
             eid =   int(items[1])
             lc  =   int(items[2])
@@ -265,7 +356,7 @@ def ReadLines(_lns):
 
             elds.append(ELd(eid, lc, isGlobal, wxi, wyi, wzi, wxj, wyj, wzj)) 
 
-        elif l.startswith("ALOD") or l.startswith("al"):
+        elif key == "ALOD":
 
             lc = int(items[1])
             px = float(items[2]) * 1e3 # [kN/m2] --> [N/m2]
@@ -282,7 +373,7 @@ def ReadLines(_lns):
 
             alds.append(ALd(lc, px, py, pz, e1, e2, e3, e4))
         
-        elif l.startswith("GLOD") or l.startswith("gl"):
+        elif key == "GLOD":
 
             lc =   int(items[1])
             gx = float(items[2])
@@ -291,13 +382,13 @@ def ReadLines(_lns):
 
             glds.append(GLd(lc, gx, gy, gz))
 
-        elif l.startswith("LNME"):
+        elif key == "LNME":
             lid   = int(items[1])
             lname = str(items[2]).strip()
 
             lcases.append(Lcase(lid, lname))
 
-        elif l.startswith("LCMB"):
+        elif key == "LCMB":
 
             fcs = []
             lcs = []
@@ -315,7 +406,7 @@ def ReadLines(_lns):
 
             lcmbs.append(Lcmb(lc, name, fcs, lcs))
 
-        elif l.startswith("AXIS") or l.startswith("ax"):
+        elif key == "AXIS":
 
             id   = int(items[1])
             name = str(items[2]).strip()
@@ -332,7 +423,7 @@ def ReadLines(_lns):
 
             axes.append(Axis(id, name, isHorizontal, nid, xdir))
 
-        elif l.startswith("PLOT") or l.startswith("plt"):
+        elif key == "PLOT":
 
             id   = int(items[1])
             name = str(items[2]).strip()
@@ -359,12 +450,18 @@ def ReadLines(_lns):
         ns = [_find_by_id(nds, nid, "NODE") for nid in nids]
         dmems.append(CSTMembrane3(id, diap, ns[0], ns[1], ns[2]))
 
+    for w in wwalls:
+        if w.model_requested == WOOD_WALL_MODEL_SHEAR_PANEL:
+            w.generate_shear_panel(nds, wshears, dcons)
+        else:
+            w.generate_mvp_equivalent_braces(nds, mats, secs, elms, ejnts, dcons)
+
     date_input = str(datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
                      
     mdl = Mdl(
         nds, elms, ejnts, mats, secs, cons, lds, elds, alds, glds,
         lcases, lcmbs, axes, plts, date_input,
-        dmats, diaps, dregs, dopns, dmems, dcons
+        dmats, diaps, dregs, dopns, dmems, dcons, dloads, wwalls, wshears
     )
 
     return mdl
@@ -372,16 +469,18 @@ def ReadLines(_lns):
 def RegisterInputData(_mdl: Mdl):
     
     nds  = sorted(_mdl.nds,   key=lambda n: n.id)
-    elms = sorted(_mdl.elms,  key=lambda e: e.id)
-    ejnts= sorted(_mdl.ejnts, key=lambda e: e.eid)
-    mats = sorted(_mdl.mats,  key=lambda m: m.id)
-    secs = sorted(_mdl.secs,  key=lambda s: s.id)
+    elms = sorted([e for e in _mdl.elms if not getattr(e, "auto_generated", False)], key=lambda e: e.id)
+    ejnts= sorted([e for e in _mdl.ejnts if not getattr(e, "auto_generated", False)], key=lambda e: e.eid)
+    mats = sorted([m for m in _mdl.mats if not getattr(m, "auto_generated", False)], key=lambda m: m.id)
+    secs = sorted([s for s in _mdl.secs if not getattr(s, "auto_generated", False)], key=lambda s: s.id)
     dmats= sorted(_mdl.dmats, key=lambda m: m.id)
     diaps= sorted(_mdl.diaps, key=lambda d: d.id)
     dregs= list(_mdl.dregs)
     dopns= list(_mdl.dopns)
     dmems= sorted(_mdl.dmems, key=lambda m: m.id)
-    dcons= list(getattr(_mdl, "dcons", []))
+    dcons= [dc for dc in list(getattr(_mdl, "dcons", [])) if not getattr(dc, "auto_generated", False)]
+    dloads = sorted(getattr(_mdl, "dloads", []), key=lambda dl: (dl.diap_id, dl.lc, dl.load_type))
+    wwalls = sorted(getattr(_mdl, "wwalls", []), key=lambda w: w.id)
     cons = sorted(_mdl.cons,  key=lambda c: c.nid)
 
     lds_w_o_combi = [l for l in _mdl.lds if not l.combi]
@@ -466,8 +565,11 @@ def RegisterInputData(_mdl: Mdl):
 
     ## diaphragms and membrane elements
     lns += "# --- DIAPHRAGM REGION(DIAP) ---\n"
-    lns += "#         ID,       NAME,    TYPE,     DMAT,        T,    THETA\n"
-    lns += "#                                             (mm)     (deg)\n"
+    lns += "#         ID,       NAME,  TYPE,  SRC, MAG/ID,      T, THETA,      RA, HMAX\n"
+    lns += "#   TYPE: 0=RIGID  1=SEMI  2=FLEX\n"
+    lns += "#   SRC:  0=DMAT  1=TIMBER_FLOOR  2=TIMBER_ROOF\n"
+    lns += "#   MAG/ID: SRC=0 -> DMAT ID, SRC=1/2 -> multiplier\n"
+    lns += "#   T, HMAX: (mm)   RA: (rad)\n"
     for d in diaps:
         lns += d.OutputDiapInfo()
     lns += "\n"
@@ -497,9 +599,28 @@ def RegisterInputData(_mdl: Mdl):
     lns += "\n"
 
     lns += "# --- DIAPHRAGM CONNECTION(DCON) ---\n"
-    lns += "#    DIAP ID,  TARGET,  [MEMBER ID],  TYPE,  TOL=...\n"
+    lns += "#    DIAP, TRGT,    ID, CONN,   TOL, SPACING\n"
+    lns += "#   TRGT: 0=AUTO  1=ELEM  2=NODE\n"
+    lns += "#   CONN: 0=RIGID  1=OPEN\n"
     for dc in dcons:
         lns += dc.OutputDConInfo()
+    lns += "\n"
+
+    lns += "# --- DIAPHRAGM LOAD(DLOD) ---\n"
+    lns += "#    DIAP,  LC, TYPE,  (TYPE-dependent columns)\n"
+    lns += "#   TYPE: 0=AREA(PX,PY kN/m2)  1=LINE(N1,N2,PX,PY)  2=MBTR(ELEM,PX,PY)\n"
+    lns += "#         3=MASS(MASS,AX,AY kg/m2)  4=WGHT(WGHT,AX,AY kN/m2)\n"
+    for dl in dloads:
+        lns += dl.OutputDLoadInfo()
+    lns += "\n"
+
+    lns += "# --- WOOD RATED WALL(WWLL) ---\n"
+    lns += "#         ID,     NAME, MODEL,    M,      L,      H, DIR,       RA, N1, N2, N3, N4, DIAP, LAYO\n"
+    lns += "#   MODEL: 0=BRACE  1=PANEL  2=MEMBRANE(reserved)\n"
+    lns += "#   DIR: 0=X  1=Y    LAYO: 0=SINGLE  1=X-BRACE\n"
+    lns += "#   M: multiplier   L,H: (m)   RA: (rad)\n"
+    for w in wwalls:
+        lns += w.output_info()
     lns += "\n"
 
     ## element joints

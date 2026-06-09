@@ -8,6 +8,10 @@ The GUI editor, `stb solve`, and `stb validate` all use the same parser (`ReadLi
 - One record per line; fields separated by **commas** (`,`).
 - Lines starting with `#` are comments and ignored.
 - Blank lines are ignored.
+- **First column is always a 4-character uppercase record type** (e.g. `MATE`, `WWLL`).
+- **Data columns are positional numbers or minimal text** — do not use `KEY=value` syntax.
+- **Enumerated values use integer codes** (documented in comment headers and below).
+- Each record group in a file starts with `# ---` comment lines describing the columns.
 - **Use explicit load keywords** — see [Loads](#loads) below.
 - Define materials and sections before elements that reference them; define nodes before elements.
 
@@ -63,8 +67,6 @@ MATE, ID, NAME, E, G, Gamma, Alpha, Fy
 | Alpha | — | Thermal expansion coefficient |
 | Fy | N/mm² | Yield stress (stored; linear analysis) |
 
-Short alias: line may start with `m` (lowercase) instead of `MATE`.
-
 ---
 
 ### `SECT` — cross-section
@@ -83,8 +85,6 @@ SECT, ID, NAME, MAT_ID, TYPE, DIM1, DIM2, ...
 
 `MAT_ID` must refer to an existing `MATE` record.
 
-Short alias: `s` instead of `SECT`.
-
 ---
 
 ### `NODE` — node
@@ -94,8 +94,6 @@ NODE, ID, X, Y, Z
 ```
 
 Coordinates in **metres**. Optional trailing `*` in some GUI exports is ignored by the parser if present after the Z value (see legacy files).
-
-Short alias: `n` instead of `NODE`.
 
 ---
 
@@ -107,8 +105,6 @@ ELEM, ID, NODE_I, NODE_J, SEC_ID, BETA
 
 - Connects two nodes with a 1D frame element.
 - `BETA` (degrees): section rotation about the member axis; default `0` if omitted.
-
-Short aliases: `ELEM` or `ele`.
 
 ---
 
@@ -124,8 +120,6 @@ EJNT, ELEM_ID, Ryi, Rzi, Ryj, Rzj
 
 If no `EJNT` line exists for an element, default joint stiffness is assigned in the model builder.
 
-Short alias: `ej`.
-
 ---
 
 ### `DMAT` — diaphragm material
@@ -134,9 +128,9 @@ Short alias: `ej`.
 DMAT, ID, NAME, Ex, Ey, Gxy, Nuxy, Gamma, Alpha
 ```
 
-Plane-stress material used by diaphragm membrane elements. This is the low-level
-input for verification and advanced use. Ordinary preset inputs will be added on
-top of this in later phases.
+Plane-stress material used by diaphragm membrane elements. This remains the
+low-level input for verification and advanced use when `Ex`, `Ey`, `Gxy`,
+`Nuxy`, and membrane thickness should be specified directly.
 
 | Field | Unit | Description |
 |-------|------|-------------|
@@ -152,24 +146,35 @@ For isotropic behavior, use `Ex = Ey = E`, `Gxy = E / (2(1 + nu))`, `Nuxy = nu`.
 ### `DIAP` — diaphragm region
 
 ```
-DIAP, ID, NAME, TYPE, DMAT=MAT_ID, T=THICKNESS, THETA=ANGLE
+DIAP, ID, NAME, TYPE, SRC, MAG/ID, T, THETA, RA, HMAX
 ```
 
-Defines a floor/roof diaphragm region. Phase 1 supports `TYPE = SEMI` with
-manual `DMEM` triangles. `RIGID` and `FLEX` are reserved for future diaphragm
-strategy switching.
+| Col | Unit | Description |
+|-----|------|-------------|
+| TYPE | — | `0` = rigid, `1` = semi-rigid, `2` = flexible |
+| SRC | — | `0` = explicit `DMAT`, `1` = timber floor, `2` = timber roof |
+| MAG/ID | — | `SRC=0`: `DMAT` ID; `SRC=1/2`: floor/roof multiplier |
+| T | mm | Membrane thickness (`SRC=1/2` defaults internally to 1000 mm if blank) |
+| THETA | deg | Material axis angle in the membrane plane |
+| RA | rad | Reference drift for timber conversion (default `1/150`) |
+| HMAX | mm | Maximum mesh/constraint spacing metadata (optional) |
 
-| Field | Unit | Description |
-|-------|------|-------------|
-| TYPE | — | `SEMI`, `RIGID`, or `FLEX` |
-| DMAT | — | Diaphragm material ID |
-| T | mm | Membrane thickness |
-| THETA | degrees | Material axis angle in the membrane plane |
+`TYPE=0` creates in-plane rigid-floor MPC constraints for nodes in the `DREG`
+polygon. `TYPE=1` uses `DMEM` membrane elements. `TYPE=2` stores metadata only.
 
-Positional form is also accepted for the MVP:
+Timber multipliers are converted internally to equivalent in-plane shear stiffness:
 
 ```
-DIAP, ID, NAME, SEMI, MAT_ID, T, THETA
+G*t = multiplier * 1.96 kN/m / reference_drift
+```
+
+Examples:
+
+```
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0, 0.006667, 1820
+DIAP, 20, ROOF_A, 1, 2, 1.0, 1000, 30, 0.006667, 1820
+DIAP,  1, RC_SLAB, 1, 0, 10, 150, 0, ,
+DIAP, 30, RIGID2F, 0, 0, , , 0, ,
 ```
 
 ---
@@ -190,26 +195,25 @@ DOFs are not used by this element.
 ### `DCON` — diaphragm-to-member connection
 
 ```
-DCON, DIAP_ID, AUTO, CONNECTION_TYPE, TOL=...
-DCON, DIAP_ID, MEMBER, ELEM_ID, CONNECTION_TYPE, TOL=...
+DCON, DIAP, TRGT, ID, CONN, TOL, SPACING
 ```
 
-Associates existing frame members with a diaphragm mesh. The MVP supports
-`CONNECTED_RIGID` and `DISCONNECTED`. `CONNECTED_RIGID` generates MPC
-constraints for the member end nodes found on the diaphragm boundary or inside
-the diaphragm triangles. Only horizontal `ux, uy` DOFs are constrained.
-
-| Field | Unit | Description |
-|-------|------|-------------|
-| TARGET | — | `AUTO` for all members, or `MEMBER` for one element |
-| CONNECTION_TYPE | — | `CONNECTED_RIGID`, `DISCONNECTED`; `LOAD_TRANSFER_ONLY` and `CONNECTED_SPRING` are reserved |
+| Col | Unit | Description |
+|-----|------|-------------|
+| TRGT | — | `0` = auto, `1` = element, `2` = node |
+| ID | — | Element or node ID (`TRGT=0` → blank) |
+| CONN | — | `0` = rigid in-plane tie, `1` = disconnected |
 | TOL | m | Geometry tolerance for edge/triangle matching |
+| SPACING | m | Optional constraint spacing metadata |
+
+`CONN=0` generates MPC constraints for horizontal `ux, uy` DOFs.
 
 Examples:
 
 ```
-DCON, 1, AUTO, CONNECTED_RIGID, TOL=0.01
-DCON, 1, MEMBER, 201, DISCONNECTED
+DCON, 1, 0, , 0, 0.01
+DCON, 1, 1, 201, 1,
+DCON, 1, 2, 35, 0, 0.01
 ```
 
 ---
@@ -235,8 +239,6 @@ CONS, NODE_ID, TX, TY, TZ, RX, RY, RZ
 
 Each DOF: **`0` = free**, **`1` = fixed**.
 
-Short alias: `c`.
-
 ---
 
 ## Loads
@@ -255,8 +257,6 @@ Example (5 kN downward at node 1, load case 0):
 PLOD, 1, 0, 0.00, 0.00, -5.00, 0.00, 0.00, 0.00
 ```
 
-Short alias: `plo`.
-
 ---
 
 ### `ELOD` — member distributed load (line load)
@@ -269,8 +269,6 @@ ELOD, ELEM_ID, LC, E_G, WXi, WYi, WZi, WXj, WYj, WZj
 |-------|-------------|
 | E_G | `0` = element local axes, `1` = global axes |
 | WXi…WZj | Distributed load intensity at start/end (kN/m) |
-
-Short alias: `elo`.
 
 ---
 
@@ -293,7 +291,68 @@ its centroid. This preserves global equilibrium and support reactions exactly,
 including the member-axial pressure component. The bounding members must form a
 single closed triangular or quadrilateral loop.
 
-Short alias: `al`.
+---
+
+### `DLOD` — diaphragm load / seismic mass
+
+```
+DLOD, DIAP, LC, TYPE, ...
+```
+
+| TYPE | Following columns | Unit |
+|------|-------------------|------|
+| `0` AREA | PX, PY | kN/m² |
+| `1` LINE | N1, N2, PX, PY | kN/m |
+| `2` MBTR | ELEM, PX, PY | kN/m |
+| `3` MASS | MASS, AX, AY | kg/m² |
+| `4` WGHT | WGHT, AX, AY | kN/m² |
+
+Examples:
+
+```
+DLOD, 10, 1, 0, 0.407, 0.0
+DLOD,  1, 1, 1, 0, 1, 2.0, 0.0
+DLOD,  1, 1, 4, 3.0, 1.0, 0.0
+```
+
+---
+
+### `WWLL` — wood rated wall (multiplier input)
+
+```
+WWLL, ID, NAME, MODEL, M, L, H, DIR, RA, N1, N2, N3, N4, DIAP, LAYO
+```
+
+| Col | Unit | Description |
+|-----|------|-------------|
+| MODEL | — | `0` = equivalent brace, `1` = shear panel, `2` = membrane (reserved) |
+| M | — | Wall multiplier |
+| L, H | m | Wall length and height for conversion |
+| DIR | — | `0` = X, `1` = Y |
+| RA | rad | Reference drift angle (default `1/120`) |
+| N1..N4 | — | Corner node IDs (bottom line, then top line) |
+| DIAP | — | Diaphragm ID for in-plane MPC tie to the wall line (blank = none) |
+| LAYO | — | Brace layout: `0` = single brace, `1` = X-brace pair (default) |
+
+The parser converts wall multiplier to allowable shear and stiffness:
+
+```
+Qa = 1.96 * m * L        (kN)
+Delta = RA * H           (m)
+K = Qa / Delta           (kN/m -> internally N/m)
+```
+
+For `MODEL=0`, diagonal length `d = sqrt(L^2 + H^2)` and
+equivalent brace axial rigidity is:
+
+```
+EA = K * d^3 / L^2
+```
+
+For an X-brace pair, each brace uses half of this `EA`.
+
+Users input rated-wall properties (`M, L, H, DIR, RA`) and node geometry only;
+explicit brace/EA input is not required.
 
 ---
 
@@ -304,8 +363,6 @@ GLOD, LC, GX, GY, GZ
 ```
 
 Acceleration components in **m/s²** (e.g. `0, 0, -9.80665` for downward Z).
-
-Short alias: `gl`.
 
 ---
 
@@ -339,8 +396,6 @@ AXIS, ID, NAME, V_H, NODE_ID, X_DIR
 | V_H | `0` = vertical plane, `1` = horizontal |
 | X_DIR | For vertical: `0` = global X, `1` = global Y |
 
-Short alias: `ax`.
-
 ---
 
 ### `PLOT` — plot request
@@ -355,8 +410,6 @@ PLOT, ID, NAME, AXIS_ID, TYPE, LC, SCALE, DEFFAC
 | 1 | Load |
 | 2 | Force diagram |
 | 3 | Utilization |
-
-Short alias: `plt`.
 
 ---
 

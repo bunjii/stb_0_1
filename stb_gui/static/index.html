@@ -9,34 +9,75 @@
 <body>
   <div id="toolbar">
     <span class="title">Structural Toolbox</span>
-    <label>
-      Model
-      <select id="modelSelect"></select>
-    </label>
+    <button id="btnNew" type="button">New</button>
+    <button id="btnOpen" type="button">Open</button>
+    <button id="btnSave" type="button">Save</button>
+    <button id="btnClose" type="button" class="btn-secondary">Close</button>
+    <span id="modelPath" class="model-path" title=""></span>
+    <input type="file" id="openFileInput" accept=".dat,text/plain" hidden>
     <button id="btnReload" type="button">Reload</button>
-    <button id="btnSolve" type="button" title="Run analysis (F5)">Solve</button>
+    <button id="btnSolve" type="button" title="Solve (F5)">Solve</button>
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
+    <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P)">Pick mode</button>
+    <button id="btnToggleDistance" type="button" class="btn-secondary" title="Distance (D)">Distance</button>
+    <button id="btnToggleSelectionPanel" type="button" class="btn-secondary" title="Show/hide list of picked elements">Picked list</button>
     <span id="status">Loading…</span>
   </div>
   <div id="viewport">
+    <div id="selectionMarquee" class="selection-marquee" hidden></div>
+    <div id="elemContextMenu" class="context-menu" hidden>
+      <div id="contextMenuTitle" class="context-menu-title"></div>
+      <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
+      <button type="button" id="contextMenuDeleteNodes" class="context-menu-item context-menu-danger" data-action="delete-nodes">Delete nodes…</button>
+      <div id="contextMenuElemEdits" class="context-menu-elem-edits">
+      <div class="context-menu-group">
+        <div class="context-menu-label">Change section</div>
+        <div id="contextMenuSections" class="context-menu-scroll"></div>
+      </div>
+      <div class="context-menu-group">
+        <div class="context-menu-label">Change material (SECT MAT)</div>
+        <div id="contextMenuMaterials" class="context-menu-scroll"></div>
+      </div>
+      <div class="context-menu-group">
+        <div class="context-menu-label">Joint (EJNT)</div>
+        <button type="button" class="context-menu-item" data-action="ejnt-edit">Edit joint…</button>
+      </div>
+      </div>
+    </div>
     <div id="dispLegendOverlay" class="viewport-disp-legend" hidden>
       <div id="dispLegendTitle" class="viewport-disp-legend-title">|u|</div>
       <div id="dispLegendLc" class="viewport-disp-legend-lc"></div>
       <label class="viewport-disp-legend-bound">
-        <span class="viewport-disp-legend-bound-label">max</span>
-        <input type="number" id="dispContourMax" step="any">
+        <span class="viewport-disp-legend-bound-label">max (mm)</span>
+        <input type="number" id="dispContourMax" step="any" inputmode="decimal">
       </label>
-      <div id="dispLegendBar" class="viewport-disp-legend-bar"></div>
+      <div class="viewport-disp-legend-bar-wrap">
+        <div id="dispLegendBar" class="viewport-disp-legend-bar"></div>
+        <div id="dispLegendTicks" class="viewport-disp-legend-ticks"></div>
+      </div>
       <label class="viewport-disp-legend-bound">
-        <span class="viewport-disp-legend-bound-label">min</span>
-        <input type="number" id="dispContourMin" step="any">
+        <span class="viewport-disp-legend-bound-label">min (mm)</span>
+        <input type="number" id="dispContourMin" step="any" inputmode="decimal">
       </label>
       <button type="button" id="btnDispContourAuto" class="btn-disp-contour-auto">Auto</button>
     </div>
+    <div id="distanceOverlay" class="distance-overlay" hidden></div>
     <div id="viewerInfoOverlay" class="viewer-info-overlay"></div>
+    <div id="ejntEditPanel" class="ejnt-edit-panel" hidden>
+      <div class="ejnt-edit-header">
+        <span class="ejnt-edit-title">Edit joint (EJNT)</span>
+        <button type="button" id="btnEjntEditClose" class="btn-icon" title="Close">×</button>
+      </div>
+      <div class="ejnt-edit-hint">Edit the EJNT input line(s) for the picked element(s). Delete a line to restore the default rigid joint.</div>
+      <textarea id="ejntEditText" class="ejnt-edit-text" spellcheck="false"></textarea>
+      <div class="ejnt-edit-actions">
+        <button type="button" id="btnEjntEditApply">Apply</button>
+        <button type="button" id="btnEjntEditCancel" class="btn-secondary">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <div id="resultsPanel" class="float-panel">
@@ -108,6 +149,9 @@
         <label class="panel-check">
           <input type="checkbox" id="chkMembrane" checked> DMEM
         </label>
+        <label class="panel-check">
+          <input type="checkbox" id="chkWoodWall" checked> WRW
+        </label>
       </section>
 
       <section class="panel-section">
@@ -139,6 +183,19 @@
         </label>
         <div id="forceLegend" class="force-legend"></div>
       </section>
+    </div>
+  </div>
+
+  <div id="selectionPanel" class="float-panel float-panel-selection">
+    <div id="selectionPanelHeader" class="float-panel-header">
+      <span class="float-panel-title">Picked elements</span>
+      <button type="button" id="btnSelectionCollapse" class="btn-icon" title="Collapse">−</button>
+    </div>
+    <div id="selectionPanelBody" class="float-panel-body">
+      <p class="panel-hint">Pick mode: left drag = box pick (nodes + elements), click = nearest, right-click = edit menu. Ctrl+click toggles. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <div id="selectionSummary" class="selection-summary">Nothing picked</div>
+      <ul id="selectionList" class="selection-list"></ul>
+      <button id="btnClearSelection" type="button" class="btn-block btn-secondary">Clear picked</button>
     </div>
   </div>
 

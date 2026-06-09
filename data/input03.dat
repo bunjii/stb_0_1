@@ -13,42 +13,57 @@
 # TYPE OF ANALYSIS: 3D LINEAR STATIC
 
 # --- MATERIAL(MATE) ---
-#         ID,   NAME,        E,        G,    Gamma,    Alpha,       Fy
-#                       (N/mm2)   (N/mm2)   (kN/m3)       (-)   (N/mm2)
-MATE,      0,  SS400,   205000,    79000,     78.5,  1.2e-05,      235
+# MATE,   ID,       NAME,        E,        G,    Gamma,    Alpha,       Fy
+#     ,     ,           ,    N/mm2,    N/mm2,    kN/m3,        -,    N/mm2
+
+MATE,      0,      SS400,   205000,    79000,     78.5,  1.2e-05,      235
 
 # --- SECTION(SECT) ---
-#         ID,   NAME,    MAT,   TYPE,  DIM 1,  DIM 2,  DIM 3,  DIM 4
-#                                        (mm)    (mm)    (mm)    (mm)
-#   (TYPE 0: RECT., 1: CIRC., 2: I, 3: CHS, 4: RHS) 
-SECT,      0,     G1,      0,      2,  400.0,  200.0,    8.0,   13.0
+# SECT,   ID,       NAME,    MAT,   TYPE,     DIM1,     DIM2,     DIM3,     DIM4
+#     ,     ,           ,       ,       ,       mm,       mm,       mm,       mm
+#   TYPE: 0=RECT  1=CIRC  2=I  3=CHS  4=RHS
+#   DIM3,DIM4: optional; omit for types with fewer dimensions
+
+SECT,      0,         G1,      0,      2,    400.0,    200.0,      8.0,     13.0
 
 # --- NODE ---
-#         ID,         X,         Y,         Z,  CONST.
-#                    (m)        (m)        (m)
+# NODE,   ID,         X,         Y,         Z
+#     ,     ,         m,         m,         m
+
 NODE,      0,       0.0,       0.0,       0.0,      *
 NODE,      1,       4.0,       0.0,       0.0,      *
 
 # --- ELEMENT(ELEM) ---
-#         ID,     Ni,     Nj,    SEC,     Beta
-#                                         (deg)
+# ELEM,   ID,     Ni,     Nj,    SEC,     Beta
+#     ,     ,       ,       ,       ,      deg
+
 ELEM,      0,      0,      1,      0
 
-# --- ELEMENT JOINT ---
+# --- ELEMENT JOINT(EJNT) ---
+# EJNT, ELEM,        Ryi,        Rzi,        Ryj,        Rzj
+#     ,     ,    kNm/rad,    kNm/rad,    kNm/rad,    kNm/rad
+#   blank field = default rigid offset
+
 #    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj
-#             (kNm/rad) (kNm/rad) (kNm/rad) (kNm/rad)
-EJNT,      0,         ,         ,         ,         
+
+EJNT,      0,           ,           ,           ,           
 
 # --- CONSTRAINT(CONS) ---
+# CONS, NODE,   TX,   TY,   TZ,   RX,   RY,   RZ
+#   TX..RZ: 0=FREE  1=FIXED
+
 #    NODE ID,   TX,   TY,   TZ,   RX,   RY,   RZ
-#   (0:FREE, 1:FIXED)
+
 CONS,      0,    1,    1,    1,    1,    0,    1
 CONS,      1,    1,    1,    1,    1,    0,    1
 
 # --- ELEMENT LOAD(ELOD) ---
+# ELOD, ELEM,   LC,   EG,      WXi,      WYi,      WZi,      WXj,      WYj,      WZj
+#     ,     ,     ,     ,     kN/m,     kN/m,     kN/m,     kN/m,     kN/m,     kN/m
+#   EG: 0=element local axes  1=global axes
+
 #    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj
-#                          (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)
-#   (E/G: Element(=0) or Global(=1) Coordinate System)
-ELOD,      0,    0,    1,   0.00,   0.00, -10.00,   0.00,   0.00, -10.00
+
+ELOD,      0,    0,    1,      0.0,      0.0,    -10.0,      0.0,      0.0,    -10.0
 
 

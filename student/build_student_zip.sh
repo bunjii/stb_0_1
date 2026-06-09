@@ -54,6 +54,7 @@ fi
 echo "Python ${VERSION} (Windows embeddable, 64-bit)" > "$WORKDIR/python-embed/VERSION.txt"
 
 cp "$ROOT/docs/学生用_はじめ方_Windows.md" "$WORKDIR/はじめ方_Windows.md"
+cp "$ROOT/docs/学生用_インストール_Windows.md" "$WORKDIR/はじめ方_インストーラ版.md"
 
 rm -f "$ZIP"
 (cd "$DIST/_build" && zip -r -q "$ZIP" "$NAME")
@@ -64,4 +65,6 @@ echo "Done: $ZIP"
 echo "Size: $(du -h "$ZIP" | cut -f1)"
 echo "Embedded Python: ${VERSION}"
 echo ""
-echo "学生へ: ZIP を解凍 → Install_once.bat → Start Structural Toolbox.bat"
+echo "学生へ（ZIP）: 解凍 → Install_once.bat → Start Structural Toolbox.bat"
+echo "学生へ（推奨）: Windows で build_student_installer.ps1 → Setup.exe を配布"
+echo "  詳細: docs/教員用_インストーラ作成_Windows.md"

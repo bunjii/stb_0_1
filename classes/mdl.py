@@ -31,7 +31,10 @@ class Mdl:
                  _dregs = None,
                  _dopns = None,
                  _dmems = None,
-                 _dcons = None):
+                 _dcons = None,
+                 _dloads = None,
+                 _wwalls = None,
+                 _wshears = None):
 
         self.nds        = _nds
         self.elms       = _elms
@@ -54,6 +57,9 @@ class Mdl:
         self.dopns      = _dopns if _dopns is not None else []
         self.dmems      = _dmems if _dmems is not None else []
         self.dcons      = _dcons if _dcons is not None else []
+        self.dloads     = _dloads if _dloads is not None else []
+        self.wwalls     = _wwalls if _wwalls is not None else []
+        self.wshears    = _wshears if _wshears is not None else []
         self.dassocs    = []
         self.mpcs       = []
         self.lcs        =  None
@@ -117,7 +123,8 @@ class Mdl:
                 relevant_elds = list(filter(lambda el: el.lc == lc, self.elds))
                 relevant_glds = list(filter(lambda gl: gl.lc == lc, self.glds))
                 relevant_alds = list(filter(lambda al: al.lc == lc, self.alds))
-                relevant_lds = relevant_plds + relevant_elds    + relevant_glds + relevant_alds
+                relevant_dloads = list(filter(lambda dl: dl.lc == lc, self.dloads))
+                relevant_lds = relevant_plds + relevant_elds + relevant_glds + relevant_alds + relevant_dloads
 
                 # print(f"self.lds: {[l.id for l in self.lds]}")
                 # create combined load
@@ -159,6 +166,13 @@ class Mdl:
                         newld.elms_t = None
                         newld.elms_b = None
                         self.alds.append(newld)
+
+                    elif type(l).__name__ == "DiaphragmLoad":
+                        newld.px *= factor
+                        newld.py *= factor
+                        newld.mass *= factor
+                        newld.weight *= factor
+                        self.dloads.append(newld)
 
         # # create area loads
 
@@ -296,6 +310,15 @@ class Mdl:
             else:
                 al.clc = lcs.index(al.lc)
 
+        # diaphragm loads
+        for dl in self.dloads:
+            if dl.lc not in lcs:
+                lcs.append(dl.lc)
+                dl.clc = self.max_clc
+                self.max_clc += 1
+            else:
+                dl.clc = lcs.index(dl.lc)
+
         # diaphragm materials, regions and membrane elements
         cid = 0
         for dm in self.dmats:
@@ -383,6 +406,9 @@ class Mdl:
         self.dregs = []
         self.dopns = []
         self.dcons = []
+        self.dloads = []
+        self.wwalls = []
+        self.wshears = []
         self.dassocs = []
         self.mpcs = []
         self.mats = []

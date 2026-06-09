@@ -3,6 +3,8 @@ import json
 
 import numpy as np
 
+from stb_gui.input_format import NEW_MODEL_TEMPLATE
+
 _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -227,6 +229,72 @@ def list_model_files():
     return out
 
 
+def _model_dir_allowed(rel):
+    rel = normalize_model_relpath(rel)
+    if not rel or not rel.endswith(".dat"):
+        return False
+    return rel.startswith("data/") or rel.startswith("examples/")
+
+
+def safe_model_basename(filename):
+    """Return a safe .dat basename for files stored under data/."""
+
+    name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
+    if not name:
+        raise ValueError("Filename is required")
+    if not name.lower().endswith(".dat"):
+        name += ".dat"
+    if name in (".dat", "..dat") or ".." in name or "/" in name or "\\" in name:
+        raise ValueError("Invalid filename: " + filename)
+    return name
+
+
+def allocate_new_model_path():
+    """Return an unused project-relative path under data/ for a new model."""
+
+    data_dir = os.path.join(project_root(), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    for i in range(1, 10000):
+        name = "untitled.dat" if i == 1 else "untitled_{0:03d}.dat".format(i)
+        rel = "data/" + name
+        full = os.path.join(data_dir, name)
+        if not os.path.isfile(full):
+            return rel
+    raise ValueError("Too many untitled model files in data/")
+
+
+def create_new_model_file():
+    """Create a comment-only .dat file and return (relative path, text)."""
+
+    rel = allocate_new_model_path()
+    full = os.path.join(project_root(), rel.replace("/", os.sep))
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(NEW_MODEL_TEMPLATE)
+    return rel, NEW_MODEL_TEMPLATE
+
+
+def write_model_file(rel_path, text):
+    """Write model text to data/ or examples/. Returns normalized relative path."""
+
+    rel = normalize_model_relpath(rel_path)
+    if not _model_dir_allowed(rel):
+        raise ValueError("Model path must be a .dat file under data/ or examples/")
+    full = os.path.join(project_root(), rel.replace("/", os.sep))
+    parent = os.path.dirname(full)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(text if text is not None else "")
+    return rel
+
+
+def open_uploaded_model(filename, text):
+    """Save uploaded input under data/ and return its relative path."""
+
+    name = safe_model_basename(filename)
+    return write_model_file("data/" + name, text)
+
+
 def mdl_to_dict(mdl, relpath=None, solved=False):
     """Build a JSON-serializable model description for the web viewer."""
 
@@ -270,6 +338,9 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "material_name": mat_name,
             "material_id": mat_id,
             "ejnt_defined": bool(e.id in explicit_ejnt_ids),
+            "auto_generated": bool(getattr(e, "auto_generated", False)),
+            "generated_from": getattr(e, "generated_from", None),
+            "generated_from_id": getattr(e, "generated_from_id", None),
         }
         if e.pln != None:
             item["len"] = float(e.len)
@@ -376,6 +447,10 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "nuxy": float(dm.nuxy),
             "gamma": float(dm.gamma) * 1e-3,
             "alpha": float(dm.alpha),
+            "source": getattr(dm, "source", "DMAT"),
+            "multiplier": getattr(dm, "multiplier", None),
+            "reference_drift": getattr(dm, "reference_drift", None),
+            "equivalent_gt": getattr(dm, "equivalent_gt", None),
         })
 
     diaphragms = []
@@ -384,9 +459,63 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "id": d.id,
             "name": d.name,
             "type": d.type,
-            "material_id": d.mat.id,
-            "thickness": float(d.t),
+            "material_id": d.mat.id if d.mat is not None else None,
+            "thickness": float(d.t) if d.t is not None else None,
             "theta": float(d.theta),
+            "source": getattr(d, "source", "DMAT"),
+            "hmax": getattr(d, "hmax", None),
+            "reference_drift": getattr(d, "reference_drift", None),
+            "timber_multiplier": getattr(d, "timber_multiplier", None),
+        })
+
+    diaphragm_loads = []
+    for dl in getattr(mdl, "dloads", []):
+        diaphragm_loads.append({
+            "diaphragm_id": dl.diap_id,
+            "lc": dl.lc,
+            "type": dl.load_type,
+            "px": float(dl.px) * 1e-3,
+            "py": float(dl.py) * 1e-3,
+            "nodes": list(dl.node_ids),
+            "member_id": dl.member_id,
+            "mass": float(dl.mass),
+            "weight": float(dl.weight) * 1e-3,
+            "ax": float(dl.ax),
+            "ay": float(dl.ay),
+        })
+
+    wood_rated_walls = []
+    for w in getattr(mdl, "wwalls", []):
+        item = {
+            "id": w.id,
+            "name": w.name,
+            "model_requested": w.model_requested,
+            "model_active": w.model_active,
+            "multiplier": float(w.multiplier),
+            "length": float(w.length),
+            "height": float(w.height),
+            "direction": w.direction,
+            "reference_drift": float(w.reference_drift),
+            "qa_kN": float(w.qa_kN),
+            "delta": float(w.delta),
+            "k_n_per_m": float(w.k_n_per_m),
+            "diagonal_length": float(w.diagonal_length),
+            "generated_elem_ids": list(w.generated_elem_ids),
+            "diaphragm_id": w.diap_id,
+        }
+        if all(v is not None for v in [w.n1, w.n2, w.n3, w.n4]):
+            item["nodes"] = [w.n1, w.n2, w.n3, w.n4]
+        wood_rated_walls.append(item)
+
+    wood_shear_panels = []
+    for sp in getattr(mdl, "wshears", []):
+        wood_shear_panels.append({
+            "id": sp.id,
+            "wall_id": sp.wall_id,
+            "name": sp.name,
+            "nodes": [sp.n1.id, sp.n2.id, sp.n3.id, sp.n4.id],
+            "direction": sp.direction,
+            "k_n_per_m": float(sp.k),
         })
 
     membrane_elements = []
@@ -415,6 +544,40 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             float(mdl.bounds[4]), float(mdl.bounds[5]),
         ]
 
+    materials = []
+    for m in sorted(mdl.mats, key=lambda x: x.id):
+        materials.append({
+            "id": m.id,
+            "name": m.name,
+        })
+
+    sections = []
+    for s in sorted(mdl.secs, key=lambda x: x.id):
+        dims = [float(d) * 1e3 for d in s.dims] if s.dims is not None else []
+        sections.append({
+            "id": s.id,
+            "name": s.name,
+            "material_id": s.mat.id if s.mat is not None else None,
+            "material_name": s.mat.name if s.mat is not None else "",
+            "type": int(s.type),
+            "dims": dims,
+        })
+
+    element_joints = []
+    for j in sorted(getattr(mdl, "ejnts", []) or [], key=lambda x: x.eid):
+        def _ejnt_out(val):
+            if val is None:
+                return None
+            return float(val) * 1e-3
+
+        element_joints.append({
+            "elem_id": j.eid,
+            "ryi": _ejnt_out(j.ryi),
+            "rzi": _ejnt_out(j.rzi),
+            "ryj": _ejnt_out(j.ryj),
+            "rzj": _ejnt_out(j.rzj),
+        })
+
     return {
         "path": relpath,
         "solved": solved,
@@ -424,12 +587,18 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
         "bounds": bounds,
         "nodes": nodes,
         "elements": elements,
+        "materials": materials,
+        "sections": sections,
+        "element_joints": element_joints,
         "supports": supports,
         "reactions": reactions,
         "point_loads": point_loads,
         "element_loads": element_loads,
         "diaphragm_materials": diaphragm_materials,
         "diaphragms": diaphragms,
+        "diaphragm_loads": diaphragm_loads,
+        "wood_rated_walls": wood_rated_walls,
+        "wood_shear_panels": wood_shear_panels,
         "membrane_elements": membrane_elements,
     }
 

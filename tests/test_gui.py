@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import unittest.mock
 
 _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _STB_ROOT not in sys.path:
@@ -31,6 +32,9 @@ class TestGuiModelJson(unittest.TestCase):
         self.assertTrue("section_id" in elem)
         self.assertTrue("material_name" in elem)
         self.assertTrue("material_id" in elem)
+        self.assertIn("materials", data)
+        self.assertIn("sections", data)
+        self.assertIn("element_joints", data)
         self.assertEqual(len(data["point_loads"]), 1)
         self.assertAlmostEqual(data["point_loads"][0]["pz"], -5.0, places=3)
 
@@ -101,13 +105,36 @@ class TestGuiModelJson(unittest.TestCase):
         full = resolve_model_path(r"data\UK_ROOF_240420.dat")
         self.assertTrue(full.endswith("UK_ROOF_240420.dat"))
 
+    def test_wood_rated_walls_in_model_json(self):
+        lines = [
+            "MATE, 1, SUGI, 9500, 633, 5.0, 3.0e-06, 20",
+            "SECT, 1, C120, 1, 0, 120, 120",
+            "NODE, 1, 0, 0, 0",
+            "NODE, 2, 1.82, 0, 0",
+            "NODE, 3, 1.82, 0, 2.73",
+            "NODE, 4, 0, 0, 2.73",
+            "CONS, 1, 1, 1, 1, 1, 1, 1",
+            "CONS, 2, 1, 1, 1, 1, 1, 1",
+            "WWLL, 1, W1, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 1, 2, 3, 4, , 1",
+        ]
+        mdl = parse_input(lines)
+        data = mdl_to_dict(mdl, relpath="inline.dat", solved=False)
+
+        self.assertEqual(len(data["wood_rated_walls"]), 1)
+        wall = data["wood_rated_walls"][0]
+        self.assertEqual(wall["id"], 1)
+        self.assertEqual(wall["name"], "W1")
+        self.assertEqual(wall["nodes"], [1, 2, 3, 4])
+        self.assertEqual(wall["model_requested"], "EQUIVALENT_BRACE")
+        self.assertAlmostEqual(wall["qa_kN"], 1.96 * 2.0 * 1.82, places=6)
+
     def test_membrane_elements_in_model_json(self):
         lines = [
             "DMAT, 1, D1, 1000, 1000, 384.6153846, 0.3, 0, 0",
             "NODE, 1, 0, 0, 0",
             "NODE, 2, 1, 0, 0",
             "NODE, 3, 0, 1, 0",
-            "DIAP, 1, F1, SEMI, DMAT=1, T=100, THETA=0",
+            "DIAP, 1, F1, 1, 0, 1, 100, 0, ,",
             "DMEM, 1, 1, 1, 2, 3",
             "CONS, 1, 1, 1, 1, 1, 1, 1",
             "CONS, 2, 0, 1, 1, 1, 1, 1",
@@ -192,6 +219,14 @@ class TestGuiApi(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertTrue("Structural Toolbox" in r.text)
+        self.assertIn("btnNew", r.text)
+        self.assertIn("btnOpen", r.text)
+        self.assertIn("btnSave", r.text)
+        self.assertIn("btnClose", r.text)
+        self.assertIn("btnToggleSelect", r.text)
+        self.assertIn("selectionPanel", r.text)
+        self.assertIn("selectionMarquee", r.text)
+        self.assertIn("elemContextMenu", r.text)
 
     def test_gui_open_url(self):
         from stb_gui.server import gui_open_url
@@ -208,6 +243,60 @@ class TestGuiApi(unittest.TestCase):
         r = client.get("/api/models")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["default"], "data/UK_ROOF_240420.dat")
+
+    def test_api_model_new_creates_comment_only_file(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        import os
+        from stb_gui.input_format import NEW_MODEL_TEMPLATE
+        from stb_gui.model_json import project_root
+        r = self.client.post("/api/model/new")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["path"].startswith("data/"))
+        self.assertTrue(body["path"].endswith(".dat"))
+        self.assertEqual(body["text"], NEW_MODEL_TEMPLATE)
+        full = os.path.join(project_root(), body["path"].replace("/", os.sep))
+        try:
+            self.assertTrue(os.path.isfile(full))
+            with open(full, encoding="utf-8") as f:
+                txt = f.read()
+            self.assertEqual(txt, NEW_MODEL_TEMPLATE)
+            m = self.client.get("/api/model", params={"path": body["path"], "solve": 0})
+            self.assertEqual(m.status_code, 200)
+            self.assertEqual(len(m.json()["nodes"]), 0)
+        finally:
+            if os.path.isfile(full):
+                os.remove(full)
+
+    def test_api_model_open_upload(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        import os
+        from stb_gui.model_json import project_root
+        text = "# upload test\n"
+        r = self.client.post("/api/model/open", json={"filename": "_gui_upload_test.dat", "text": text})
+        self.assertEqual(r.status_code, 200)
+        rel = r.json()["path"]
+        self.assertEqual(rel, "data/_gui_upload_test.dat")
+        full = os.path.join(project_root(), rel.replace("/", os.sep))
+        try:
+            with open(full, encoding="utf-8") as f:
+                self.assertEqual(f.read(), text)
+        finally:
+            if os.path.isfile(full):
+                os.remove(full)
+
+    def test_api_shutdown_returns_ok(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        with unittest.mock.patch("stb_gui.server.threading.Timer") as timer:
+            inst = timer.return_value
+            r = self.client.post("/api/shutdown")
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.json()["ok"])
+            timer.assert_called_once()
+            inst.start.assert_called_once()
 
 
 if __name__ == "__main__":
