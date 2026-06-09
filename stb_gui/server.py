@@ -1,7 +1,10 @@
 import os
+import signal
 import socket
+import threading
 
-from stb_gui.dat_edit import apply_edit_action, validate_dat_text
+from stb_gui.dat_edit import apply_edit_action, validate_dat_text, ejnt_lines_for_elements
+from stb_gui.input_format import EJNT_EDITOR_HEADER
 from stb_gui.model_json import (
     project_root,
     list_model_files,
@@ -10,6 +13,8 @@ from stb_gui.model_json import (
     load_results_text,
     normalize_model_relpath,
     resolve_model_path,
+    create_new_model_file,
+    open_uploaded_model,
 )
 
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -127,6 +132,56 @@ def create_app(default_model=None):
             "element_ids": body.get("element_ids") or [],
             "action": body.get("action"),
         })
+
+    @app.get("/api/model/ejnt-lines")
+    def api_model_ejnt_lines(
+        path: str = Query(..., description="Relative path under project root"),
+        element_ids: str = Query(..., description="Comma-separated element ids"),
+    ):
+        try:
+            resolve_model_path(path)
+            ids = [int(x.strip()) for x in element_ids.split(",") if x.strip()]
+            text = load_input_text(path)
+            rows = ejnt_lines_for_elements(text, ids)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return JSONResponse({
+            "path": normalize_model_relpath(path),
+            "header": EJNT_EDITOR_HEADER,
+            "lines": rows,
+        })
+
+    @app.post("/api/model/new")
+    def api_model_new():
+        try:
+            rel, text = create_new_model_file()
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
+        return JSONResponse({"ok": True, "path": rel, "text": text})
+
+    @app.post("/api/model/open")
+    def api_model_open(body: dict = Body(...)):
+        text = body.get("text")
+        if text is None:
+            raise HTTPException(status_code=400, detail="text is required")
+        filename = body.get("filename") or body.get("path") or "model.dat"
+        try:
+            rel = open_uploaded_model(filename, text)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
+        return JSONResponse({"ok": True, "path": rel})
+
+    @app.post("/api/shutdown")
+    def api_shutdown():
+        def _stop_server():
+            os.kill(os.getpid(), signal.SIGINT)
+
+        threading.Timer(0.3, _stop_server).start()
+        return JSONResponse({"ok": True})
 
     return app
 

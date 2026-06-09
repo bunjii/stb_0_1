@@ -3,6 +3,8 @@ import json
 
 import numpy as np
 
+from stb_gui.input_format import NEW_MODEL_TEMPLATE
+
 _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -225,6 +227,72 @@ def list_model_files():
             if name.endswith(".dat"):
                 out.append(os.path.join(sub, name).replace("\\", "/"))
     return out
+
+
+def _model_dir_allowed(rel):
+    rel = normalize_model_relpath(rel)
+    if not rel or not rel.endswith(".dat"):
+        return False
+    return rel.startswith("data/") or rel.startswith("examples/")
+
+
+def safe_model_basename(filename):
+    """Return a safe .dat basename for files stored under data/."""
+
+    name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
+    if not name:
+        raise ValueError("Filename is required")
+    if not name.lower().endswith(".dat"):
+        name += ".dat"
+    if name in (".dat", "..dat") or ".." in name or "/" in name or "\\" in name:
+        raise ValueError("Invalid filename: " + filename)
+    return name
+
+
+def allocate_new_model_path():
+    """Return an unused project-relative path under data/ for a new model."""
+
+    data_dir = os.path.join(project_root(), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    for i in range(1, 10000):
+        name = "untitled.dat" if i == 1 else "untitled_{0:03d}.dat".format(i)
+        rel = "data/" + name
+        full = os.path.join(data_dir, name)
+        if not os.path.isfile(full):
+            return rel
+    raise ValueError("Too many untitled model files in data/")
+
+
+def create_new_model_file():
+    """Create a comment-only .dat file and return (relative path, text)."""
+
+    rel = allocate_new_model_path()
+    full = os.path.join(project_root(), rel.replace("/", os.sep))
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(NEW_MODEL_TEMPLATE)
+    return rel, NEW_MODEL_TEMPLATE
+
+
+def write_model_file(rel_path, text):
+    """Write model text to data/ or examples/. Returns normalized relative path."""
+
+    rel = normalize_model_relpath(rel_path)
+    if not _model_dir_allowed(rel):
+        raise ValueError("Model path must be a .dat file under data/ or examples/")
+    full = os.path.join(project_root(), rel.replace("/", os.sep))
+    parent = os.path.dirname(full)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(text if text is not None else "")
+    return rel
+
+
+def open_uploaded_model(filename, text):
+    """Save uploaded input under data/ and return its relative path."""
+
+    name = safe_model_basename(filename)
+    return write_model_file("data/" + name, text)
 
 
 def mdl_to_dict(mdl, relpath=None, solved=False):

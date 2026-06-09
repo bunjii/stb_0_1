@@ -105,7 +105,12 @@ function clampAllViewerOptions() {
 
 const el = {
   viewport: document.getElementById("viewport"),
-  modelSelect: document.getElementById("modelSelect"),
+  btnNew: document.getElementById("btnNew"),
+  btnOpen: document.getElementById("btnOpen"),
+  btnSave: document.getElementById("btnSave"),
+  btnClose: document.getElementById("btnClose"),
+  modelPath: document.getElementById("modelPath"),
+  openFileInput: document.getElementById("openFileInput"),
   btnReload: document.getElementById("btnReload"),
   btnSolve: document.getElementById("btnSolve"),
   btnInput: document.getElementById("btnInput"),
@@ -118,6 +123,7 @@ const el = {
   dispLegendTitle: document.getElementById("dispLegendTitle"),
   dispLegendLc: document.getElementById("dispLegendLc"),
   dispLegendBar: document.getElementById("dispLegendBar"),
+  dispLegendTicks: document.getElementById("dispLegendTicks"),
   viewerInfoOverlay: document.getElementById("viewerInfoOverlay"),
   dispContourMin: document.getElementById("dispContourMin"),
   dispContourMax: document.getElementById("dispContourMax"),
@@ -166,6 +172,11 @@ const el = {
   contextMenuDeleteElems: document.getElementById("contextMenuDeleteElems"),
   contextMenuDeleteNodes: document.getElementById("contextMenuDeleteNodes"),
   contextMenuElemEdits: document.getElementById("contextMenuElemEdits"),
+  ejntEditPanel: document.getElementById("ejntEditPanel"),
+  ejntEditText: document.getElementById("ejntEditText"),
+  btnEjntEditApply: document.getElementById("btnEjntEditApply"),
+  btnEjntEditCancel: document.getElementById("btnEjntEditCancel"),
+  btnEjntEditClose: document.getElementById("btnEjntEditClose"),
   optLoadArrow: document.getElementById("optLoadArrow"),
   optLoadArrowVal: document.getElementById("optLoadArrowVal"),
   optSupportGizmo: document.getElementById("optSupportGizmo"),
@@ -200,6 +211,11 @@ let selectedElementIds = new Set();
 let selectedNodeIds = new Set();
 let selectionDrag = null;
 const _worldProj = new THREE.Vector3();
+const _ndcScratch = new THREE.Vector3();
+const _viewPosScratch = new THREE.Vector3();
+const _leaderStart = new THREE.Vector3();
+const _leaderEnd = new THREE.Vector3();
+const _labelNdc = new THREE.Vector3();
 const SELECTION_PICK_PX = 10;
 const SELECTION_NODE_PICK_PX = 14;
 const SELECTION_DRAG_MIN_PX = 4;
@@ -212,14 +228,32 @@ let currentResultsText = null;
 let viewerOptions = Object.assign({}, OPTIONS_DEFAULTS);
 let wideLineMaterials = new Set();
 let dispContourScaleKey = null;
+let supportGizmoEntries = [];
+let nodeLabelEntries = [];
+let _nodeLabelLeaderMat = null;
+let currentModelPath = null;
+const inputEditors = new Map();
 let showWorldAxes = true;
 const _supportDiscTexCache = new Map();
+let _nodePointTexture = null;
 
 function saveLastModelPath(path) {
-  const p = normalizeModelPath(path);
-  if (!p) return;
+  setCurrentModelPath(path);
+}
+
+function getCurrentModelPath() {
+  return currentModelPath;
+}
+
+function setCurrentModelPath(path) {
+  currentModelPath = normalizeModelPath(path);
+  if (el.modelPath) {
+    el.modelPath.textContent = currentModelPath || "";
+    el.modelPath.title = currentModelPath || "";
+  }
+  if (!currentModelPath) return;
   try {
-    localStorage.setItem(MODEL_STORAGE_KEY, p);
+    localStorage.setItem(MODEL_STORAGE_KEY, currentModelPath);
   } catch (e) { /* ignore */ }
 }
 
@@ -610,6 +644,26 @@ function pickTargetAtScreen(px, py) {
   return null;
 }
 
+function elementIJArrowLength(model, elemLen) {
+  const span = modelSpan(model);
+  const minLen = Math.max(span * 0.012, 0.04);
+  const maxLen = Math.max(span * 0.06, minLen * 2);
+  return THREE.MathUtils.clamp(elemLen * 0.42, minLen, Math.min(maxLen, elemLen * 0.85));
+}
+
+function addElementIJDirectionArrow(p0, p1, model, group, color, lineWidthPx) {
+  const dir = p1.clone().sub(p0);
+  const len = dir.length();
+  if (len < 1e-12) return;
+  dir.normalize();
+  const arrowLen = elementIJArrowLength(model, len);
+  const mid = p0.clone().add(p1).multiplyScalar(0.5);
+  const half = arrowLen * 0.5;
+  const tail = mid.clone().addScaledVector(dir, -half);
+  const head = mid.clone().addScaledVector(dir, half);
+  addDirectedArrow(tail, head, group, color, lineWidthPx, 0.95, 22);
+}
+
 function updateSelectionHighlight() {
   clearGroup(selectionGroup);
   if (!currentModel || !hasPickSelection()) return;
@@ -635,6 +689,18 @@ function updateSelectionHighlight() {
       ALPHA.opaque
     );
   }
+  const arrowWidth = elementLineWidthPx() + 1.5;
+  for (const e of currentModel.elements) {
+    if (!selectedElementIds.has(e.id)) continue;
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1) continue;
+    const p0 = nodePosition(n0, currentModel, display.lc, display.defFac, display.deformed);
+    const p1 = nodePosition(n1, currentModel, display.lc, display.defFac, display.deformed);
+    addElementIJDirectionArrow(
+      p0, p1, currentModel, selectionGroup, COLORS.selected, arrowWidth
+    );
+  }
   if (selectedNodeIds.size > 0) {
     const nodePts = [];
     for (const n of currentModel.nodes) {
@@ -645,7 +711,7 @@ function updateSelectionHighlight() {
     if (nodePts.length > 0) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(nodePts, 3));
-      const mat = new THREE.PointsMaterial({
+      const mat = nodePointsMaterial({
         color: COLORS.selectedNode,
         size: 12,
         sizeAttenuation: false,
@@ -856,6 +922,56 @@ function selectedNodeIdList() {
   return Array.from(selectedNodeIds).sort(function (a, b) { return a - b; });
 }
 
+function hideEjntEditor() {
+  if (el.ejntEditPanel) el.ejntEditPanel.hidden = true;
+  if (el.ejntEditText) el.ejntEditText.value = "";
+}
+
+async function fetchEjntLines(path, elementIds) {
+  const ids = elementIds.join(",");
+  const url = "/api/model/ejnt-lines?path=" + encodeURIComponent(path)
+    + "&element_ids=" + encodeURIComponent(ids);
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(function () { return {}; });
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+async function openEjntEditor() {
+  const path = getCurrentModelPath();
+  if (!path) return;
+  if (selectedElementIds.size === 0) {
+    setStatus("Pick one or more elements first");
+    return;
+  }
+  const elemIds = selectedElementIdList();
+  hideContextMenu();
+  setStatus("Loading EJNT lines…");
+  try {
+    const data = await fetchEjntLines(path, elemIds);
+    const header = data.header || "";
+    const lines = (data.lines || []).map(function (row) { return row.line; }).join("\n");
+    if (el.ejntEditText) el.ejntEditText.value = header + lines;
+    if (el.ejntEditPanel) el.ejntEditPanel.hidden = false;
+    if (el.ejntEditText) el.ejntEditText.focus();
+    setStatus(path + " — edit EJNT for element(s) " + elemIds.join(", "));
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+    window.alert("Failed to load EJNT lines: " + ex.message);
+  }
+}
+
+function applyEjntEditor() {
+  if (!el.ejntEditText) return;
+  applyModelEdit({
+    action: "set_ejnt_lines",
+    lines_text: el.ejntEditText.value,
+  });
+  hideEjntEditor();
+}
+
 function hideContextMenu() {
   if (el.elemContextMenu) el.elemContextMenu.hidden = true;
 }
@@ -966,7 +1082,7 @@ function pruneSelectionToModel() {
 }
 
 async function restoreEditHistoryEntry(snapshot, redoTarget) {
-  const path = el.modelSelect.value;
+  const path = getCurrentModelPath();
   if (!snapshot || snapshot.path !== path) {
     setStatus("Undo/redo history does not match the current model");
     return false;
@@ -999,7 +1115,7 @@ async function undoModelEdit() {
   const snap = editUndoStack.pop();
   const ok = await restoreEditHistoryEntry(snap, editRedoStack);
   if (ok) {
-    setStatus((el.modelSelect.value || "") + " — undo (Ctrl+Z)");
+    setStatus((getCurrentModelPath() || "") + " — undo (Ctrl+Z)");
   } else if (snap) {
     editUndoStack.push(snap);
   }
@@ -1013,7 +1129,7 @@ async function redoModelEdit() {
   const snap = editRedoStack.pop();
   const ok = await restoreEditHistoryEntry(snap, editUndoStack);
   if (ok) {
-    setStatus((el.modelSelect.value || "") + " — redo (Ctrl+Y)");
+    setStatus((getCurrentModelPath() || "") + " — redo (Ctrl+Y)");
   } else if (snap) {
     editRedoStack.push(snap);
   }
@@ -1039,7 +1155,7 @@ function initEditHistoryShortcuts() {
 }
 
 async function applyModelEdit(extra) {
-  const path = el.modelSelect.value;
+  const path = getCurrentModelPath();
   if (!path) return;
   let payload;
   if (extra.action === "delete_nodes") {
@@ -1127,18 +1243,21 @@ function initContextMenu() {
       applyModelEdit({ action: "delete_nodes" });
       return;
     }
-    if (action === "ejnt-pin") {
-      applyModelEdit({ action: "set_ejnt", preset: "pin" });
+    if (action === "ejnt-edit") {
+      openEjntEditor();
       return;
-    }
-    if (action === "ejnt-spring") {
-      applyModelEdit({ action: "set_ejnt", preset: "spring_soft" });
-      return;
-    }
-    if (action === "ejnt-rigid") {
-      applyModelEdit({ action: "remove_ejnt" });
     }
   });
+
+  if (el.btnEjntEditApply) {
+    el.btnEjntEditApply.addEventListener("click", () => applyEjntEditor());
+  }
+  if (el.btnEjntEditCancel) {
+    el.btnEjntEditCancel.addEventListener("click", () => hideEjntEditor());
+  }
+  if (el.btnEjntEditClose) {
+    el.btnEjntEditClose.addEventListener("click", () => hideEjntEditor());
+  }
 
   document.addEventListener("mousedown", function (ev) {
     if (!el.elemContextMenu || el.elemContextMenu.hidden) return;
@@ -1147,12 +1266,19 @@ function initContextMenu() {
   });
 
   document.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape") hideContextMenu();
+    if (ev.key === "Escape") {
+      if (el.ejntEditPanel && !el.ejntEditPanel.hidden) {
+        hideEjntEditor();
+        ev.stopPropagation();
+        return;
+      }
+      hideContextMenu();
+    }
   });
 }
 
 function refreshDisplayStatus(model) {
-  const path = model.path || el.modelSelect.value || "";
+  const path = model.path || getCurrentModelPath() || "";
   const lcKey = String(el.lcSelect.value);
   let extra = analysisComplete(model) ? " (solved)" : "";
   if (analysisComplete(model) && !modelHasForceData(model, lcKey)) {
@@ -1182,7 +1308,7 @@ function updateViewerInfoOverlay(model) {
     return;
   }
 
-  const path = normalizeModelPath(model.path || el.modelSelect.value || "");
+  const path = normalizeModelPath(model.path || getCurrentModelPath() || "");
   const fileName = path ? path.replace(/^.*\//, "") : "(none)";
   const lc = String(el.lcSelect.value || "");
   const solved = analysisComplete(model);
@@ -1276,6 +1402,7 @@ function initThree() {
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.dampingFactor = 0.2;
   controls.target.set(0, 0, 0);
 
   const amb = new THREE.AmbientLight(0xffffff, 0.65);
@@ -1324,6 +1451,8 @@ function clearWideLineMaterials() {
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  updateSupportGizmoPositions();
+  updateNodeLabelPositions();
   renderer.render(scene, camera);
 }
 
@@ -1590,12 +1719,25 @@ function dispContourColor(t) {
   return c;
 }
 
-function formatDispInputValue(v) {
-  const av = Math.abs(v);
-  if (av < 1e-9) return "0";
-  if (av < 0.01) return v.toFixed(5);
-  if (av < 1) return v.toFixed(4);
-  return v.toFixed(3);
+const DISP_CONTOUR_TICK_FRACTIONS = [0.25, 0.5, 0.75];
+
+function formatDispInputValue(meters) {
+  const mm = meters * 1e3;
+  const av = Math.abs(mm);
+  if (av < 1e-6) return "0";
+  if (av < 0.01) return mm.toFixed(3);
+  if (av < 1) return mm.toFixed(2);
+  if (av < 100) return mm.toFixed(1);
+  return mm.toFixed(0);
+}
+
+function formatDispTickValueMm(meters) {
+  const mm = meters * 1e3;
+  const av = Math.abs(mm);
+  if (av < 1e-6) return "0";
+  if (av < 1) return mm.toFixed(2);
+  if (av < 100) return mm.toFixed(1);
+  return mm.toFixed(0);
 }
 
 function formatDispAbsValue(v) {
@@ -1626,17 +1768,41 @@ function syncDispContourInputs(autoRange, lc, defFac, force) {
 }
 
 function getDispContourDisplayRange() {
-  let min = parseFloat(el.dispContourMin && el.dispContourMin.value);
-  let max = parseFloat(el.dispContourMax && el.dispContourMax.value);
-  if (!isFinite(min)) min = 0;
-  if (!isFinite(max)) max = min + 1e-15;
-  if (max < min) {
-    const swap = max;
-    max = min;
-    min = swap;
+  let minMm = parseFloat(el.dispContourMin && el.dispContourMin.value);
+  let maxMm = parseFloat(el.dispContourMax && el.dispContourMax.value);
+  if (!isFinite(minMm)) minMm = 0;
+  if (!isFinite(maxMm)) maxMm = minMm + 1e-12;
+  if (maxMm < minMm) {
+    const swap = maxMm;
+    maxMm = minMm;
+    minMm = swap;
   }
-  if (max - min < 1e-15) max = min + 1e-15;
-  return { min: min, max: max };
+  if (maxMm - minMm < 1e-12) maxMm = minMm + 1e-12;
+  return { min: minMm / 1e3, max: maxMm / 1e3 };
+}
+
+function updateDispContourTicks(rangeMeters) {
+  if (!el.dispLegendTicks) return;
+  el.dispLegendTicks.replaceChildren();
+  if (!rangeMeters) return;
+  const span = rangeMeters.max - rangeMeters.min;
+  for (const frac of DISP_CONTOUR_TICK_FRACTIONS) {
+    const valueM = rangeMeters.min + frac * span;
+    const tick = document.createElement("div");
+    tick.className = "viewport-disp-legend-tick";
+    tick.style.bottom = (frac * 100) + "%";
+
+    const label = document.createElement("span");
+    label.className = "viewport-disp-legend-tick-label";
+    label.textContent = formatDispTickValueMm(valueM);
+
+    const line = document.createElement("span");
+    line.className = "viewport-disp-legend-tick-line";
+    line.setAttribute("aria-hidden", "true");
+
+    tick.append(label, line);
+    el.dispLegendTicks.append(tick);
+  }
 }
 
 function dispContourT(mag, range) {
@@ -1651,6 +1817,7 @@ function updateDispContourOverlay(visible, autoRange, lc, defFac, syncInputs) {
     el.dispLegendOverlay.classList.remove("visible");
     el.dispLegendOverlay.hidden = true;
     dispContourScaleKey = null;
+    updateDispContourTicks(null);
     return;
   }
 
@@ -1659,7 +1826,7 @@ function updateDispContourOverlay(visible, autoRange, lc, defFac, syncInputs) {
   el.dispLegendOverlay.hidden = false;
   el.dispLegendOverlay.classList.add("visible");
   if (el.dispLegendTitle) {
-    el.dispLegendTitle.textContent = "|u| (×" + defFac + ")";
+    el.dispLegendTitle.textContent = "|u| (mm, ×" + defFac + ")";
   }
   if (el.dispLegendLc) {
     el.dispLegendLc.textContent = "LC " + lc;
@@ -1667,6 +1834,7 @@ function updateDispContourOverlay(visible, autoRange, lc, defFac, syncInputs) {
   if (el.dispLegendBar) {
     el.dispLegendBar.style.background = dispContourGradientCss();
   }
+  updateDispContourTicks(getDispContourDisplayRange());
 }
 
 function applyDispContourAutoRange() {
@@ -1803,6 +1971,8 @@ function buildModelScene(model) {
   clearGroup(modelGroup);
   clearGroup(labelGroup);
   clearWideLineMaterials();
+  supportGizmoEntries = [];
+  nodeLabelEntries = [];
 
   enrichModelReactions(model);
 
@@ -1913,22 +2083,17 @@ function buildModelScene(model) {
     );
   }
 
-  const supportNodeIds = new Set();
-  for (const s of model.supports || []) {
-    supportNodeIds.add(s.node);
-  }
   const nodePts = [];
   for (const n of model.nodes) {
-    if (supportNodeIds.has(n.id)) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
     nodePts.push(p.x, p.y, p.z);
   }
   if (nodePts.length > 0) {
     const ngeo = new THREE.BufferGeometry();
     ngeo.setAttribute("position", new THREE.Float32BufferAttribute(nodePts, 3));
-    const nmat = new THREE.PointsMaterial({
+    const nmat = nodePointsMaterial({
       color: COLORS.node,
-      size: Math.max(0.04, (model.bounds ? (model.bounds[1] - model.bounds[0]) * 0.012 : 0.05)),
+      size: nodeMarkerSize(model),
       sizeAttenuation: true,
     });
     modelGroup.add(new THREE.Points(ngeo, nmat));
@@ -1942,7 +2107,11 @@ function buildModelScene(model) {
       const n = nm[s.node];
       if (!n) continue;
       const p = nodePosition(n, model, lc, defFac, deformed);
-      addSupportDisc(p, s.fixed, supSize, modelGroup);
+      const sp = addSupportDisc(
+        supportGizmoCenter(p, model, supSize, camera, renderer),
+        s.fixed, supSize, modelGroup
+      );
+      supportGizmoEntries.push({ nodePos: p, gizmoRadius: supSize, sprite: sp });
     }
   }
   if (showEJnt) {
@@ -2035,8 +2204,22 @@ function buildModelScene(model) {
         fg: colorHex(COLORS.nodeLabel),
       });
       sprite.renderOrder = 16;
-      sprite.position.copy(nodeLabelPoint(p, span, nodeLabelScale));
+      const lineGeo = new THREE.BufferGeometry();
+      lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(6, 3));
+      const line = new THREE.Line(lineGeo, nodeLabelLeaderMaterial());
+      line.frustumCulled = false;
+      line.renderOrder = 15;
+      const entry = {
+        nodePos: p.clone(),
+        span: span,
+        scaleFactor: nodeLabelScale,
+        sprite: sprite,
+        line: line,
+      };
+      updateNodeLabelEntry(entry, model, camera, renderer);
       labelGroup.add(sprite);
+      labelGroup.add(line);
+      nodeLabelEntries.push(entry);
     }
   }
 
@@ -2085,6 +2268,38 @@ function modelSpan(model) {
   return Math.max(b[1] - b[0], b[3] - b[2], b[5] - b[4], 1e-6);
 }
 
+function nodeMarkerSize(model) {
+  return Math.max(0.04, (model.bounds ? (model.bounds[1] - model.bounds[0]) * 0.012 : 0.05));
+}
+
+function createNodePointTexture() {
+  if (_nodePointTexture) return _nodePointTexture;
+  const px = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = px;
+  canvas.height = px;
+  const ctx = canvas.getContext("2d");
+  ctx.beginPath();
+  ctx.arc(px / 2, px / 2, px / 2 - 0.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  _nodePointTexture = new THREE.CanvasTexture(canvas);
+  _nodePointTexture.needsUpdate = true;
+  return _nodePointTexture;
+}
+
+function nodePointsMaterial(opts) {
+  return new THREE.PointsMaterial({
+    color: opts.color,
+    size: opts.size,
+    sizeAttenuation: opts.sizeAttenuation !== false,
+    map: createNodePointTexture(),
+    transparent: true,
+    alphaTest: 0.05,
+    depthTest: opts.depthTest !== false,
+  });
+}
+
 function supportGizmoSize(model) {
   const span = modelSpan(model);
   const base = Math.max(span * 0.022, 0.07);
@@ -2093,10 +2308,184 @@ function supportGizmoSize(model) {
   return base * (pct / 100);
 }
 
+function billboardPixelSize(worldPos, worldDiameter, camera, renderer) {
+  _viewPosScratch.copy(worldPos).applyMatrix4(camera.matrixWorldInverse);
+  const dist = Math.max(-_viewPosScratch.z, 1e-6);
+  const height = renderer.domElement.clientHeight;
+  const scale = height * camera.projectionMatrix.elements[5] * 0.5 * renderer.getPixelRatio();
+  return worldDiameter * (scale / dist);
+}
+
+// PointsMaterial map circle: visible diameter is ~half of billboardPixelSize estimate.
+const NODE_POINT_RENDER_DIAMETER_SCALE = 0.5;
+const SUPPORT_GIZMO_VISUAL_RADIUS_FACTOR =
+  (160 / 2 - 6) / (160 / 2);
+
+function nodeMarkerPixelRadius(worldPos, model, camera, renderer) {
+  const diameterPx = billboardPixelSize(worldPos, nodeMarkerSize(model), camera, renderer);
+  return diameterPx * NODE_POINT_RENDER_DIAMETER_SCALE * 0.5;
+}
+
+function supportGizmoPixelRadius(worldPos, gizmoRadius, camera, renderer) {
+  const diameterPx = billboardPixelSize(worldPos, gizmoRadius * 2, camera, renderer);
+  return diameterPx * 0.5 * SUPPORT_GIZMO_VISUAL_RADIUS_FACTOR;
+}
+
+function supportGizmoCenter(nodePos, model, gizmoRadius, camera, renderer, target) {
+  const out = target || new THREE.Vector3();
+  const nodeSize = nodeMarkerSize(model);
+  if (!camera || !renderer || renderer.domElement.clientHeight < 1) {
+    return out.copy(nodePos).add(new THREE.Vector3(0, 0, -(nodeSize * 0.5 + gizmoRadius)));
+  }
+
+  const offsetPx = nodeMarkerPixelRadius(nodePos, model, camera, renderer)
+    + supportGizmoPixelRadius(nodePos, gizmoRadius, camera, renderer);
+
+  _ndcScratch.copy(nodePos).project(camera);
+  const height = renderer.domElement.clientHeight;
+  _ndcScratch.y -= (offsetPx / height) * 2;
+  return out.copy(_ndcScratch).unproject(camera);
+}
+
+function nodeLabelLeaderMaterial() {
+  if (!_nodeLabelLeaderMat) {
+    _nodeLabelLeaderMat = new THREE.LineBasicMaterial({
+      color: COLORS.nodeLabel,
+      transparent: true,
+      opacity: 0.38,
+      depthTest: false,
+    });
+  }
+  return _nodeLabelLeaderMat;
+}
+
+function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
+  const width = renderer.domElement.clientWidth;
+  const height = renderer.domElement.clientHeight;
+  if (width < 1 || height < 1) {
+    return {
+      labelPos: nodePos.clone().add(new THREE.Vector3(0, nodeMarkerSize(model) * 0.8, 0)),
+      leaderStart: nodePos.clone(),
+    };
+  }
+
+  const nodeRadiusPx = nodeMarkerPixelRadius(nodePos, model, camera, renderer);
+  const screenDx = 20;
+  const screenDy = 24;
+  const dirLen = Math.hypot(screenDx, screenDy) || 1;
+  const sx = screenDx / dirLen;
+  const sy = screenDy / dirLen;
+
+  _ndcScratch.copy(nodePos).project(camera);
+
+  const edgePx = nodeRadiusPx + 2;
+  _labelNdc.set(
+    _ndcScratch.x + (sx * edgePx / width) * 2,
+    _ndcScratch.y + (sy * edgePx / height) * 2,
+    _ndcScratch.z
+  );
+  _leaderStart.copy(_labelNdc).unproject(camera);
+
+  const labelPx = nodeRadiusPx + 18;
+  _labelNdc.set(
+    _ndcScratch.x + (sx * labelPx / width) * 2,
+    _ndcScratch.y + (sy * labelPx / height) * 2,
+    _ndcScratch.z
+  );
+  _leaderEnd.copy(_labelNdc).unproject(camera);
+
+  return { labelPos: _leaderEnd.clone(), leaderStart: _leaderStart.clone() };
+}
+
+function updateNodeLabelEntry(entry, model, camera, renderer) {
+  const placement = computeNodeLabelPlacement(entry.nodePos, model, camera, renderer);
+  entry.sprite.position.copy(placement.labelPos);
+  const pos = entry.line.geometry.attributes.position;
+  pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
+  pos.setXYZ(1, placement.labelPos.x, placement.labelPos.y, placement.labelPos.z);
+  pos.needsUpdate = true;
+  entry.line.geometry.computeBoundingSphere();
+}
+
+function updateNodeLabelPositions() {
+  if (!camera || !renderer || !currentModel || nodeLabelEntries.length === 0) return;
+  for (const entry of nodeLabelEntries) {
+    updateNodeLabelEntry(entry, currentModel, camera, renderer);
+  }
+}
+
+function updateSupportGizmoPositions() {
+  if (!camera || !renderer || !currentModel || supportGizmoEntries.length === 0) return;
+  for (const entry of supportGizmoEntries) {
+    supportGizmoCenter(
+      entry.nodePos, currentModel, entry.gizmoRadius, camera, renderer, entry.sprite.position
+    );
+  }
+}
+
 function ejntMarkerRadius(model) {
   const span = modelSpan(model);
   const supHalf = supportGizmoSize(model);
   return Math.max(supHalf * 0.3, span * 0.004, 0.012);
+}
+
+function ejntByElementId(model) {
+  const map = Object.create(null);
+  for (const j of model.element_joints || []) {
+    if (j && j.elem_id != null) map[j.elem_id] = j;
+  }
+  return map;
+}
+
+function ejntEndHasRelease(j, end) {
+  if (!j) return false;
+  if (end === "i") return j.ryi != null || j.rzi != null;
+  return j.ryj != null || j.rzj != null;
+}
+
+function drawEJntMarkers(model, opts) {
+  const { lc, defFac, deformed, nm, group } = opts;
+  const r = ejntMarkerRadius(model);
+  const supportHalf = supportGizmoSize(model);
+  const geo = new THREE.SphereGeometry(r, 16, 12);
+  const mat = new THREE.MeshBasicMaterial({ color: COLORS.ejnt, depthTest: true });
+  const ejntMap = ejntByElementId(model);
+
+  for (const e of model.elements || []) {
+    if (!e) continue;
+    const j = ejntMap[e.id];
+    const showI = ejntEndHasRelease(j, "i");
+    const showJ = ejntEndHasRelease(j, "j");
+    if (!showI && !showJ) continue;
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1) continue;
+    const p0 = nodePosition(n0, model, lc, defFac, deformed);
+    const p1 = nodePosition(n1, model, lc, defFac, deformed);
+    const len = p0.distanceTo(p1);
+    if (len < 1e-12) continue;
+
+    const offset = supportHalf + r;
+    let t0 = offset / len;
+    let t1 = 1 - offset / len;
+    if (!(t0 < t1)) {
+      t0 = 0.35;
+      t1 = 0.65;
+    }
+
+    if (showI) {
+      const m0 = new THREE.Mesh(geo, mat);
+      m0.position.copy(elemPointAlong(p0, p1, t0));
+      m0.renderOrder = 9;
+      group.add(m0);
+    }
+    if (showJ) {
+      const m1 = new THREE.Mesh(geo, mat);
+      m1.position.copy(elemPointAlong(p0, p1, t1));
+      m1.renderOrder = 9;
+      group.add(m1);
+    }
+  }
 }
 
 function drawMembraneElements(model, opts) {
@@ -2153,44 +2542,6 @@ function drawMembraneElements(model, opts) {
     Math.max(elementLineWidthPx() * 0.85, 0.5),
     ALPHA.membraneEdge
   );
-}
-
-function drawEJntMarkers(model, opts) {
-  const { lc, defFac, deformed, nm, group } = opts;
-  const r = ejntMarkerRadius(model);
-  const supportHalf = supportGizmoSize(model);
-  const geo = new THREE.SphereGeometry(r, 16, 12);
-  const mat = new THREE.MeshBasicMaterial({ color: COLORS.ejnt, depthTest: true });
-
-  for (const e of model.elements || []) {
-    if (!e || !e.ejnt_defined) continue;
-    const n0 = nm[e.n0];
-    const n1 = nm[e.n1];
-    if (!n0 || !n1) continue;
-    const p0 = nodePosition(n0, model, lc, defFac, deformed);
-    const p1 = nodePosition(n1, model, lc, defFac, deformed);
-    const len = p0.distanceTo(p1);
-    if (len < 1e-12) continue;
-
-    const offset = supportHalf + r;
-    let t0 = offset / len;
-    let t1 = 1 - offset / len;
-    if (!(t0 < t1)) {
-      t0 = 0.35;
-      t1 = 0.65;
-    }
-
-    const c0 = elemPointAlong(p0, p1, t0);
-    const c1 = elemPointAlong(p0, p1, t1);
-    const m0 = new THREE.Mesh(geo, mat);
-    const m1 = new THREE.Mesh(geo, mat);
-    m0.position.copy(c0);
-    m1.position.copy(c1);
-    m0.renderOrder = 9;
-    m1.renderOrder = 9;
-    group.add(m0);
-    group.add(m1);
-  }
 }
 
 function axisPerpendiculars(d) {
@@ -2360,6 +2711,7 @@ function addSupportDisc(center, fixed, size, group) {
   sp.scale.set(size * 2, size * 2, 1);
   sp.renderOrder = 8;
   group.add(sp);
+  return sp;
 }
 
 function loadArrowLength(model) {
@@ -2454,11 +2806,6 @@ function labelOffsetDistance(span, scaleFactor, fallback) {
 function loadValueOffsetDistance(span, scaleFactor) {
   // Requested rule: move by text-height * 1.2 from the shaft end.
   return labelWorldHeight(span, scaleFactor, 0.03) * 1.2;
-}
-
-function nodeLabelPoint(nodePoint, span, scaleFactor) {
-  const pad = labelOffsetDistance(span, scaleFactor, 0.03);
-  return new THREE.Vector3(nodePoint.x, nodePoint.y + pad, nodePoint.z);
 }
 
 function loadValueLabelPoint(tail, tip, span, scaleFactor) {
@@ -3095,7 +3442,7 @@ function arrowPerpendicular(dir) {
   return new THREE.Vector3().crossVectors(d, ref).normalize();
 }
 
-function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale) {
+function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, renderOrder) {
   const d = head.clone().sub(tail);
   const length = d.length();
   if (length < 1e-12) return head.clone();
@@ -3107,13 +3454,14 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale) {
   const perp = arrowPerpendicular(dir);
   const wingA = wingBase.clone().addScaledVector(perp, headWide);
   const wingB = wingBase.clone().addScaledVector(perp, -headWide);
+  const ro = (renderOrder != null && isFinite(renderOrder)) ? renderOrder : 5;
 
   if (lineWidthPx != null) {
     const pts = [];
     addLinePair(tail, head, pts);
     addLinePair(wingA, head, pts);
     addLinePair(wingB, head, pts);
-    addWideLineSegmentsFromPts(pts, color, group, 5, lineWidthPx);
+    addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx);
     return head.clone();
   }
 
@@ -3122,7 +3470,7 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale) {
   shaftGeo.computeBoundingSphere();
   const shaft = new THREE.Line(shaftGeo, lineMat);
   shaft.frustumCulled = false;
-  shaft.renderOrder = 5;
+  shaft.renderOrder = ro;
   group.add(shaft);
 
   const headPts = [
@@ -3134,7 +3482,7 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale) {
   headGeo.computeBoundingSphere();
   const headLines = new THREE.LineSegments(headGeo, lineMat);
   headLines.frustumCulled = false;
-  headLines.renderOrder = 6;
+  headLines.renderOrder = ro + 1;
   group.add(headLines);
 
   return head.clone();
@@ -3578,7 +3926,7 @@ function showTextDocumentWindow(text, title) {
   doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
   doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
   doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
-  doc.write(".toolbar button{background:#5eff4d;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+  doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
   doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
   doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
   doc.write("@page{size:A4 landscape;margin:10mm;}");
@@ -3643,6 +3991,22 @@ async function saveInputText(path, text) {
   return res.json();
 }
 
+function registerInputEditor(path, win, getText) {
+  inputEditors.set(path, { win: win, getText: getText });
+  const timer = setInterval(() => {
+    if (!win.closed) return;
+    clearInterval(timer);
+    const entry = inputEditors.get(path);
+    if (entry && entry.win === win) inputEditors.delete(path);
+  }, 500);
+}
+
+function getInputEditorText(path) {
+  const entry = inputEditors.get(path);
+  if (entry && entry.win && !entry.win.closed) return entry.getText();
+  return null;
+}
+
 function showInputEditorWindow(text, path) {
   const w = window.open("", "_blank", "width=980,height=760,scrollbars=yes,resizable=yes");
   if (!w) {
@@ -3656,7 +4020,7 @@ function showInputEditorWindow(text, path) {
   doc.write("</title><style>");
   doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
   doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;}");
-  doc.write(".toolbar button{background:#5eff4d;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+  doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
   doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
   doc.write(".status{margin-left:auto;color:#aaa;font-size:12px;}");
   doc.write("textarea{width:100%;height:calc(100vh - 52px);box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:12px;line-height:1.25;resize:none;}");
@@ -3669,6 +4033,7 @@ function showInputEditorWindow(text, path) {
   const textarea = doc.getElementById("txt");
   const statusEl = doc.getElementById("status");
   textarea.value = text;
+  registerInputEditor(path, w, () => textarea.value);
 
   function setWinStatus(msg) {
     if (statusEl) statusEl.textContent = msg;
@@ -3681,7 +4046,7 @@ function showInputEditorWindow(text, path) {
       resetEditHistory();
       setWinStatus("saved");
       setStatus(path + " — input file saved (undo history cleared)");
-      if (el.modelSelect.value === path) await loadSelectedModel(false);
+      if (getCurrentModelPath() === path) await loadSelectedModel(false);
     } catch (ex) {
       setWinStatus("save failed");
       setStatus("Error: " + ex.message);
@@ -3702,8 +4067,27 @@ function showInputEditorWindow(text, path) {
   });
 }
 
+async function saveCurrentModel() {
+  const path = getCurrentModelPath();
+  if (!path) {
+    setStatus("No model open");
+    return;
+  }
+  setStatus("Saving " + path + "…");
+  try {
+    const edited = getInputEditorText(path);
+    const text = edited != null ? edited : await fetchInputText(path);
+    await saveInputText(path, text);
+    resetEditHistory();
+    if (getCurrentModelPath() === path) await loadSelectedModel(false);
+    setStatus(path + " — saved");
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+  }
+}
+
 async function openInputWindow() {
-  const path = el.modelSelect.value;
+  const path = getCurrentModelPath();
   if (!path) return;
 
   setStatus("Loading " + path + "…");
@@ -3717,7 +4101,7 @@ async function openInputWindow() {
 }
 
 async function openResultsWindow() {
-  const path = el.modelSelect.value;
+  const path = getCurrentModelPath();
   if (!path) return;
 
   let text = currentResultsText;
@@ -3750,9 +4134,65 @@ async function openResultsWindow() {
   setStatus(path + " — output opened in new window");
 }
 
+async function createNewModel() {
+  setStatus("Creating new model…");
+  try {
+    const res = await fetch("/api/model/new", { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || res.statusText);
+    }
+    const data = await res.json();
+    setCurrentModelPath(data.path);
+    await loadSelectedModel(false);
+    await openInputWindow();
+    setStatus(data.path + " — new model");
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+  }
+}
+
+function promptOpenModelFile() {
+  if (el.openFileInput) el.openFileInput.click();
+}
+
+async function openUploadedModelFile(file) {
+  if (!file) return;
+  setStatus("Opening " + file.name + "…");
+  try {
+    const text = await file.text();
+    const res = await fetch("/api/model/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, text: text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || res.statusText);
+    }
+    const data = await res.json();
+    setCurrentModelPath(data.path);
+    await loadSelectedModel(false);
+    setStatus(data.path + " — opened");
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+  }
+}
+
+async function closeApplication() {
+  setStatus("Shutting down…");
+  try {
+    await fetch("/api/shutdown", { method: "POST" });
+  } catch (e) { /* server may exit before response completes */ }
+  currentModel = null;
+  currentModelPath = null;
+  document.body.innerHTML = "<p style=\"padding:2rem;font-family:system-ui,sans-serif;color:#333\">"
+    + "Structural Toolbox server stopped. You can close this tab.</p>";
+}
+
 async function loadSelectedModel(solve, options) {
   options = options || {};
-  const path = el.modelSelect.value;
+  const path = getCurrentModelPath();
   if (!path) return;
   if (!options.keepSelection) clearSelection();
   if (solve) {
@@ -3820,21 +4260,31 @@ async function bootstrap() {
   });
   try {
     const data = await fetchModelList();
-    el.modelSelect.innerHTML = "";
-    for (const p of data.models) {
-      const opt = document.createElement("option");
-      opt.value = p;
-      opt.textContent = p;
-      el.modelSelect.appendChild(opt);
-    }
     const launchFile = launchFileFromUrl();
     const initial = resolveInitialModel(data.models, data.default);
-    if (initial) el.modelSelect.value = initial;
-    if (launchFile && initial === launchFile) clearLaunchFileFromUrl();
-    await loadSelectedModel(false);
+    if (initial) {
+      setCurrentModelPath(initial);
+      if (launchFile && initial === launchFile) clearLaunchFileFromUrl();
+      await loadSelectedModel(false);
+    } else {
+      setCurrentModelPath(null);
+      setStatus("Ready — use New or Open");
+    }
   } catch (ex) {
     setStatus("Error: " + ex.message);
   }
+}
+
+el.btnNew.addEventListener("click", () => createNewModel());
+el.btnOpen.addEventListener("click", () => promptOpenModelFile());
+el.btnSave.addEventListener("click", () => saveCurrentModel());
+el.btnClose.addEventListener("click", () => closeApplication());
+if (el.openFileInput) {
+  el.openFileInput.addEventListener("change", () => {
+    const file = el.openFileInput.files && el.openFileInput.files[0];
+    el.openFileInput.value = "";
+    openUploadedModelFile(file);
+  });
 }
 
 el.btnReload.addEventListener("click", () => loadSelectedModel(false));
@@ -3847,10 +4297,19 @@ function isViewerTextInputTarget(target) {
 }
 
 document.addEventListener("keydown", (ev) => {
-  if (ev.key !== "F5" && ev.code !== "F5") return;
   if (isViewerTextInputTarget(ev.target)) return;
-  ev.preventDefault();
-  loadSelectedModel(true);
+
+  if (ev.key === "F5" || ev.code === "F5") {
+    ev.preventDefault();
+    loadSelectedModel(true);
+    return;
+  }
+
+  if (ev.key === "p" || ev.key === "P") {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    ev.preventDefault();
+    setSelectionMode(!selectionModeActive);
+  }
 });
 
 el.btnToggleAxes.addEventListener("click", () => {
@@ -3875,10 +4334,6 @@ if (el.btnClearSelection) {
 
 el.btnInput.addEventListener("click", () => openInputWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
-el.modelSelect.addEventListener("change", () => {
-  resetEditHistory();
-  loadSelectedModel(false);
-});
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
   if (currentModel) rebuildScene();

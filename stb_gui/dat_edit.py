@@ -344,6 +344,119 @@ def _ejnt_insert_index(lines: list[str]) -> int:
     return len(lines)
 
 
+def ejnt_lines_for_elements(text: str, element_ids: list[int]) -> list[dict[str, Any]]:
+    """Return EJNT input lines for the given element ids (template if missing)."""
+
+    targets = sorted({int(e) for e in element_ids})
+    if not targets:
+        raise ValueError("element_ids is empty")
+
+    existing: dict[int, str] = {}
+    for line in text.splitlines():
+        rec = _split_record(line)
+        if rec and rec[0] == "EJNT":
+            eid = _parse_int(rec[1][1], "element id")
+            existing[eid] = line
+
+    out: list[dict[str, Any]] = []
+    for eid in targets:
+        if eid in existing:
+            out.append({
+                "element_id": eid,
+                "line": existing[eid],
+                "exists": True,
+            })
+        else:
+            out.append({
+                "element_id": eid,
+                "line": _format_ejnt_line(eid, None, None, None, None),
+                "exists": False,
+            })
+    return out
+
+
+def _parse_ejnt_lines_text(lines_text: str, targets: set[int]) -> dict[int, str]:
+    updates: dict[int, str] = {}
+    for line in lines_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        rec = _split_record(stripped)
+        if not rec or rec[0] != "EJNT":
+            raise ValueError("Expected EJNT record: {0!r}".format(stripped[:80]))
+        parts = rec[1]
+        if len(parts) < 2:
+            raise ValueError("Invalid EJNT record: {0!r}".format(stripped[:80]))
+        eid = _parse_int(parts[1], "element id")
+        if eid not in targets:
+            raise ValueError(
+                "EJNT element id {0} is not in the current selection".format(eid)
+            )
+        if eid in updates:
+            raise ValueError("Duplicate EJNT for element id {0}".format(eid))
+        updates[eid] = stripped
+    return updates
+
+
+def apply_ejnt_lines_text(
+    text: str,
+    element_ids: list[int],
+    lines_text: str,
+) -> tuple[str, list[str]]:
+    targets = {int(e) for e in element_ids}
+    if not targets:
+        raise ValueError("element_ids is empty")
+
+    updates = _parse_ejnt_lines_text(lines_text, targets)
+    lines = text.splitlines()
+    existing: dict[int, int] = {}
+    for idx, line in enumerate(lines):
+        rec = _split_record(line)
+        if rec and rec[0] == "EJNT":
+            eid = _parse_int(rec[1][1], "element id")
+            existing[eid] = idx
+
+    out: list[str] = []
+    replaced: set[int] = set()
+    updated = removed = 0
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "EJNT":
+            eid = _parse_int(rec[1][1], "element id")
+            if eid in targets:
+                if eid in updates:
+                    out.append(updates[eid])
+                    replaced.add(eid)
+                    updated += 1
+                else:
+                    removed += 1
+                continue
+        out.append(line)
+
+    inserted = 0
+    to_insert = [
+        updates[eid] for eid in sorted(targets) if eid in updates and eid not in replaced
+    ]
+    if to_insert:
+        insert_at = _ejnt_insert_index(out)
+        out[insert_at:insert_at] = to_insert
+        inserted = len(to_insert)
+
+    if updated == 0 and inserted == 0 and removed == 0:
+        raise ValueError("No EJNT changes to apply")
+
+    parts: list[str] = []
+    if updated:
+        parts.append("updated {0}".format(updated))
+    if inserted:
+        parts.append("added {0}".format(inserted))
+    if removed:
+        parts.append("removed {0} (rigid default)".format(removed))
+    return _ensure_trailing_newline("\n".join(out)), [
+        "EJNT: " + ", ".join(parts) + " for selected element(s).",
+    ]
+
+
 def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]]:
     op = action.get("action")
     element_ids = action.get("element_ids") or []
@@ -370,6 +483,11 @@ def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]
         )
     if op == "remove_ejnt":
         return remove_ejnt_for_elements(text, element_ids)
+    if op == "set_ejnt_lines":
+        lines_text = action.get("lines_text")
+        if lines_text is None:
+            raise ValueError("lines_text is required")
+        return apply_ejnt_lines_text(text, element_ids, str(lines_text))
     raise ValueError("Unknown action: {0!r}".format(op))
 
 

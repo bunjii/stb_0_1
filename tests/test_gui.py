@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import unittest.mock
 
 _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _STB_ROOT not in sys.path:
@@ -195,6 +196,10 @@ class TestGuiApi(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertTrue("Structural Toolbox" in r.text)
+        self.assertIn("btnNew", r.text)
+        self.assertIn("btnOpen", r.text)
+        self.assertIn("btnSave", r.text)
+        self.assertIn("btnClose", r.text)
         self.assertIn("btnToggleSelect", r.text)
         self.assertIn("selectionPanel", r.text)
         self.assertIn("selectionMarquee", r.text)
@@ -215,6 +220,60 @@ class TestGuiApi(unittest.TestCase):
         r = client.get("/api/models")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["default"], "data/UK_ROOF_240420.dat")
+
+    def test_api_model_new_creates_comment_only_file(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        import os
+        from stb_gui.input_format import NEW_MODEL_TEMPLATE
+        from stb_gui.model_json import project_root
+        r = self.client.post("/api/model/new")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["path"].startswith("data/"))
+        self.assertTrue(body["path"].endswith(".dat"))
+        self.assertEqual(body["text"], NEW_MODEL_TEMPLATE)
+        full = os.path.join(project_root(), body["path"].replace("/", os.sep))
+        try:
+            self.assertTrue(os.path.isfile(full))
+            with open(full, encoding="utf-8") as f:
+                txt = f.read()
+            self.assertEqual(txt, NEW_MODEL_TEMPLATE)
+            m = self.client.get("/api/model", params={"path": body["path"], "solve": 0})
+            self.assertEqual(m.status_code, 200)
+            self.assertEqual(len(m.json()["nodes"]), 0)
+        finally:
+            if os.path.isfile(full):
+                os.remove(full)
+
+    def test_api_model_open_upload(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        import os
+        from stb_gui.model_json import project_root
+        text = "# upload test\n"
+        r = self.client.post("/api/model/open", json={"filename": "_gui_upload_test.dat", "text": text})
+        self.assertEqual(r.status_code, 200)
+        rel = r.json()["path"]
+        self.assertEqual(rel, "data/_gui_upload_test.dat")
+        full = os.path.join(project_root(), rel.replace("/", os.sep))
+        try:
+            with open(full, encoding="utf-8") as f:
+                self.assertEqual(f.read(), text)
+        finally:
+            if os.path.isfile(full):
+                os.remove(full)
+
+    def test_api_shutdown_returns_ok(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        with unittest.mock.patch("stb_gui.server.threading.Timer") as timer:
+            inst = timer.return_value
+            r = self.client.post("/api/shutdown")
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.json()["ok"])
+            timer.assert_called_once()
+            inst.start.assert_called_once()
 
 
 if __name__ == "__main__":

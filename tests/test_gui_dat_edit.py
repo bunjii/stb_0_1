@@ -8,8 +8,10 @@ if _STB_ROOT not in sys.path:
 
 from stb_gui.dat_edit import (
     apply_edit_action,
+    apply_ejnt_lines_text,
     delete_elements,
     delete_nodes,
+    ejnt_lines_for_elements,
     set_element_section,
     set_ejnt_for_elements,
     set_material_for_elements,
@@ -81,6 +83,56 @@ class TestDatEdit(unittest.TestCase):
         self.assertNotIn("EJNT, 1,", out2)
         validate_dat_text(out2)
 
+    def test_ejnt_lines_for_elements_existing_and_template(self):
+        text = SAMPLE + "EJNT, 1, 0.0, , 0.0,\n"
+        rows = ejnt_lines_for_elements(text, [1, 2])
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(rows[0]["exists"])
+        self.assertIn("EJNT, 1,", rows[0]["line"])
+        self.assertFalse(rows[1]["exists"])
+        self.assertIn("EJNT, 2,", rows[1]["line"])
+
+    def test_apply_ejnt_lines_text_update_insert_remove(self):
+        text = SAMPLE + "EJNT, 1, 0.0, , 0.0,\nEJNT, 2, 1e-06, 1e-06, 1e-06, 1e-06,\n"
+        out, warnings = apply_ejnt_lines_text(
+            text,
+            [1, 2],
+            "EJNT, 1, 1e-06, 1e-06, 1e-06, 1e-06,\n",
+        )
+        self.assertIn("EJNT, 1, 1e-06", out)
+        self.assertNotIn("EJNT, 2,", out)
+        validate_dat_text(out)
+        self.assertTrue(any("removed" in w.lower() for w in warnings))
+
+        out2, _ = apply_ejnt_lines_text(
+            SAMPLE,
+            [1],
+            "EJNT, 1, 0.0, , 0.0,\n",
+        )
+        self.assertIn("EJNT, 1,", out2)
+        validate_dat_text(out2)
+
+    def test_apply_ejnt_lines_text_ignores_comment_header(self):
+        text = SAMPLE + "EJNT, 1, 0.0, , 0.0,\n"
+        from stb_gui.input_format import EJNT_EDITOR_HEADER
+        out, _ = apply_ejnt_lines_text(
+            text,
+            [1],
+            EJNT_EDITOR_HEADER + "EJNT, 1, 1e-06, 1e-06, 1e-06, 1e-06,\n",
+        )
+        self.assertIn("EJNT, 1, 1e-06", out)
+        validate_dat_text(out)
+
+    def test_apply_edit_action_set_ejnt_lines(self):
+        out, warnings = apply_edit_action(SAMPLE, {
+            "action": "set_ejnt_lines",
+            "element_ids": [1],
+            "lines_text": "EJNT, 1, 0.0, , 0.0,\n",
+        })
+        self.assertIn("EJNT, 1,", out)
+        validate_dat_text(out)
+        self.assertTrue(warnings)
+
 
 class TestGuiEditApi(unittest.TestCase):
 
@@ -127,6 +179,23 @@ class TestGuiEditApi(unittest.TestCase):
         self.assertIn("materials", body)
         self.assertIn("sections", body)
         self.assertGreater(len(body["sections"]), 0)
+
+    def test_api_model_ejnt_lines(self):
+        if self.client is None:
+            self.skipTest("fastapi not installed")
+        path = "examples/cantilever.dat"
+        r = self.client.get(
+            "/api/model/ejnt-lines",
+            params={"path": path, "element_ids": "0"},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["path"], path)
+        self.assertEqual(len(body["lines"]), 1)
+        self.assertEqual(body["lines"][0]["element_id"], 0)
+        self.assertIn("line", body["lines"][0])
+        self.assertIn("header", body)
+        self.assertIn("EJNT", body["header"])
 
 
 if __name__ == "__main__":

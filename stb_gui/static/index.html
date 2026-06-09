@@ -9,17 +9,19 @@
 <body>
   <div id="toolbar">
     <span class="title">Structural Toolbox</span>
-    <label>
-      Model
-      <select id="modelSelect"></select>
-    </label>
+    <button id="btnNew" type="button">New</button>
+    <button id="btnOpen" type="button">Open</button>
+    <button id="btnSave" type="button">Save</button>
+    <button id="btnClose" type="button" class="btn-secondary">Close</button>
+    <span id="modelPath" class="model-path" title=""></span>
+    <input type="file" id="openFileInput" accept=".dat,text/plain" hidden>
     <button id="btnReload" type="button">Reload</button>
-    <button id="btnSolve" type="button" title="Run analysis (F5)">Solve</button>
+    <button id="btnSolve" type="button" title="Solve (F5)">Solve</button>
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
-    <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode: left drag = box pick, right drag = rotate, Ctrl+click = toggle">Pick mode</button>
+    <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P)">Pick mode</button>
     <button id="btnToggleSelectionPanel" type="button" class="btn-secondary" title="Show/hide list of picked elements">Picked list</button>
     <span id="status">Loading…</span>
   </div>
@@ -40,9 +42,7 @@
       </div>
       <div class="context-menu-group">
         <div class="context-menu-label">Joint (EJNT)</div>
-        <button type="button" class="context-menu-item" data-action="ejnt-pin">Pin ends (0)</button>
-        <button type="button" class="context-menu-item" data-action="ejnt-spring">Soft spring (1e-6)</button>
-        <button type="button" class="context-menu-item" data-action="ejnt-rigid">Rigid (remove EJNT)</button>
+        <button type="button" class="context-menu-item" data-action="ejnt-edit">Edit joint…</button>
       </div>
       </div>
     </div>
@@ -50,17 +50,32 @@
       <div id="dispLegendTitle" class="viewport-disp-legend-title">|u|</div>
       <div id="dispLegendLc" class="viewport-disp-legend-lc"></div>
       <label class="viewport-disp-legend-bound">
-        <span class="viewport-disp-legend-bound-label">max</span>
-        <input type="number" id="dispContourMax" step="any">
+        <span class="viewport-disp-legend-bound-label">max (mm)</span>
+        <input type="number" id="dispContourMax" step="any" inputmode="decimal">
       </label>
-      <div id="dispLegendBar" class="viewport-disp-legend-bar"></div>
+      <div class="viewport-disp-legend-bar-wrap">
+        <div id="dispLegendBar" class="viewport-disp-legend-bar"></div>
+        <div id="dispLegendTicks" class="viewport-disp-legend-ticks"></div>
+      </div>
       <label class="viewport-disp-legend-bound">
-        <span class="viewport-disp-legend-bound-label">min</span>
-        <input type="number" id="dispContourMin" step="any">
+        <span class="viewport-disp-legend-bound-label">min (mm)</span>
+        <input type="number" id="dispContourMin" step="any" inputmode="decimal">
       </label>
       <button type="button" id="btnDispContourAuto" class="btn-disp-contour-auto">Auto</button>
     </div>
     <div id="viewerInfoOverlay" class="viewer-info-overlay"></div>
+    <div id="ejntEditPanel" class="ejnt-edit-panel" hidden>
+      <div class="ejnt-edit-header">
+        <span class="ejnt-edit-title">Edit joint (EJNT)</span>
+        <button type="button" id="btnEjntEditClose" class="btn-icon" title="Close">×</button>
+      </div>
+      <div class="ejnt-edit-hint">Edit the EJNT input line(s) for the picked element(s). Delete a line to restore the default rigid joint.</div>
+      <textarea id="ejntEditText" class="ejnt-edit-text" spellcheck="false"></textarea>
+      <div class="ejnt-edit-actions">
+        <button type="button" id="btnEjntEditApply">Apply</button>
+        <button type="button" id="btnEjntEditCancel" class="btn-secondary">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <div id="resultsPanel" class="float-panel">
