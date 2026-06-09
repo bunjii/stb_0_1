@@ -60,7 +60,7 @@ def _base_lines(dcon_line=None):
         "NODE, 4, 1, 0, 0",
         "NODE, 5, 1, 1, 0",
         "ELEM, 10, 4, 5, 1, 0",
-        "DIAP, 1, F1, SEMI, DMAT=1, T=100, THETA=0",
+        "DIAP, 1, F1, 1, 0, 1, 100, 0, ,",
         "DMEM, 1, 1, 1, 2, 3",
         "CONS, 1, 1, 1, 1, 1, 1, 1",
         "CONS, 2, 1, 1, 1, 1, 1, 1",
@@ -77,7 +77,7 @@ def _base_lines(dcon_line=None):
 class TestDiaphragmConnectionMPC(unittest.TestCase):
 
     def test_boundary_member_mpc_generation(self):
-        mdl = parse_input(_base_lines("DCON, 1, MEMBER, 10, CONNECTED_RIGID, TOL=0.01"))
+        mdl = parse_input(_base_lines("DCON, 1, 1, 10, 0, 0.01"))
 
         self.assertEqual(len(mdl.dcons), 1)
         self.assertEqual(len(mdl.dassocs), 1)
@@ -91,7 +91,7 @@ class TestDiaphragmConnectionMPC(unittest.TestCase):
         self.assertEqual(sorted([m.slave_dof % 6 for m in mdl.mpcs]), [0, 1])
 
     def test_embedded_member_mpc_generation(self):
-        lines = _base_lines("DCON, 1, MEMBER, 10, CONNECTED_RIGID, TOL=0.01")
+        lines = _base_lines("DCON, 1, 1, 10, 0, 0.01")
         lines[6] = "NODE, 4, 0.5, 0.5, 0"
         mdl = parse_input(lines)
 
@@ -101,7 +101,7 @@ class TestDiaphragmConnectionMPC(unittest.TestCase):
         self.assertTrue(np.allclose(cp.shape_function_weights, [0.5, 0.25, 0.25]))
 
     def test_disconnected_member_generates_no_mpcs(self):
-        mdl = parse_input(_base_lines("DCON, 1, MEMBER, 10, DISCONNECTED, TOL=0.01"))
+        mdl = parse_input(_base_lines("DCON, 1, 1, 10, 1, 0.01"))
 
         self.assertEqual(len(mdl.mpcs), 0)
         self.assertEqual(mdl.dassocs[0].association_type, "none")
@@ -111,7 +111,7 @@ class TestDiaphragmConnectionMPC(unittest.TestCase):
         solve_model(disconnected)
         ux_free = disconnected.FindNodeFromId(4).disps[0, 0]
 
-        connected = parse_input(_base_lines("DCON, 1, MEMBER, 10, CONNECTED_RIGID, TOL=0.01"))
+        connected = parse_input(_base_lines("DCON, 1, 1, 10, 0, 0.01"))
         solve_model(connected)
         ux_tied = connected.FindNodeFromId(4).disps[0, 0]
 
@@ -130,7 +130,7 @@ class TestDiaphragmConnectionMPC(unittest.TestCase):
         mz_disconnected = abs(float(e0.forces[5, 0]))
         mz_center_disconnected = abs(float(e0.forces[13, 0]))
 
-        connected = parse_input(lines + ["DCON, 1, MEMBER, 10, CONNECTED_RIGID, TOL=0.01"])
+        connected = parse_input(lines + ["DCON, 1, 1, 10, 0, 0.01"])
         solve_model(connected)
         e1 = connected.FindElemFromEid(10)
         mz_connected = abs(float(e1.forces[5, 0]))

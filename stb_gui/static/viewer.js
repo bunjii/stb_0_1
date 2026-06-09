@@ -21,6 +21,8 @@ const COLORS = {
   deform: 0x4E8AC6,
   membraneFill: 0x6b8f71,
   membraneEdge: 0x2f5d3a,
+  woodWallFill: 0xc9a86c,
+  woodWallEdge: 0x8b6914,
   nodeLabel: 0x000000,
   force: 0x4D829E,
 };
@@ -41,6 +43,8 @@ const ALPHA = {
   elementGhost: 1.0,
   membraneFill: 0.32,
   membraneEdge: 0.9,
+  woodWallFill: 0.35,
+  woodWallEdge: 0.9,
   opaque: 1.0,
 };
 
@@ -141,6 +145,7 @@ const el = {
   chkMaterial: document.getElementById("chkMaterial"),
   chkSection: document.getElementById("chkSection"),
   chkMembrane: document.getElementById("chkMembrane"),
+  chkWoodWall: document.getElementById("chkWoodWall"),
   chkForceValues: document.getElementById("chkForceValues"),
   forceSelect: document.getElementById("forceSelect"),
   frcDiv: document.getElementById("frcDiv"),
@@ -1522,6 +1527,10 @@ function updateViewerInfoOverlay(model) {
     const nmem = model.membrane_elements ? model.membrane_elements.length : 0;
     displayLines.push("DMEM (" + nmem + ")");
   }
+  if (el.chkWoodWall && el.chkWoodWall.checked) {
+    const nwrw = model.wood_rated_walls ? model.wood_rated_walls.length : 0;
+    displayLines.push("WRW (" + nwrw + ")");
+  }
   if (forceComp !== "None") {
     displayLines.push(
       "force diagram: " + forceComp +
@@ -1541,6 +1550,7 @@ function updateViewerInfoOverlay(model) {
     "nodes: " + (model.nodes ? model.nodes.length : 0),
     "elements: " + (model.elements ? model.elements.length : 0),
     "DMEM: " + (model.membrane_elements ? model.membrane_elements.length : 0),
+    "WRW: " + (model.wood_rated_walls ? model.wood_rated_walls.length : 0),
     "supports: " + supports,
     "point loads: " + pointLoads,
     "element loads: " + elemLoads,
@@ -2178,6 +2188,7 @@ function buildModelScene(model) {
   const showMaterial = el.chkMaterial.checked;
   const showSection = el.chkSection.checked;
   const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  const showWoodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
   const nm = nodeMap(model);
   const em = elemMap(model);
   const span = modelSpan(model);
@@ -2312,6 +2323,16 @@ function buildModelScene(model) {
 
   if (showMembrane) {
     drawMembraneElements(model, {
+      lc,
+      defFac,
+      deformed,
+      nm,
+      group: modelGroup,
+    });
+  }
+
+  if (showWoodWall) {
+    drawWoodRatedWalls(model, {
       lc,
       defFac,
       deformed,
@@ -2673,6 +2694,68 @@ function drawEJntMarkers(model, opts) {
       group.add(m1);
     }
   }
+}
+
+function drawWoodRatedWalls(model, opts) {
+  const { lc, defFac, deformed, nm, group } = opts;
+  const items = model.wood_rated_walls || [];
+  if (!items.length) return;
+
+  const fillPos = [];
+  const edgePts = [];
+
+  for (const wall of items) {
+    const ids = wall.nodes;
+    if (!ids || ids.length !== 4) continue;
+    const n0 = nm[ids[0]];
+    const n1 = nm[ids[1]];
+    const n2 = nm[ids[2]];
+    const n3 = nm[ids[3]];
+    if (!n0 || !n1 || !n2 || !n3) continue;
+    const p0 = nodePosition(n0, model, lc, defFac, deformed);
+    const p1 = nodePosition(n1, model, lc, defFac, deformed);
+    const p2 = nodePosition(n2, model, lc, defFac, deformed);
+    const p3 = nodePosition(n3, model, lc, defFac, deformed);
+    fillPos.push(
+      p0.x, p0.y, p0.z,
+      p1.x, p1.y, p1.z,
+      p2.x, p2.y, p2.z,
+      p0.x, p0.y, p0.z,
+      p2.x, p2.y, p2.z,
+      p3.x, p3.y, p3.z
+    );
+    edgePts.push(
+      p0.x, p0.y, p0.z, p1.x, p1.y, p1.z,
+      p1.x, p1.y, p1.z, p2.x, p2.y, p2.z,
+      p2.x, p2.y, p2.z, p3.x, p3.y, p3.z,
+      p3.x, p3.y, p3.z, p0.x, p0.y, p0.z
+    );
+  }
+
+  if (fillPos.length === 0) return;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(fillPos, 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({
+    color: COLORS.woodWallFill,
+    transparent: true,
+    opacity: ALPHA.woodWallFill,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 3;
+  group.add(mesh);
+
+  addWideLineSegmentsFromPts(
+    edgePts,
+    COLORS.woodWallEdge,
+    group,
+    4,
+    Math.max(elementLineWidthPx() * 0.9, 0.5),
+    ALPHA.woodWallEdge
+  );
 }
 
 function drawMembraneElements(model, opts) {
@@ -4599,6 +4682,11 @@ el.chkSection.addEventListener("change", () => {
 });
 if (el.chkMembrane) {
   el.chkMembrane.addEventListener("change", () => {
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.chkWoodWall) {
+  el.chkWoodWall.addEventListener("change", () => {
     if (currentModel) rebuildScene();
   });
 }

@@ -33,12 +33,15 @@ NEW_MODEL_TEMPLATE = """# --- NEW MODEL ---
 # ELEM,      0,      0,      1,      0,      0.0
 #
 # --- DIAPHRAGM REGION(DIAP) ---
-#         ID,       NAME,    TYPE,     DMAT/PRESET,        T,    THETA
-#     TYPE: RIGID, SEMI/SEMI_RIGID, FLEX/FLEXIBLE
-# DIAP,      1,  RC_SLAB,     SEMI,  DMAT=0,  T=150,  THETA=0
-# DIAP,     10,  2F_MAIN,     SEMI,  TIMBER_FLOOR,  FLOOR_MAG=2.0,  THETA=0,  HMAX=1820
-# DIAP,     20,   ROOF_A,     SEMI,  TIMBER_ROOF,   ROOF_MAG=1.0,   THETA=30, HMAX=1820
-# DIAP,     30,  RIGID2F,    RIGID
+#         ID,       NAME,  TYPE,  SRC, MAG/ID,      T, THETA,      RA, HMAX
+#   TYPE: 0=RIGID  1=SEMI  2=FLEX
+#   SRC:  0=DMAT  1=TIMBER_FLOOR  2=TIMBER_ROOF
+#   MAG/ID: SRC=0 -> DMAT ID, SRC=1/2 -> multiplier
+#   T, HMAX: (mm)   RA: (rad)
+# DIAP,      1,  RC_SLAB,     1,    0,      0,  150.0,    0.0,       ,
+# DIAP,     10,  2F_MAIN,     1,    1,    2.0, 1000.0,    0.0, 0.006667, 1820
+# DIAP,     20,   ROOF_A,     1,    2,    1.0, 1000.0,   30.0, 0.006667, 1820
+# DIAP,     30,  RIGID2F,     0,    0,       ,       ,    0.0,       ,
 #
 # --- DIAPHRAGM OUTER POLYGON(DREG) ---
 #    DIAP ID,  NODE1,  NODE2,  NODE3, ...
@@ -53,27 +56,29 @@ NEW_MODEL_TEMPLATE = """# --- NEW MODEL ---
 # DMEM,      1,      1,      0,      1,      2
 #
 # --- DIAPHRAGM CONNECTION(DCON) ---
-#    DIAP ID,  TARGET,  [MEMBER ID],  TYPE,  TOL=...
-# DCON,      1,     AUTO,  CONNECTED_RIGID,  TOL=0.01
-# DCON,      1,   MEMBER,      0,  CONNECTED_RIGID,  TOL=0.01
-# DCON,      1,   MEMBER,      1,  DISCONNECTED
-# DCON,      1,     NODE,     35,  CONNECTED_RIGID,  TOL=0.01
+#    DIAP, TRGT,    ID, CONN,   TOL, SPACING
+#   TRGT: 0=AUTO  1=ELEM  2=NODE
+#   CONN: 0=RIGID  1=OPEN
+# DCON,      1,     0,       ,    0,  0.01
+# DCON,      1,     1,      0,    0,  0.01
+# DCON,      1,     1,      1,    1,
+# DCON,      1,     2,     35,    0,  0.01
 #
 # --- DIAPHRAGM LOAD(DLOD) ---
-#    DIAP ID,    LC,            TYPE,  PX/PY or MASS/WEIGHT
-#         AREA: kN/m2, LINE: kN/m, WEIGHT: kN/m2, MASS: kg/m2
-# DLOD,      1,     1,            AREA,  PX=1.0, PY=0.0
-# DLOD,      1,     1,            LINE,  N1=0, N2=1, PX=2.0, PY=0.0
-# DLOD,      1,     1,          WEIGHT,  WEIGHT=3.0, AX=1.0, AY=0.0
+#    DIAP,  LC, TYPE,  (TYPE-dependent columns)
+#   TYPE: 0=AREA(PX,PY kN/m2)  1=LINE(N1,N2,PX,PY)  2=MBTR(ELEM,PX,PY)
+#         3=MASS(MASS,AX,AY kg/m2)  4=WGHT(WGHT,AX,AY kN/m2)
+# DLOD,      1,     1,    0,    1.0,    0.0
+# DLOD,      1,     1,    1,      0,      1,    2.0,    0.0
+# DLOD,      1,     1,    4,    3.0,    1.0,    0.0
 #
-# --- WOOD RATED WALL(WOOD_RATED_WALL) ---
-#         ID,       NAME, MODEL=EQUIVALENT_BRACE/SHEAR_PANEL/MEMBRANE_WALL,
-#                         M=wall multiplier, L=wall length(m), H=wall height(m),
-#                         DIR=X/Y, RA=reference drift, N1..N4=wall corner nodes
-# WOOD_RATED_WALL,  1,  W1_X,  MODEL=EQUIVALENT_BRACE,  M=2.0,  L=1.82,  H=2.73,
-#                      DIR=X,  RA=0.0083333333,  N1=11,  N2=12,  N3=22,  N4=21,  DIAP=10
-# WOOD_RATED_WALL,  2,  W2_Y,  MODEL=SHEAR_PANEL,  M=2.5,  L=1.82,  H=2.73,
-#                      DIR=Y,  RA=0.0083333333,  N1=12,  N2=13,  N3=23,  N4=22,  DIAP=10
+# --- WOOD RATED WALL(WWLL) ---
+#         ID,     NAME, MODEL,    M,      L,      H, DIR,       RA, N1, N2, N3, N4, DIAP, LAYO
+#   MODEL: 0=BRACE  1=PANEL  2=MEMBRANE(reserved)
+#   DIR: 0=X  1=Y    LAYO: 0=SINGLE  1=X-BRACE
+#   M: multiplier   L,H: (m)   RA: (rad)
+# WWLL,      1,   W1_X,     0,    2.0,   1.82,   2.73,   0, 0.0083333333,   11,   12,   22,   21,     10,    1
+# WWLL,      2,   W2_Y,     1,    2.5,   1.82,   2.73,   1, 0.0083333333,   12,   13,   23,   22,     10,    1
 #
 # --- ELEMENT JOINT(EJNT) ---
 #    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj

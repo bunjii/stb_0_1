@@ -17,7 +17,7 @@ class TestDiaphragmFeatures(unittest.TestCase):
 
     def test_timber_floor_multiplier_creates_equivalent_material(self):
         mdl = parse_input([
-            "DIAP, 10, 2F_MAIN, SEMI, TIMBER_FLOOR, FLOOR_MAG=2.0, THETA=0, HMAX=1820",
+            "DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0, 0.006666666666666667, 1820",
         ])
 
         self.assertEqual(len(mdl.dmats), 1)
@@ -35,12 +35,12 @@ class TestDiaphragmFeatures(unittest.TestCase):
             "NODE, 1, 0, 0, 0",
             "NODE, 2, 1, 0, 0",
             "NODE, 3, 0, 1, 0",
-            "DIAP, 1, F1, SEMI, DMAT=1, T=100, THETA=0",
+            "DIAP, 1, F1, 1, 0, 1, 100, 0, ,",
             "DMEM, 1, 1, 1, 2, 3",
             "CONS, 1, 1, 1, 1, 1, 1, 1",
             "CONS, 2, 0, 1, 1, 1, 1, 1",
             "CONS, 3, 1, 0, 1, 1, 1, 1",
-            "DLOD, 1, 0, AREA, PX=6.0, PY=0.0",
+            "DLOD, 1, 0, 0, 6.0, 0.0",
         ]
         mdl = parse_input(lines)
         solve_model(mdl)
@@ -54,7 +54,7 @@ class TestDiaphragmFeatures(unittest.TestCase):
             "NODE, 2, 4, 0, 3",
             "NODE, 3, 4, 3, 3",
             "NODE, 4, 0, 3, 3",
-            "DIAP, 1, R1, RIGID",
+            "DIAP, 1, R1, 0, 0, , , 0, ,",
             "DREG, 1, 1, 2, 3, 4",
         ])
 

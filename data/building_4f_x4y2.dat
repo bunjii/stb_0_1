@@ -354,9 +354,10 @@ GLOD,      0,  0.000000,  0.000000,  -9.806650
 DMAT,     10,  FC24_SLAB,   25500,   25500, 10625.0, 0.20, 0.0, 0.0
 
 # --- DIAPHRAGM REGION(DIAP) ---
-#         ID,       NAME,    TYPE,     DMAT,        T,    THETA
-#                                             (mm)     (deg)
-DIAP,     1,  2F_RC_SLAB,     SEMI,  DMAT=10,  T=150,  THETA=0
+#         ID,       NAME,  TYPE,  SRC, MAG/ID,      T, THETA,      RA, HMAX
+#   TYPE: 0=RIGID  1=SEMI  2=FLEX
+#   SRC:  0=DMAT  1=TIMBER_FLOOR  2=TIMBER_ROOF
+DIAP,     1,  2F_RC_SLAB,     1,    0,     10,  150,    0.0,       ,
 
 # --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---
 # 2F full slab: nodes 100-142 @ z=3.8, 4x2 bays (5.5m x 9m / 3.2m), 2 triangles each
@@ -380,26 +381,27 @@ DMEM,   16, 1,    131,    142,    132
 
 # --- DIAPHRAGM CONNECTION(DCON) ---
 # 2F perimeter beams (z=3.8) rigid in-plane tie to DIAP 1; interior 2F beams unchanged
-#         DIAP,  TARGET,  MEMBER,  TYPE,  TOL
-DCON,     1,  MEMBER,      22,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      23,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      24,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      25,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      30,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      31,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      32,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      33,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      34,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      38,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      39,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      43,  CONNECTED_RIGID,  TOL=0.01
-DCON,     1,  MEMBER,      26,  DISCONNECTED
-DCON,     1,  MEMBER,      27,  DISCONNECTED
-DCON,     1,  MEMBER,      28,  DISCONNECTED
-DCON,     1,  MEMBER,      29,  DISCONNECTED
-DCON,     1,  MEMBER,      35,  DISCONNECTED
-DCON,     1,  MEMBER,      36,  DISCONNECTED
-DCON,     1,  MEMBER,      37,  DISCONNECTED
-DCON,     1,  MEMBER,      40,  DISCONNECTED
-DCON,     1,  MEMBER,      41,  DISCONNECTED
-DCON,     1,  MEMBER,      42,  DISCONNECTED
+#    DIAP, TRGT,    ID, CONN,   TOL
+#   TRGT: 0=AUTO  1=ELEM  2=NODE   CONN: 0=RIGID  1=OPEN
+DCON,     1,     1,     22,    0,  0.01
+DCON,     1,     1,     23,    0,  0.01
+DCON,     1,     1,     24,    0,  0.01
+DCON,     1,     1,     25,    0,  0.01
+DCON,     1,     1,     30,    0,  0.01
+DCON,     1,     1,     31,    0,  0.01
+DCON,     1,     1,     32,    0,  0.01
+DCON,     1,     1,     33,    0,  0.01
+DCON,     1,     1,     34,    0,  0.01
+DCON,     1,     1,     38,    0,  0.01
+DCON,     1,     1,     39,    0,  0.01
+DCON,     1,     1,     43,    0,  0.01
+DCON,     1,     1,     26,    1,
+DCON,     1,     1,     27,    1,
+DCON,     1,     1,     28,    1,
+DCON,     1,     1,     29,    1,
+DCON,     1,     1,     35,    1,
+DCON,     1,     1,     36,    1,
+DCON,     1,     1,     37,    1,
+DCON,     1,     1,     40,    1,
+DCON,     1,     1,     41,    1,
+DCON,     1,     1,     42,    1,

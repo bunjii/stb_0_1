@@ -44,7 +44,7 @@ ELEM,     10,      6,      4,      3,      0.0
 # --- DIAPHRAGM REGION(DIAP) ---
 # Timber floor diaphragm: FLOOR_MAG=2.0 (床倍率2倍).
 # Converted internally to equivalent G*t using REFERENCE_DRIFT (default 1/150).
-DIAP,     10,  2F_MAIN,     SEMI,  TIMBER_FLOOR,  FLOOR_MAG=2.0,  THETA=0,  HMAX=1820
+DIAP,     10,  2F_MAIN,     1,    1,    2.0, 1000,    0.0, 0.006666667, 1820
 
 # --- DIAPHRAGM OUTER POLYGON(DREG) ---
 #    DIAP ID,  NODE1,  NODE2,  NODE3, ...
@@ -57,10 +57,10 @@ DMEM,   1002,     10,      1,      3,      4
 
 # --- DIAPHRAGM CONNECTION(DCON) ---
 # Tie floor perimeter beams to the timber diaphragm for in-plane transfer.
-DCON,     10,   MEMBER,      1,  CONNECTED_RIGID,  TOL=0.01
-DCON,     10,   MEMBER,      2,  CONNECTED_RIGID,  TOL=0.01
-DCON,     10,   MEMBER,      3,  CONNECTED_RIGID,  TOL=0.01
-DCON,     10,   MEMBER,      4,  CONNECTED_RIGID,  TOL=0.01
+DCON,     10,     1,      1,    0,  0.01
+DCON,     10,     1,      2,    0,  0.01
+DCON,     10,     1,      3,    0,  0.01
+DCON,     10,     1,      4,    0,  0.01
 
 # --- CONSTRAINT(CONS) ---
 #    NODE ID,   TX,   TY,   TZ,   RX,   RY,   RZ
@@ -89,8 +89,8 @@ PLOD,      4,    1,   0.00,   0.00,  -1.50,   0.00,   0.00,   0.00
 #    DIAP ID,    LC,            TYPE,  PX/PY or MASS/WEIGHT
 # Seismic in-plane area loads on the 2x timber floor (total 2.0 kN per direction).
 # Floor area = 3.64 x 3.64 = 13.25 m2 -> 2.0 / 13.25 = 0.151 kN/m2
-DLOD,     10,     2,            AREA,  PX=0.151, PY=0.0
-DLOD,     10,     3,            AREA,  PX=0.0, PY=0.151
+DLOD,     10,     2,    0,  0.151,  0.0
+DLOD,     10,     3,    0,    0.0, 0.151
 
 # --- ELEMENT LOAD(ELOD) ---
 #    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj

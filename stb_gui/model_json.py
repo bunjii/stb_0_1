@@ -486,7 +486,7 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
 
     wood_rated_walls = []
     for w in getattr(mdl, "wwalls", []):
-        wood_rated_walls.append({
+        item = {
             "id": w.id,
             "name": w.name,
             "model_requested": w.model_requested,
@@ -502,7 +502,10 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "diagonal_length": float(w.diagonal_length),
             "generated_elem_ids": list(w.generated_elem_ids),
             "diaphragm_id": w.diap_id,
-        })
+        }
+        if all(v is not None for v in [w.n1, w.n2, w.n3, w.n4]):
+            item["nodes"] = [w.n1, w.n2, w.n3, w.n4]
+        wood_rated_walls.append(item)
 
     wood_shear_panels = []
     for sp in getattr(mdl, "wshears", []):

@@ -105,13 +105,36 @@ class TestGuiModelJson(unittest.TestCase):
         full = resolve_model_path(r"data\UK_ROOF_240420.dat")
         self.assertTrue(full.endswith("UK_ROOF_240420.dat"))
 
+    def test_wood_rated_walls_in_model_json(self):
+        lines = [
+            "MATE, 1, SUGI, 9500, 633, 5.0, 3.0e-06, 20",
+            "SECT, 1, C120, 1, 0, 120, 120",
+            "NODE, 1, 0, 0, 0",
+            "NODE, 2, 1.82, 0, 0",
+            "NODE, 3, 1.82, 0, 2.73",
+            "NODE, 4, 0, 0, 2.73",
+            "CONS, 1, 1, 1, 1, 1, 1, 1",
+            "CONS, 2, 1, 1, 1, 1, 1, 1",
+            "WWLL, 1, W1, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 1, 2, 3, 4, , 1",
+        ]
+        mdl = parse_input(lines)
+        data = mdl_to_dict(mdl, relpath="inline.dat", solved=False)
+
+        self.assertEqual(len(data["wood_rated_walls"]), 1)
+        wall = data["wood_rated_walls"][0]
+        self.assertEqual(wall["id"], 1)
+        self.assertEqual(wall["name"], "W1")
+        self.assertEqual(wall["nodes"], [1, 2, 3, 4])
+        self.assertEqual(wall["model_requested"], "EQUIVALENT_BRACE")
+        self.assertAlmostEqual(wall["qa_kN"], 1.96 * 2.0 * 1.82, places=6)
+
     def test_membrane_elements_in_model_json(self):
         lines = [
             "DMAT, 1, D1, 1000, 1000, 384.6153846, 0.3, 0, 0",
             "NODE, 1, 0, 0, 0",
             "NODE, 2, 1, 0, 0",
             "NODE, 3, 0, 1, 0",
-            "DIAP, 1, F1, SEMI, DMAT=1, T=100, THETA=0",
+            "DIAP, 1, F1, 1, 0, 1, 100, 0, ,",
             "DMEM, 1, 1, 1, 2, 3",
             "CONS, 1, 1, 1, 1, 1, 1, 1",
             "CONS, 2, 0, 1, 1, 1, 1, 1",

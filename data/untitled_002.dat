@@ -31,9 +31,10 @@
 # ELEM,      0,      0,      1,      0,      0.0
 #
 # --- DIAPHRAGM REGION(DIAP) ---
-#         ID,       NAME,    TYPE,     DMAT,        T,    THETA
-#                                             (mm)     (deg)
-# DIAP,      1,  RC_SLAB,     SEMI,  DMAT=0,  T=150,  THETA=0
+#         ID,       NAME,  TYPE,  SRC, MAG/ID,      T, THETA,      RA, HMAX
+#   TYPE: 0=RIGID  1=SEMI  2=FLEX
+#   SRC:  0=DMAT  1=TIMBER_FLOOR  2=TIMBER_ROOF
+# DIAP,      1,  RC_SLAB,     1,    0,      0,  150.0,    0.0,       ,
 #
 # --- DIAPHRAGM OUTER POLYGON(DREG) ---
 #    DIAP ID,  NODE1,  NODE2,  NODE3, ...
@@ -48,10 +49,12 @@
 # DMEM,      1,      1,      0,      1,      2
 #
 # --- DIAPHRAGM CONNECTION(DCON) ---
-#    DIAP ID,  TARGET,  [MEMBER ID],  TYPE,  TOL=...
-# DCON,      1,     AUTO,  CONNECTED_RIGID,  TOL=0.01
-# DCON,      1,   MEMBER,      0,  CONNECTED_RIGID,  TOL=0.01
-# DCON,      1,   MEMBER,      1,  DISCONNECTED
+#    DIAP, TRGT,    ID, CONN,   TOL, SPACING
+#   TRGT: 0=AUTO  1=ELEM  2=NODE
+#   CONN: 0=RIGID  1=OPEN
+# DCON,      1,     0,       ,    0,  0.01
+# DCON,      1,     1,      0,    0,  0.01
+# DCON,      1,     1,      1,    1,
 #
 # --- ELEMENT JOINT(EJNT) ---
 #    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj

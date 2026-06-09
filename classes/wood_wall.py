@@ -12,6 +12,69 @@ WOOD_WALL_MODEL_SHEAR_PANEL = "SHEAR_PANEL"
 WOOD_WALL_MODEL_EQ_BRACE = "EQUIVALENT_BRACE"
 WOOD_WALL_MODEL_MEMBRANE = "MEMBRANE_WALL"
 
+WWLL_MODEL_BRACE = 0
+WWLL_MODEL_PANEL = 1
+WWLL_MODEL_MEMBRANE = 2
+WWLL_DIR_X = 0
+WWLL_DIR_Y = 1
+WWLL_LAYO_SINGLE = 0
+WWLL_LAYO_X = 1
+
+
+def wwll_model_from_code(code):
+    mapping = {
+        WWLL_MODEL_BRACE: WOOD_WALL_MODEL_EQ_BRACE,
+        WWLL_MODEL_PANEL: WOOD_WALL_MODEL_SHEAR_PANEL,
+        WWLL_MODEL_MEMBRANE: WOOD_WALL_MODEL_MEMBRANE,
+    }
+    try:
+        return mapping[int(code)]
+    except (KeyError, ValueError, TypeError):
+        raise ValueError("Unknown WWLL MODEL code: {0}".format(code))
+
+
+def wwll_model_to_code(model):
+    mapping = {
+        WOOD_WALL_MODEL_EQ_BRACE: WWLL_MODEL_BRACE,
+        WOOD_WALL_MODEL_SHEAR_PANEL: WWLL_MODEL_PANEL,
+        WOOD_WALL_MODEL_MEMBRANE: WWLL_MODEL_MEMBRANE,
+    }
+    m = str(model).strip().upper()
+    if m not in mapping:
+        raise ValueError("Unknown WWLL MODEL: {0}".format(model))
+    return mapping[m]
+
+
+def wwll_dir_from_code(code):
+    c = int(code)
+    if c == WWLL_DIR_X:
+        return "X"
+    if c == WWLL_DIR_Y:
+        return "Y"
+    raise ValueError("Unknown WWLL DIR code: {0}".format(code))
+
+
+def wwll_dir_to_code(direction):
+    d = str(direction).strip().upper()
+    if d == "X":
+        return WWLL_DIR_X
+    if d == "Y":
+        return WWLL_DIR_Y
+    raise ValueError("Unknown WWLL DIR: {0}".format(direction))
+
+
+def wwll_layo_from_code(code):
+    c = int(code)
+    if c == WWLL_LAYO_SINGLE:
+        return "SINGLE"
+    if c == WWLL_LAYO_X:
+        return "X"
+    raise ValueError("Unknown WWLL LAYO code: {0}".format(code))
+
+
+def wwll_layo_to_code(layout):
+    return WWLL_LAYO_X if str(layout).strip().upper() == "X" else WWLL_LAYO_SINGLE
+
 
 def _next_id(seq):
     ids = [x.id for x in seq] if seq else []
@@ -81,24 +144,25 @@ class WoodRatedWall:
         return ea_total / max(brace_count, 1)
 
     def output_info(self):
+        n1 = "" if self.n1 is None else "{0: >6}".format(self.n1)
+        n2 = "" if self.n2 is None else "{0: >6}".format(self.n2)
+        n3 = "" if self.n3 is None else "{0: >6}".format(self.n3)
+        n4 = "" if self.n4 is None else "{0: >6}".format(self.n4)
+        diap = "" if self.diap_id is None else "{0: >6}".format(self.diap_id)
         props = [
-            "WOOD_RATED_WALL",
+            "WWLL",
             "{0: >6}".format(self.id),
             "{0: >10}".format(self.name),
-            "MODEL={0}".format(self.model_requested),
-            "M={0:.6g}".format(self.multiplier),
-            "L={0:.6g}".format(self.length),
-            "H={0:.6g}".format(self.height),
-            "DIR={0}".format(self.direction),
-            "RA={0:.8g}".format(self.reference_drift),
+            "{0: >4}".format(wwll_model_to_code(self.model_requested)),
+            "{0:.6g}".format(self.multiplier),
+            "{0:.6g}".format(self.length),
+            "{0:.6g}".format(self.height),
+            "{0: >4}".format(wwll_dir_to_code(self.direction)),
+            "{0:.8g}".format(self.reference_drift),
+            n1, n2, n3, n4,
+            diap,
+            "{0: >4}".format(wwll_layo_to_code(self.brace_layout)),
         ]
-        if all(v is not None for v in [self.n1, self.n2, self.n3, self.n4]):
-            props.extend([
-                "N1={0}".format(self.n1), "N2={0}".format(self.n2),
-                "N3={0}".format(self.n3), "N4={0}".format(self.n4),
-            ])
-        if self.diap_id is not None:
-            props.append("DIAP={0}".format(self.diap_id))
         return ", ".join(props) + "\n"
 
     def generate_mvp_equivalent_braces(self, nds, mats, secs, elms, ejnts, dcons):

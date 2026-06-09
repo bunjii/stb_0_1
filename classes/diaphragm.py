@@ -39,6 +39,101 @@ def normalize_diaphragm_type(value):
     raise ValueError("Unknown DIAP type: {0}".format(value))
 
 
+DIAP_TYPE_CODES = {
+    0: DIAP_RIGID,
+    1: DIAP_SEMI_RIGID,
+    2: DIAP_FLEXIBLE,
+}
+DIAP_SRC_DMAT = 0
+DIAP_SRC_TIMBER_FLOOR = 1
+DIAP_SRC_TIMBER_ROOF = 2
+
+DCON_TRGT_AUTO = 0
+DCON_TRGT_ELEM = 1
+DCON_TRGT_NODE = 2
+DCON_TRGT_LABELS = {0: "AUTO", 1: "MEMBER", 2: "NODE"}
+
+DCON_CONN_RIGID = 0
+DCON_CONN_OPEN = 1
+DCON_CONN_LABELS = {0: CONN_CONNECTED_RIGID, 1: CONN_DISCONNECTED}
+
+DLOD_AREA = 0
+DLOD_LINE = 1
+DLOD_MEMBER_TRANSFER = 2
+DLOD_MASS = 3
+DLOD_WEIGHT = 4
+
+
+def diap_type_from_code(code):
+    try:
+        return DIAP_TYPE_CODES[int(code)]
+    except (KeyError, ValueError, TypeError):
+        raise ValueError("Unknown DIAP TYPE code: {0}".format(code))
+
+
+def diap_type_to_code(diap_type):
+    for code, name in DIAP_TYPE_CODES.items():
+        if name == diap_type:
+            return code
+    raise ValueError("Unknown DIAP type: {0}".format(diap_type))
+
+
+def diap_src_from_code(code):
+    c = int(code)
+    if c == DIAP_SRC_DMAT:
+        return "DMAT"
+    if c == DIAP_SRC_TIMBER_FLOOR:
+        return TIMBER_FLOOR
+    if c == DIAP_SRC_TIMBER_ROOF:
+        return TIMBER_ROOF
+    raise ValueError("Unknown DIAP SRC code: {0}".format(code))
+
+
+def diap_src_to_code(source):
+    s = str(source).strip().upper()
+    if s in ["DMAT", "0"]:
+        return DIAP_SRC_DMAT
+    if s == TIMBER_FLOOR:
+        return DIAP_SRC_TIMBER_FLOOR
+    if s == TIMBER_ROOF:
+        return DIAP_SRC_TIMBER_ROOF
+    raise ValueError("Unknown DIAP SRC: {0}".format(source))
+
+
+def dcon_trgt_from_code(code):
+    try:
+        return DCON_TRGT_LABELS[int(code)]
+    except (KeyError, ValueError, TypeError):
+        raise ValueError("Unknown DCON TRGT code: {0}".format(code))
+
+
+def dcon_trgt_to_code(target_type):
+    t = str(target_type).strip().upper()
+    if t == "AUTO":
+        return DCON_TRGT_AUTO
+    if t in ["MEMBER", "ELEM", "ELEMENT"]:
+        return DCON_TRGT_ELEM
+    if t in ["NODE", "ND"]:
+        return DCON_TRGT_NODE
+    raise ValueError("Unknown DCON TRGT: {0}".format(target_type))
+
+
+def dcon_conn_from_code(code):
+    try:
+        return DCON_CONN_LABELS[int(code)]
+    except (KeyError, ValueError, TypeError):
+        raise ValueError("Unknown DCON CONN code: {0}".format(code))
+
+
+def dcon_conn_to_code(connection_type):
+    c = str(connection_type).strip().upper()
+    if c == CONN_CONNECTED_RIGID:
+        return DCON_CONN_RIGID
+    if c == CONN_DISCONNECTED:
+        return DCON_CONN_OPEN
+    raise ValueError("Unknown DCON CONN: {0}".format(connection_type))
+
+
 def timber_multiplier_to_gt(multiplier, reference_drift=TIMBER_REFERENCE_DRIFT,
                             unit_shear_strength=TIMBER_UNIT_SHEAR_STRENGTH):
     """Convert Japanese timber floor/roof multiplier to membrane shear stiffness.
@@ -181,27 +276,29 @@ class DiaphragmRegion:
         return self.type == DIAP_SEMI_RIGID and self.mat is not None and self.t is not None
 
     def OutputDiapInfo(self):
+        type_code = diap_type_to_code(self.type)
+        src_code = diap_src_to_code(self.source)
+        if self.source in [TIMBER_FLOOR, TIMBER_ROOF]:
+            mag_id = "{0:.6g}".format(self.timber_multiplier)
+        elif self.mat is not None:
+            mag_id = "{0: >6}".format(self.mat.id)
+        else:
+            mag_id = ""
+        t_mm = "" if self.t is None else "{0:.3f}".format(self.t * 1e3)
+        ra = "" if self.reference_drift is None else "{0:.8g}".format(self.reference_drift)
+        hmax = "" if self.hmax is None else "{0:.3f}".format(self.hmax * 1e3)
         props = [
             "DIAP",
             "{0: >6}".format(self.id),
             "{0: >10}".format(self.name),
-            "{0: >8}".format(self.type),
+            "{0: >4}".format(type_code),
+            "{0: >4}".format(src_code),
+            mag_id,
+            t_mm,
+            "{0:.3f}".format(self.theta),
+            ra,
+            hmax,
         ]
-        if self.source in [TIMBER_FLOOR, TIMBER_ROOF]:
-            props.append(self.source)
-            key = "FLOOR_MAG" if self.source == TIMBER_FLOOR else "ROOF_MAG"
-            props.append("{0}={1:.3f}".format(key, self.timber_multiplier))
-        elif self.mat is not None:
-            props.append("DMAT={0}".format(self.mat.id))
-        if self.t is not None:
-            props.append("T={0:.3f}".format(self.t * 1e3))
-        props.extend([
-            "THETA={0:.3f}".format(self.theta),
-        ])
-        if self.reference_drift is not None:
-            props.append("REFERENCE_DRIFT={0:.8g}".format(self.reference_drift))
-        if self.hmax is not None:
-            props.append("HMAX={0:.3f}".format(self.hmax * 1e3))
         return ", ".join(props) + "\n"
 
 
@@ -233,41 +330,72 @@ class DiaphragmLoad:
         self.clc = None
 
     def OutputDLoadInfo(self):
+        type_code = dlod_type_to_code(self.load_type)
         props = [
             "DLOD",
             "{0: >6}".format(self.diap_id),
             "{0: >4}".format(self.lc),
-            "{0: >16}".format(self.load_type),
+            "{0: >4}".format(type_code),
         ]
         if self.load_type == DiaphragmLoad.AREA:
             props.extend([
-                "PX={0:.6g}".format(self.px * 1e-3),
-                "PY={0:.6g}".format(self.py * 1e-3),
+                "{0:.6g}".format(self.px * 1e-3),
+                "{0:.6g}".format(self.py * 1e-3),
             ])
         elif self.load_type == DiaphragmLoad.LINE:
-            if len(self.node_ids) >= 2:
-                props.extend(["N1={0}".format(self.node_ids[0]), "N2={0}".format(self.node_ids[1])])
             props.extend([
-                "PX={0:.6g}".format(self.px * 1e-3),
-                "PY={0:.6g}".format(self.py * 1e-3),
+                "{0: >6}".format(self.node_ids[0]),
+                "{0: >6}".format(self.node_ids[1]),
+                "{0:.6g}".format(self.px * 1e-3),
+                "{0:.6g}".format(self.py * 1e-3),
             ])
         elif self.load_type == DiaphragmLoad.MEMBER_TRANSFER:
-            if self.member_id is not None:
-                props.append("MEMBER={0}".format(self.member_id))
             props.extend([
-                "PX={0:.6g}".format(self.px * 1e-3),
-                "PY={0:.6g}".format(self.py * 1e-3),
+                "{0: >6}".format(self.member_id),
+                "{0:.6g}".format(self.px * 1e-3),
+                "{0:.6g}".format(self.py * 1e-3),
+            ])
+        elif self.load_type == DiaphragmLoad.MASS:
+            props.extend([
+                "{0:.6g}".format(self.mass),
+                "{0:.6g}".format(self.ax),
+                "{0:.6g}".format(self.ay),
             ])
         else:
-            if self.mass != 0.0:
-                props.append("MASS={0:.6g}".format(self.mass))
-            if self.weight != 0.0:
-                props.append("WEIGHT={0:.6g}".format(self.weight * 1e-3))
-            if self.ax != 0.0:
-                props.append("AX={0:.6g}".format(self.ax))
-            if self.ay != 0.0:
-                props.append("AY={0:.6g}".format(self.ay))
+            props.extend([
+                "{0:.6g}".format(self.weight * 1e-3),
+                "{0:.6g}".format(self.ax),
+                "{0:.6g}".format(self.ay),
+            ])
         return ", ".join(props) + "\n"
+
+
+def dlod_type_from_code(code):
+    c = int(code)
+    mapping = {
+        DLOD_AREA: DiaphragmLoad.AREA,
+        DLOD_LINE: DiaphragmLoad.LINE,
+        DLOD_MEMBER_TRANSFER: DiaphragmLoad.MEMBER_TRANSFER,
+        DLOD_MASS: DiaphragmLoad.MASS,
+        DLOD_WEIGHT: DiaphragmLoad.WEIGHT,
+    }
+    if c not in mapping:
+        raise ValueError("Unknown DLOD TYPE code: {0}".format(code))
+    return mapping[c]
+
+
+def dlod_type_to_code(load_type):
+    mapping = {
+        DiaphragmLoad.AREA: DLOD_AREA,
+        DiaphragmLoad.LINE: DLOD_LINE,
+        DiaphragmLoad.MEMBER_TRANSFER: DLOD_MEMBER_TRANSFER,
+        DiaphragmLoad.MASS: DLOD_MASS,
+        DiaphragmLoad.WEIGHT: DLOD_WEIGHT,
+    }
+    lt = str(load_type).strip().upper()
+    if lt not in mapping:
+        raise ValueError("Unknown DLOD TYPE: {0}".format(load_type))
+    return mapping[lt]
 
 
 class DiaphragmPolygon:
@@ -297,17 +425,19 @@ class DiaphragmConnection:
         self.spring_properties = _spring_properties
 
     def OutputDConInfo(self):
+        trgt = dcon_trgt_to_code(self.target_type)
+        conn = dcon_conn_to_code(self.connection_type)
+        target_id = "" if self.target_id is None else "{0: >6}".format(self.target_id)
         props = [
             "DCON",
             "{0: >6}".format(self.diaphragm_id),
-            "{0: >8}".format(self.target_type),
+            "{0: >4}".format(trgt),
+            target_id,
+            "{0: >4}".format(conn),
+            "{0:.6g}".format(self.tolerance),
         ]
-        if self.target_type in ["MEMBER", "ELEM", "ELEMENT", "NODE", "ND"] and self.target_id is not None:
-            props.append("{0: >6}".format(self.target_id))
-        props.append("{0: >16}".format(self.connection_type))
-        props.append("TOL={0:.6g}".format(self.tolerance))
         if self.constraint_spacing is not None:
-            props.append("SPACING={0:.6g}".format(self.constraint_spacing))
+            props.append("{0:.6g}".format(self.constraint_spacing))
         return ", ".join(props) + "\n"
 
 

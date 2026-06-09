@@ -31,7 +31,7 @@ class TestWoodRatedWall(unittest.TestCase):
 
     def test_equivalent_brace_generation_from_multiplier(self):
         lines = self._base_lines() + [
-            "WOOD_RATED_WALL, 1, W1, MODEL=EQUIVALENT_BRACE, M=2.0, L=1.82, H=2.73, DIR=X, RA=0.0083333333, N1=1, N2=2, N3=3, N4=4",
+            "WWLL, 1, W1, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 1, 2, 3, 4, , 1",
         ]
         mdl = parse_input(lines)
 
@@ -46,7 +46,7 @@ class TestWoodRatedWall(unittest.TestCase):
 
     def test_shear_panel_generates_panel_stiffness(self):
         lines = self._base_lines() + [
-            "WOOD_RATED_WALL, 2, W2, MODEL=SHEAR_PANEL, M=1.5, L=1.82, H=2.73, DIR=Y, RA=0.01, N1=1, N2=2, N3=3, N4=4",
+            "WWLL, 2, W2, 1, 1.5, 1.82, 2.73, 1, 0.01, 1, 2, 3, 4, , 1",
         ]
         mdl = parse_input(lines)
         w = mdl.wwalls[0]
@@ -59,7 +59,7 @@ class TestWoodRatedWall(unittest.TestCase):
 
     def test_membrane_wall_is_reserved(self):
         lines = self._base_lines() + [
-            "WOOD_RATED_WALL, 3, W3, MODEL=MEMBRANE_WALL, M=1.5, L=1.82, H=2.73, DIR=X, RA=0.01, N1=1, N2=2, N3=3, N4=4",
+            "WWLL, 3, W3, 2, 1.5, 1.82, 2.73, 0, 0.01, 1, 2, 3, 4, , 1",
         ]
         with self.assertRaises(StbParseError):
             parse_input(lines)
@@ -107,7 +107,7 @@ class TestWoodRatedWall(unittest.TestCase):
             "CONS, 2, 1, 1, 1, 1, 1, 1",
             "CONS, 3, 0, 1, 1, 1, 1, 1",
             "CONS, 4, 0, 1, 1, 1, 1, 1",
-            "WOOD_RATED_WALL, 1, W1, MODEL=EQUIVALENT_BRACE, M=2.0, L=1.82, H=2.73, DIR=X, RA=0.0083333333, N1=1, N2=2, N3=3, N4=4",
+            "WWLL, 1, W1, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 1, 2, 3, 4, , 1",
             "PLOD, 3, 1, 1.0, 0, 0, 0, 0, 0",
             "PLOD, 4, 1, 1.0, 0, 0, 0, 0, 0",
         ]
@@ -133,7 +133,7 @@ class TestWoodRatedWall(unittest.TestCase):
             "CONS, 2, 1, 1, 1, 1, 1, 1",
             "CONS, 3, 1, 0, 1, 1, 1, 1",
             "CONS, 4, 1, 1, 1, 1, 1, 1",
-            "WOOD_RATED_WALL, 2, W2, MODEL=SHEAR_PANEL, M=1.5, L=1.82, H=2.73, DIR=Y, RA=0.01, N1=1, N2=2, N3=3, N4=4",
+            "WWLL, 2, W2, 1, 1.5, 1.82, 2.73, 1, 0.01, 1, 2, 3, 4, , 1",
             "PLOD, 3, 1, 0, 1.0, 0, 0, 0, 0",
         ]
         mdl, _txt = run_from_lines(lines)
