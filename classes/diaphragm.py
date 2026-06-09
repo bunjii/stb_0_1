@@ -18,6 +18,60 @@ ASSOC_NONE = "none"
 HOST_EDGE = "diaphragm_edge"
 HOST_TRIANGLE = "diaphragm_triangle"
 
+DIAP_RIGID = "RIGID"
+DIAP_SEMI_RIGID = "SEMI_RIGID"
+DIAP_FLEXIBLE = "FLEXIBLE"
+
+TIMBER_FLOOR = "TIMBER_FLOOR"
+TIMBER_ROOF = "TIMBER_ROOF"
+TIMBER_REFERENCE_DRIFT = 1.0 / 150.0
+TIMBER_UNIT_SHEAR_STRENGTH = 1.96e3  # [N/m] per floor/roof multiplier.
+
+
+def normalize_diaphragm_type(value):
+    s = str(value).strip().upper()
+    if s in ["SEMI", "SEMIRIGID", "SEMI-RIGID", "SEMI_RIGID"]:
+        return DIAP_SEMI_RIGID
+    if s in ["FLEX", "FLEXIBLE"]:
+        return DIAP_FLEXIBLE
+    if s == "RIGID":
+        return DIAP_RIGID
+    raise ValueError("Unknown DIAP type: {0}".format(value))
+
+
+def timber_multiplier_to_gt(multiplier, reference_drift=TIMBER_REFERENCE_DRIFT,
+                            unit_shear_strength=TIMBER_UNIT_SHEAR_STRENGTH):
+    """Convert Japanese timber floor/roof multiplier to membrane shear stiffness.
+
+    The multiplier is specified as allowable shear force per unit length, not as
+    Ex/Ey/Gxy.  Dividing by a reference drift angle gives equivalent G*t [N/m].
+    """
+
+    drift = float(reference_drift)
+    if drift <= 0.0:
+        raise ValueError("REFERENCE_DRIFT must be positive")
+    return float(multiplier) * float(unit_shear_strength) / drift
+
+
+def make_timber_diaphragm_material(_id, _name, _kind, _multiplier,
+                                   _reference_drift=TIMBER_REFERENCE_DRIFT,
+                                   _nuxy=0.0, _thickness=1.0):
+    gt = timber_multiplier_to_gt(_multiplier, _reference_drift)
+    t = float(_thickness)
+    if t <= 0.0:
+        raise ValueError("Equivalent diaphragm thickness must be positive")
+    gxy = gt / t
+    # Use a neutral isotropic membrane for the auto material; the meaningful
+    # timber input is G*t, while Ex/Ey are numerical companions for plane stress.
+    e = 2.0 * (1.0 + float(_nuxy)) * gxy
+    mat = DiaphragmMaterial(_id, _name, e, e, gxy, _nuxy)
+    mat.source = str(_kind).upper()
+    mat.multiplier = float(_multiplier)
+    mat.reference_drift = float(_reference_drift)
+    mat.equivalent_gt = float(gt)
+    mat.equivalent_thickness = t
+    return mat
+
 
 class DiaphragmMaterial:
     """Plane-stress material for diaphragm membrane elements."""
@@ -32,6 +86,11 @@ class DiaphragmMaterial:
         self.gamma = _gamma
         self.alpha = _alpha
         self.cid = None
+        self.source = "DMAT"
+        self.multiplier = None
+        self.reference_drift = None
+        self.equivalent_gt = None
+        self.equivalent_thickness = None
 
     @property
     def nuyx(self):
@@ -102,14 +161,24 @@ class DiaphragmMaterial:
 class DiaphragmRegion:
     """High-level diaphragm region metadata."""
 
-    def __init__(self, _id, _name, _type, _mat, _thickness, _theta=0.0):
+    def __init__(self, _id, _name, _type, _mat=None, _thickness=None, _theta=0.0,
+                 _source="DMAT", _hmax=None, _reference_drift=None,
+                 _timber_multiplier=None):
         self.id = _id
         self.name = _name
-        self.type = str(_type).upper()
+        self.type = normalize_diaphragm_type(_type)
         self.mat = _mat
         self.t = _thickness
         self.theta = _theta
         self.cid = None
+        self.source = str(_source).upper() if _source is not None else "DMAT"
+        self.hmax = _hmax
+        self.reference_drift = _reference_drift
+        self.timber_multiplier = _timber_multiplier
+
+    @property
+    def uses_membrane_stiffness(self):
+        return self.type == DIAP_SEMI_RIGID and self.mat is not None and self.t is not None
 
     def OutputDiapInfo(self):
         props = [
@@ -117,10 +186,87 @@ class DiaphragmRegion:
             "{0: >6}".format(self.id),
             "{0: >10}".format(self.name),
             "{0: >8}".format(self.type),
-            "DMAT={0}".format(self.mat.id),
-            "T={0:.3f}".format(self.t * 1e3),
-            "THETA={0:.3f}".format(self.theta),
         ]
+        if self.source in [TIMBER_FLOOR, TIMBER_ROOF]:
+            props.append(self.source)
+            key = "FLOOR_MAG" if self.source == TIMBER_FLOOR else "ROOF_MAG"
+            props.append("{0}={1:.3f}".format(key, self.timber_multiplier))
+        elif self.mat is not None:
+            props.append("DMAT={0}".format(self.mat.id))
+        if self.t is not None:
+            props.append("T={0:.3f}".format(self.t * 1e3))
+        props.extend([
+            "THETA={0:.3f}".format(self.theta),
+        ])
+        if self.reference_drift is not None:
+            props.append("REFERENCE_DRIFT={0:.8g}".format(self.reference_drift))
+        if self.hmax is not None:
+            props.append("HMAX={0:.3f}".format(self.hmax * 1e3))
+        return ", ".join(props) + "\n"
+
+
+class DiaphragmLoad:
+    """Diaphragm-level horizontal load or seismic mass metadata."""
+
+    AREA = "AREA"
+    LINE = "LINE"
+    MEMBER_TRANSFER = "MEMBER_TRANSFER"
+    MASS = "MASS"
+    WEIGHT = "WEIGHT"
+
+    def __init__(self, _diap_id, _lc, _load_type, _px=0.0, _py=0.0,
+                 _node_ids=None, _member_id=None, _mass=0.0, _weight=0.0,
+                 _ax=0.0, _ay=0.0, _source="USER", _combi=False):
+        self.diap_id = _diap_id
+        self.lc = _lc
+        self.load_type = str(_load_type).upper()
+        self.px = float(_px)
+        self.py = float(_py)
+        self.node_ids = _node_ids if _node_ids is not None else []
+        self.member_id = _member_id
+        self.mass = float(_mass)
+        self.weight = float(_weight)
+        self.ax = float(_ax)
+        self.ay = float(_ay)
+        self.source = str(_source).upper()
+        self.combi = _combi
+        self.clc = None
+
+    def OutputDLoadInfo(self):
+        props = [
+            "DLOD",
+            "{0: >6}".format(self.diap_id),
+            "{0: >4}".format(self.lc),
+            "{0: >16}".format(self.load_type),
+        ]
+        if self.load_type == DiaphragmLoad.AREA:
+            props.extend([
+                "PX={0:.6g}".format(self.px * 1e-3),
+                "PY={0:.6g}".format(self.py * 1e-3),
+            ])
+        elif self.load_type == DiaphragmLoad.LINE:
+            if len(self.node_ids) >= 2:
+                props.extend(["N1={0}".format(self.node_ids[0]), "N2={0}".format(self.node_ids[1])])
+            props.extend([
+                "PX={0:.6g}".format(self.px * 1e-3),
+                "PY={0:.6g}".format(self.py * 1e-3),
+            ])
+        elif self.load_type == DiaphragmLoad.MEMBER_TRANSFER:
+            if self.member_id is not None:
+                props.append("MEMBER={0}".format(self.member_id))
+            props.extend([
+                "PX={0:.6g}".format(self.px * 1e-3),
+                "PY={0:.6g}".format(self.py * 1e-3),
+            ])
+        else:
+            if self.mass != 0.0:
+                props.append("MASS={0:.6g}".format(self.mass))
+            if self.weight != 0.0:
+                props.append("WEIGHT={0:.6g}".format(self.weight * 1e-3))
+            if self.ax != 0.0:
+                props.append("AX={0:.6g}".format(self.ax))
+            if self.ay != 0.0:
+                props.append("AY={0:.6g}".format(self.ay))
         return ", ".join(props) + "\n"
 
 
@@ -156,7 +302,7 @@ class DiaphragmConnection:
             "{0: >6}".format(self.diaphragm_id),
             "{0: >8}".format(self.target_type),
         ]
-        if self.target_type in ["MEMBER", "ELEM", "ELEMENT"] and self.target_id is not None:
+        if self.target_type in ["MEMBER", "ELEM", "ELEMENT", "NODE", "ND"] and self.target_id is not None:
             props.append("{0: >6}".format(self.target_id))
         props.append("{0: >16}".format(self.connection_type))
         props.append("TOL={0:.6g}".format(self.tolerance))
@@ -285,6 +431,95 @@ def triangle_shape_weights(point, node_a, node_b, node_c, tolerance=common.PRES_
     return weights
 
 
+def _polygon_area_2d(points):
+    if len(points) < 3:
+        return 0.0
+    area = 0.0
+    for i in range(len(points)):
+        x0, y0 = points[i]
+        x1, y1 = points[(i + 1) % len(points)]
+        area += x0 * y1 - y0 * x1
+    return 0.5 * area
+
+
+def _point_in_polygon_2d(x, y, polygon, tolerance=common.PRES_LEN):
+    if len(polygon) < 3:
+        return False
+    inside = False
+    j = len(polygon) - 1
+    for i in range(len(polygon)):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        dx = xj - xi
+        dy = yj - yi
+        seg_len2 = dx * dx + dy * dy
+        if seg_len2 > common.PRES_ZERO:
+            r = ((x - xi) * dx + (y - yi) * dy) / seg_len2
+            if -tolerance <= r <= 1.0 + tolerance:
+                px = xi + max(0.0, min(1.0, r)) * dx
+                py = yi + max(0.0, min(1.0, r)) * dy
+                if math.hypot(x - px, y - py) <= tolerance:
+                    return True
+        if (yi > y) != (yj > y):
+            x_cross = (xj - xi) * (y - yi) / (yj - yi + 1e-300) + xi
+            if x < x_cross:
+                inside = not inside
+        j = i
+    return inside
+
+
+def build_rigid_diaphragm_mpcs(mdl, ndof=6):
+    """Generate ux/uy rigid-diaphragm MPCs for RIGID DIAP regions with DREG."""
+
+    by_diap = {d.id: d for d in getattr(mdl, "diaps", [])}
+    out = []
+    for reg in getattr(mdl, "dregs", []):
+        diap = by_diap.get(reg.diap_id)
+        if diap is None or diap.type != DIAP_RIGID:
+            continue
+        poly_nodes = []
+        for nid in reg.node_ids:
+            n = mdl.FindNodeFromId(nid)
+            if n != -1:
+                poly_nodes.append(n)
+        if len(poly_nodes) < 3:
+            continue
+
+        master = None
+        for n in poly_nodes:
+            if not (is_node_constrained(n, 0) or is_node_constrained(n, 1)):
+                master = n
+                break
+        if master is None:
+            master = poly_nodes[0]
+
+        z0 = sum(n.z for n in poly_nodes) / float(len(poly_nodes))
+        poly = [(n.x, n.y) for n in poly_nodes]
+        if _polygon_area_2d(poly) < 0.0:
+            poly = list(reversed(poly))
+
+        targets = []
+        for n in getattr(mdl, "nds", []):
+            if n is master:
+                continue
+            if abs(n.z - z0) > common.PRES_LEN:
+                continue
+            if _point_in_polygon_2d(n.x, n.y, poly):
+                targets.append(n)
+
+        mx = master.cid * ndof
+        my = master.cid * ndof + 1
+        mrz = master.cid * ndof + 5
+        for n in targets:
+            dx = n.x - master.x
+            dy = n.y - master.y
+            if not is_node_constrained(n, 0):
+                out.append(MPCConstraint(n.cid * ndof, [mx, mrz], [1.0, -dy]))
+            if not is_node_constrained(n, 1):
+                out.append(MPCConstraint(n.cid * ndof + 1, [my, mrz], [1.0, dx]))
+    return out
+
+
 def diaphragm_boundary_edges(dmems, diap):
     """Extract exterior mesh edges for one diaphragm as edge records."""
 
@@ -359,7 +594,7 @@ def build_diaphragm_mpcs(mdl, ndof=6):
     """Resolve DCON requests into associations and ux/uy MPC constraints."""
 
     mdl.dassocs = []
-    mdl.mpcs = []
+    mdl.mpcs = build_rigid_diaphragm_mpcs(mdl, ndof)
     dcons = getattr(mdl, "dcons", [])
     if not dcons:
         return [], []
@@ -367,11 +602,14 @@ def build_diaphragm_mpcs(mdl, ndof=6):
     by_diap = {d.id: d for d in getattr(mdl, "diaps", [])}
     member_overrides = {}
     auto_specs = []
+    node_specs = []
     for dc in dcons:
         if dc.target_type == "AUTO":
             auto_specs.append(dc)
         elif dc.target_type in ["MEMBER", "ELEM", "ELEMENT"]:
             member_overrides[(dc.diaphragm_id, dc.target_id)] = dc
+        elif dc.target_type in ["NODE", "ND"]:
+            node_specs.append(dc)
 
     specs = []
     for dc in auto_specs:
@@ -443,6 +681,44 @@ def build_diaphragm_mpcs(mdl, ndof=6):
         mdl.dassocs.append(DiaphragmMemberAssociation(
             dc.diaphragm_id, e.id, assoc_type, dc.connection_type, cps
         ))
+
+    for dc in node_specs:
+        if dc.connection_type == CONN_DISCONNECTED:
+            continue
+        diap = by_diap.get(dc.diaphragm_id)
+        if diap is None:
+            continue
+        node = mdl.FindNodeFromId(dc.target_id)
+        if node == -1:
+            continue
+        if is_node_constrained(node, 0) or is_node_constrained(node, 1):
+            continue
+
+        p = _node_xyz(node)
+        host = find_boundary_host(p, mdl.dmems, diap, dc.tolerance)
+        if host is None:
+            host = find_triangle_host(p, mdl.dmems, diap, dc.tolerance)
+        if host is None:
+            continue
+        cp = ConstraintPoint(
+            -1, 0.0, p, host["host_type"], host["host_entity_id"],
+            host["weights"], host["host_nodes"], node, [0, 1]
+        )
+        if dc.connection_type == CONN_CONNECTED_RIGID:
+            for dof in [0, 1]:
+                slave = node.cid * ndof + dof
+                master_dofs = []
+                coeffs = []
+                for hn, w in zip(cp.host_nodes, cp.shape_function_weights):
+                    mdof = hn.cid * ndof + dof
+                    if mdof == slave:
+                        continue
+                    if abs(w) < common.PRES_ZERO:
+                        continue
+                    master_dofs.append(mdof)
+                    coeffs.append(float(w))
+                if master_dofs:
+                    mdl.mpcs.append(MPCConstraint(slave, master_dofs, coeffs))
 
     return mdl.dassocs, mdl.mpcs
 
@@ -538,6 +814,11 @@ class CSTMembrane3:
         self.CalcLocalAxes()
         self.CalcBMatrix()
         self.CalcTransformation()
+        if not self.diap.uses_membrane_stiffness:
+            self.D = np.zeros((3, 3), dtype=np.float64)
+            self.ek = np.zeros((6, 6), dtype=np.float64)
+            self.ekG = np.zeros((9, 9), dtype=np.float64)
+            return
         self.D = self.diap.mat.DRotated(self.diap.theta)
         self.ek = self.diap.t * self.area * (self.B.T @ self.D @ self.B)
         self.ekG = self.T.T @ self.ek @ self.T

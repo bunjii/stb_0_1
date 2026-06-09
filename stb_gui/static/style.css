@@ -82,6 +82,29 @@ html, body {
   font-weight: 600;
 }
 
+#toolbar button#btnToggleDistance.active {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+
+.distance-overlay {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  z-index: 21;
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 #status {
   margin-left: auto;
   color: #aaa;

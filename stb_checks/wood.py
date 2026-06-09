@@ -42,15 +42,32 @@ class WoodElementCheck:
 class WoodCheckTables:
     element_checks: Tuple[dict, ...]
     member_classes: Tuple[dict, ...]
+    wall_checks: Tuple[dict, ...]
 
 
 @dataclass(frozen=True)
 class WoodCheckSummary:
     element_checks: Tuple[WoodElementCheck, ...]
+    wall_checks: Tuple["WoodWallCheck", ...]
     warnings: Tuple[str, ...]
     max_ratio: float
     status: str
     tables: WoodCheckTables
+
+
+@dataclass(frozen=True)
+class WoodWallCheck:
+    wall_id: int
+    wall_name: str
+    direction: str
+    wall_magnification: float
+    wall_length: float
+    wall_height: float
+    allowable_shear_capacity_Qa: float
+    analysis_shear_force_Q: float
+    utilization_ratio: float
+    status: str
+    governing_load_case: int
 
 
 def build_wood_check_summary(mdl, project: ProjectDefinition):
@@ -85,14 +102,18 @@ def build_wood_check_summary(mdl, project: ProjectDefinition):
                 continue
             checks.append(_check_element(e, member_class, load_cases, load_case_indices, project, warnings))
 
+    wall_checks = _check_wood_rated_walls(mdl, load_cases, load_case_indices, warnings)
+
     if not checks:
         warnings.append("No beam, column, or brace member classes were available for wood checks.")
 
-    max_ratio = max([c.combined_ratio for c in checks] + [0.0])
-    status = "OK" if checks and max_ratio <= 1.0 else "NG" if checks else "WARN"
-    tables = _build_tables(checks, project)
+    max_ratio = max([c.combined_ratio for c in checks] + [wc.utilization_ratio for wc in wall_checks] + [0.0])
+    has_any = bool(checks or wall_checks)
+    status = "OK" if has_any and max_ratio <= 1.0 else "NG" if has_any else "WARN"
+    tables = _build_tables(checks, wall_checks, project)
     return WoodCheckSummary(
         element_checks=tuple(checks),
+        wall_checks=tuple(wall_checks),
         warnings=tuple(warnings),
         max_ratio=max_ratio,
         status=status,
@@ -286,7 +307,7 @@ def _ratio(demand, capacity):
     return max(0.0, demand) / capacity
 
 
-def _build_tables(checks, project):
+def _build_tables(checks, wall_checks, project):
     checks_by_class = {}
     for check in checks:
         checks_by_class.setdefault(check.member_class, []).append(check)
@@ -308,6 +329,7 @@ def _build_tables(checks, project):
             for member_class in project.member_classes
             if member_class.kind in CHECKED_MEMBER_KINDS
         ),
+        wall_checks=tuple(_wall_check_to_dict(c) for c in wall_checks),
     )
 
 
@@ -334,4 +356,99 @@ def _check_to_dict(check):
             "moment_z": check.demand.moment_z,
             "deflection": check.demand.deflection,
         },
+    }
+
+
+def _check_wood_rated_walls(mdl, load_cases, load_case_indices, warnings):
+    out = []
+    for w in getattr(mdl, "wwalls", []):
+        best = None
+        qa = float(getattr(w, "qa_kN", 0.0))
+        if qa <= DEFAULT_TOLERANCE:
+            warnings.append("WOOD_RATED_WALL {0} has non-positive Qa.".format(w.id))
+            continue
+        for lc in load_cases:
+            q = _wall_shear_for_load_case(mdl, w, lc, load_case_indices, warnings)
+            util = abs(q) / qa if qa > DEFAULT_TOLERANCE else 0.0
+            wc = WoodWallCheck(
+                wall_id=int(w.id),
+                wall_name=str(w.name),
+                direction=str(w.direction),
+                wall_magnification=float(w.multiplier),
+                wall_length=float(w.length),
+                wall_height=float(w.height),
+                allowable_shear_capacity_Qa=qa,
+                analysis_shear_force_Q=float(q),
+                utilization_ratio=float(util),
+                status="OK" if util <= 1.0 else "NG",
+                governing_load_case=int(lc),
+            )
+            if best is None or wc.utilization_ratio > best.utilization_ratio:
+                best = wc
+        if best is not None:
+            out.append(best)
+    return out
+
+
+def _wall_shear_for_load_case(mdl, w, lc, load_case_indices, warnings):
+    clc = load_case_indices.get(lc)
+    if clc is None:
+        return 0.0
+    model = str(getattr(w, "model_active", getattr(w, "model_requested", "EQUIVALENT_BRACE"))).upper()
+    if model == "SHEAR_PANEL":
+        if not getattr(mdl, "wshears", None):
+            warnings.append("WOOD_RATED_WALL {0} has SHEAR_PANEL model but no panel object.".format(w.id))
+            return 0.0
+        panels = [sp for sp in mdl.wshears if getattr(sp, "wall_id", None) == w.id]
+        if not panels:
+            warnings.append("WOOD_RATED_WALL {0} has no SHEAR_PANEL record.".format(w.id))
+            return 0.0
+        return sum([_shear_panel_force(sp, clc) for sp in panels])
+    return _wall_shear_from_equivalent_braces(mdl, w, clc, warnings)
+
+
+def _wall_shear_from_equivalent_braces(mdl, w, clc, warnings):
+    eids = list(getattr(w, "generated_elem_ids", []) or [])
+    if not eids:
+        warnings.append("WOOD_RATED_WALL {0} has no generated equivalent braces.".format(w.id))
+        return 0.0
+    d = float(getattr(w, "diagonal_length", math.sqrt(w.length ** 2 + w.height ** 2)))
+    L = float(getattr(w, "length", 0.0))
+    if d <= DEFAULT_TOLERANCE or L <= DEFAULT_TOLERANCE:
+        return 0.0
+    q = 0.0
+    for eid in eids:
+        e = mdl.FindElemFromEid(eid)
+        if e == -1 or getattr(e, "forces", None) is None:
+            continue
+        f = e.forces[:, clc]
+        n = max(abs(float(f[0])), abs(float(f[6])))
+        # Convert brace axial force back to wall shear component.
+        q += n * L / d
+    return q * 1e-3  # N -> kN
+
+
+def _shear_panel_force(sp, clc):
+    dof = 0 if str(sp.direction).upper() == "X" else 1
+    d1 = float(sp.n1.disps[dof, clc]) if sp.n1.disps is not None else 0.0
+    d2 = float(sp.n2.disps[dof, clc]) if sp.n2.disps is not None else 0.0
+    d3 = float(sp.n3.disps[dof, clc]) if sp.n3.disps is not None else 0.0
+    d4 = float(sp.n4.disps[dof, clc]) if sp.n4.disps is not None else 0.0
+    delta = 0.5 * (d3 + d4) - 0.5 * (d1 + d2)
+    return float(sp.k) * delta * 1e-3  # N -> kN
+
+
+def _wall_check_to_dict(check):
+    return {
+        "wall_id": check.wall_id,
+        "wall_name": check.wall_name,
+        "direction": check.direction,
+        "wall_magnification": check.wall_magnification,
+        "wall_length": check.wall_length,
+        "wall_height": check.wall_height,
+        "allowable_shear_capacity_Qa": check.allowable_shear_capacity_Qa,
+        "analysis_shear_force_Q": check.analysis_shear_force_Q,
+        "utilization_ratio": check.utilization_ratio,
+        "status": check.status,
+        "governing_load_case": check.governing_load_case,
     }

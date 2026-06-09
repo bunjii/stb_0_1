@@ -24,7 +24,7 @@ class TestWoodChecks(unittest.TestCase):
         summary = build_wood_check_summary(mdl, project)
 
         self.assertEqual(len(summary.element_checks), 10)
-        self.assertEqual(summary.tables.member_classes[0]["name"], "roof_beams")
+        self.assertEqual(summary.tables.member_classes[0]["name"], "floor_beams")
         self.assertEqual(summary.tables.member_classes[0]["checked_count"], 4)
         self.assertEqual(summary.tables.member_classes[1]["checked_count"], 4)
         self.assertEqual(summary.tables.member_classes[2]["checked_count"], 2)

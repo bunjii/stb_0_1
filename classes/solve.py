@@ -473,6 +473,16 @@ class Solve:
                 for j in range(9):
                     kG[dofs[i], dofs[j]] += m.ekG[i, j]
 
+        for w in getattr(mdl, "wshears", []):
+            dof = w.dof()
+            nodes = w.nodes()
+            ws = w.stiffness_weights()
+            for i in range(4):
+                ri = ndof * nodes[i].cid + dof
+                for j in range(4):
+                    rj = ndof * nodes[j].cid + dof
+                    kG[ri, rj] += w.k * ws[i] * ws[j]
+
         self.kG_orig = kG.copy() # this is for calculating reactions later.
 
         # apply constraints
@@ -573,6 +583,8 @@ class Solve:
 
                 ld = l.lds[i]           
                 lm[row + i, col] += ld
+
+        self.AddDiaphragmLoads(lm)
 
         #
         # for element load
@@ -680,6 +692,81 @@ class Solve:
             )
 
         return lm
+
+    def AddDiaphragmLoads(self, lm):
+        by_diap = {d.id: d for d in getattr(self.mdl, "diaps", [])}
+        by_node = {n.id: n for n in getattr(self.mdl, "nds", [])}
+        for dl in getattr(self.mdl, "dloads", []):
+            col = dl.clc
+            if col is None:
+                continue
+            if dl.load_type == "AREA":
+                for node, fx, fy in self._diaphragm_area_nodal_loads(dl, by_diap):
+                    self._add_xy_load(lm, node, col, fx, fy)
+            elif dl.load_type == "LINE":
+                if len(dl.node_ids) < 2:
+                    continue
+                n0 = by_node.get(dl.node_ids[0])
+                n1 = by_node.get(dl.node_ids[1])
+                if n0 is None or n1 is None:
+                    continue
+                L = math.sqrt((n1.x - n0.x) ** 2 + (n1.y - n0.y) ** 2 + (n1.z - n0.z) ** 2)
+                fx = dl.px * L * 0.5
+                fy = dl.py * L * 0.5
+                self._add_xy_load(lm, n0, col, fx, fy)
+                self._add_xy_load(lm, n1, col, fx, fy)
+            elif dl.load_type in ["MASS", "WEIGHT"]:
+                px = dl.mass * dl.ax + dl.weight / common.GRAVITY * dl.ax
+                py = dl.mass * dl.ay + dl.weight / common.GRAVITY * dl.ay
+                if abs(px) < common.PRES_ZERO and abs(py) < common.PRES_ZERO:
+                    continue
+                mass_load = copy.copy(dl)
+                mass_load.px = px
+                mass_load.py = py
+                for node, fx, fy in self._diaphragm_area_nodal_loads(mass_load, by_diap):
+                    self._add_xy_load(lm, node, col, fx, fy)
+
+    def _add_xy_load(self, lm, node, col, fx, fy):
+        row = node.cid * self.ndof
+        lm[row + 0, col] += fx
+        lm[row + 1, col] += fy
+
+    def _diaphragm_area_nodal_loads(self, dl, by_diap):
+        diap = by_diap.get(dl.diap_id)
+        if diap is None:
+            return []
+
+        loads = []
+        dmems = [m for m in getattr(self.mdl, "dmems", []) if m.diap.id == dl.diap_id]
+        if dmems:
+            for m in dmems:
+                f = m.area / 3.0
+                for n in [m.n0, m.n1, m.n2]:
+                    loads.append((n, dl.px * f, dl.py * f))
+            return loads
+
+        for reg in getattr(self.mdl, "dregs", []):
+            if reg.diap_id != dl.diap_id:
+                continue
+            nodes = []
+            for nid in reg.node_ids:
+                n = self.mdl.FindNodeFromId(nid)
+                if n != -1:
+                    nodes.append(n)
+            if len(nodes) < 3:
+                continue
+            area = 0.0
+            for i in range(len(nodes)):
+                n0 = nodes[i]
+                n1 = nodes[(i + 1) % len(nodes)]
+                area += n0.x * n1.y - n0.y * n1.x
+            area = abs(area) * 0.5
+            if area <= common.PRES_ZERO:
+                continue
+            f = area / float(len(nodes))
+            for n in nodes:
+                loads.append((n, dl.px * f, dl.py * f))
+        return loads
 
     def _connected_boundary_assoc(self, _e):
         for a in getattr(self.mdl, "dassocs", []):

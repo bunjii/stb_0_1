@@ -33,9 +33,12 @@ NEW_MODEL_TEMPLATE = """# --- NEW MODEL ---
 # ELEM,      0,      0,      1,      0,      0.0
 #
 # --- DIAPHRAGM REGION(DIAP) ---
-#         ID,       NAME,    TYPE,     DMAT,        T,    THETA
-#                                             (mm)     (deg)
+#         ID,       NAME,    TYPE,     DMAT/PRESET,        T,    THETA
+#     TYPE: RIGID, SEMI/SEMI_RIGID, FLEX/FLEXIBLE
 # DIAP,      1,  RC_SLAB,     SEMI,  DMAT=0,  T=150,  THETA=0
+# DIAP,     10,  2F_MAIN,     SEMI,  TIMBER_FLOOR,  FLOOR_MAG=2.0,  THETA=0,  HMAX=1820
+# DIAP,     20,   ROOF_A,     SEMI,  TIMBER_ROOF,   ROOF_MAG=1.0,   THETA=30, HMAX=1820
+# DIAP,     30,  RIGID2F,    RIGID
 #
 # --- DIAPHRAGM OUTER POLYGON(DREG) ---
 #    DIAP ID,  NODE1,  NODE2,  NODE3, ...
@@ -54,6 +57,23 @@ NEW_MODEL_TEMPLATE = """# --- NEW MODEL ---
 # DCON,      1,     AUTO,  CONNECTED_RIGID,  TOL=0.01
 # DCON,      1,   MEMBER,      0,  CONNECTED_RIGID,  TOL=0.01
 # DCON,      1,   MEMBER,      1,  DISCONNECTED
+# DCON,      1,     NODE,     35,  CONNECTED_RIGID,  TOL=0.01
+#
+# --- DIAPHRAGM LOAD(DLOD) ---
+#    DIAP ID,    LC,            TYPE,  PX/PY or MASS/WEIGHT
+#         AREA: kN/m2, LINE: kN/m, WEIGHT: kN/m2, MASS: kg/m2
+# DLOD,      1,     1,            AREA,  PX=1.0, PY=0.0
+# DLOD,      1,     1,            LINE,  N1=0, N2=1, PX=2.0, PY=0.0
+# DLOD,      1,     1,          WEIGHT,  WEIGHT=3.0, AX=1.0, AY=0.0
+#
+# --- WOOD RATED WALL(WOOD_RATED_WALL) ---
+#         ID,       NAME, MODEL=EQUIVALENT_BRACE/SHEAR_PANEL/MEMBRANE_WALL,
+#                         M=wall multiplier, L=wall length(m), H=wall height(m),
+#                         DIR=X/Y, RA=reference drift, N1..N4=wall corner nodes
+# WOOD_RATED_WALL,  1,  W1_X,  MODEL=EQUIVALENT_BRACE,  M=2.0,  L=1.82,  H=2.73,
+#                      DIR=X,  RA=0.0083333333,  N1=11,  N2=12,  N3=22,  N4=21,  DIAP=10
+# WOOD_RATED_WALL,  2,  W2_Y,  MODEL=SHEAR_PANEL,  M=2.5,  L=1.82,  H=2.73,
+#                      DIR=Y,  RA=0.0083333333,  N1=12,  N2=13,  N3=23,  N4=22,  DIAP=10
 #
 # --- ELEMENT JOINT(EJNT) ---
 #    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj

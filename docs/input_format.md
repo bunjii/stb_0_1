@@ -134,9 +134,9 @@ Short alias: `ej`.
 DMAT, ID, NAME, Ex, Ey, Gxy, Nuxy, Gamma, Alpha
 ```
 
-Plane-stress material used by diaphragm membrane elements. This is the low-level
-input for verification and advanced use. Ordinary preset inputs will be added on
-top of this in later phases.
+Plane-stress material used by diaphragm membrane elements. This remains the
+low-level input for verification and advanced use when `Ex`, `Ey`, `Gxy`,
+`Nuxy`, and membrane thickness should be specified directly.
 
 | Field | Unit | Description |
 |-------|------|-------------|
@@ -153,23 +153,49 @@ For isotropic behavior, use `Ex = Ey = E`, `Gxy = E / (2(1 + nu))`, `Nuxy = nu`.
 
 ```
 DIAP, ID, NAME, TYPE, DMAT=MAT_ID, T=THICKNESS, THETA=ANGLE
+DIAP, ID, NAME, SEMI, TIMBER_FLOOR, FLOOR_MAG=..., THETA=..., HMAX=..., REFERENCE_DRIFT=...
+DIAP, ID, NAME, SEMI, TIMBER_ROOF, ROOF_MAG=..., THETA=..., HMAX=..., REFERENCE_DRIFT=...
 ```
 
-Defines a floor/roof diaphragm region. Phase 1 supports `TYPE = SEMI` with
-manual `DMEM` triangles. `RIGID` and `FLEX` are reserved for future diaphragm
-strategy switching.
+Defines a floor/roof diaphragm region.
 
 | Field | Unit | Description |
 |-------|------|-------------|
-| TYPE | — | `SEMI`, `RIGID`, or `FLEX` |
-| DMAT | — | Diaphragm material ID |
-| T | mm | Membrane thickness |
+| TYPE | — | `RIGID`, `SEMI`/`SEMI_RIGID`, or `FLEX`/`FLEXIBLE` |
+| DMAT | — | Diaphragm material ID for low-level membrane input |
+| T | mm | Membrane thickness. Timber presets default to an equivalent `T = 1000 mm` |
 | THETA | degrees | Material axis angle in the membrane plane |
+| FLOOR_MAG, ROOF_MAG | — | Timber floor/roof multiplier |
+| REFERENCE_DRIFT | rad | Reference drift used to convert timber multiplier to equivalent `G*t`; default `1/150` |
+| HMAX | mm | Maximum mesh/constraint spacing metadata for timber diaphragm input |
+
+`RIGID` creates in-plane rigid-floor MPC constraints for nodes in the `DREG`
+polygon and does not use membrane stiffness. `SEMI_RIGID` uses `DMEM`
+membrane/plane-stress elements. `FLEXIBLE` stores the region without floor
+stiffness; it is intended for future load-distribution workflows.
+
+Timber floor/roof multipliers are not direct `Ex`, `Ey`, or `Gxy` values. The
+parser converts them internally to equivalent in-plane shear stiffness:
+
+```
+G*t = multiplier * 1.96 kN/m / reference_drift
+```
+
+An internal diaphragm material is generated from this `G*t` so the existing
+membrane solver can use the same `DMEM` formulation.
 
 Positional form is also accepted for the MVP:
 
 ```
 DIAP, ID, NAME, SEMI, MAT_ID, T, THETA
+```
+
+Examples:
+
+```
+DIAP, 10, 2F_MAIN, SEMI, TIMBER_FLOOR, FLOOR_MAG=2.0, THETA=0, HMAX=1820
+DIAP, 20, ROOF_A, SEMI, TIMBER_ROOF, ROOF_MAG=1.0, THETA=30, HMAX=1820
+DIAP, 30, 2F_RIGID, RIGID
 ```
 
 ---
@@ -192,6 +218,7 @@ DOFs are not used by this element.
 ```
 DCON, DIAP_ID, AUTO, CONNECTION_TYPE, TOL=...
 DCON, DIAP_ID, MEMBER, ELEM_ID, CONNECTION_TYPE, TOL=...
+DCON, DIAP_ID, NODE, NODE_ID, CONNECTION_TYPE, TOL=...
 ```
 
 Associates existing frame members with a diaphragm mesh. The MVP supports
@@ -201,7 +228,7 @@ the diaphragm triangles. Only horizontal `ux, uy` DOFs are constrained.
 
 | Field | Unit | Description |
 |-------|------|-------------|
-| TARGET | — | `AUTO` for all members, or `MEMBER` for one element |
+| TARGET | — | `AUTO` for all members, `MEMBER` for one element, or `NODE` for one node |
 | CONNECTION_TYPE | — | `CONNECTED_RIGID`, `DISCONNECTED`; `LOAD_TRANSFER_ONLY` and `CONNECTED_SPRING` are reserved |
 | TOL | m | Geometry tolerance for edge/triangle matching |
 
@@ -210,6 +237,7 @@ Examples:
 ```
 DCON, 1, AUTO, CONNECTED_RIGID, TOL=0.01
 DCON, 1, MEMBER, 201, DISCONNECTED
+DCON, 1, NODE, 35, CONNECTED_RIGID
 ```
 
 ---
@@ -294,6 +322,67 @@ including the member-axial pressure component. The bounding members must form a
 single closed triangular or quadrilateral loop.
 
 Short alias: `al`.
+
+---
+
+### `DLOD` — diaphragm load / seismic mass
+
+```
+DLOD, DIAP_ID, LC, AREA, PX=..., PY=...
+DLOD, DIAP_ID, LC, LINE, N1=..., N2=..., PX=..., PY=...
+DLOD, DIAP_ID, LC, MEMBER_TRANSFER, MEMBER=..., PX=..., PY=...
+DLOD, DIAP_ID, LC, MASS, MASS=..., AX=..., AY=...
+DLOD, DIAP_ID, LC, WEIGHT, WEIGHT=..., AX=..., AY=...
+```
+
+| Type | Unit | Description |
+|------|------|-------------|
+| AREA | kN/m² | In-plane horizontal area load. Distributed to `DMEM` triangle nodes, or to `DREG` polygon nodes if no mesh exists |
+| LINE | kN/m | Boundary line load between `N1` and `N2`, distributed to the two end nodes |
+| MEMBER_TRANSFER | kN/m | Metadata for horizontal load transferred from exterior/interior beams; connected boundary member loads are also redirected by `DCON` during analysis |
+| MASS | kg/m² | Seismic mass metadata. If `AX`/`AY` is given, converted to horizontal inertia load |
+| WEIGHT | kN/m² | Seismic weight metadata. If `AX`/`AY` is given, converted to horizontal inertia load |
+
+Short alias: `dl`.
+
+---
+
+### `WOOD_RATED_WALL` — wood rated wall (multiplier input)
+
+```
+WOOD_RATED_WALL, ID, NAME, MODEL=EQUIVALENT_BRACE, M=..., L=..., H=..., DIR=..., RA=..., N1=..., N2=..., N3=..., N4=..., DIAP=...
+```
+
+| Field | Unit | Description |
+|------|------|-------------|
+| MODEL | — | `EQUIVALENT_BRACE` (MVP), `SHEAR_PANEL` (implemented), `MEMBRANE_WALL` (reserved) |
+| M | — | Wall multiplier (wall-strength index) |
+| L | m | Wall length used for rated-wall conversion |
+| H | m | Wall height used for rated-wall conversion |
+| DIR | — | Wall direction (`X` or `Y`) |
+| RA | rad | Reference drift angle (default `1/120`) |
+| N1..N4 | — | Wall corner node IDs (`N1,N2`: bottom line, `N3,N4`: top line) |
+| DIAP | — | Optional diaphragm ID. If specified, generated brace ends are tied via existing `DCON` MPC logic |
+
+The parser converts wall multiplier to allowable shear and stiffness:
+
+```
+Qa = 1.96 * m * L        (kN)
+Delta = RA * H           (m)
+K = Qa / Delta           (kN/m -> internally N/m)
+```
+
+For `EQUIVALENT_BRACE` model, diagonal length `d = sqrt(L^2 + H^2)` and
+equivalent brace axial rigidity is:
+
+```
+EA = K * d^3 / L^2
+```
+
+For an X-brace pair, each brace uses half of this `EA`.
+
+Users input rated-wall properties (`M, L, H, DIR, RA`) and node geometry only;
+explicit brace/EA input is not required.
 
 ---
 

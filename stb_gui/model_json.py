@@ -338,6 +338,9 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "material_name": mat_name,
             "material_id": mat_id,
             "ejnt_defined": bool(e.id in explicit_ejnt_ids),
+            "auto_generated": bool(getattr(e, "auto_generated", False)),
+            "generated_from": getattr(e, "generated_from", None),
+            "generated_from_id": getattr(e, "generated_from_id", None),
         }
         if e.pln != None:
             item["len"] = float(e.len)
@@ -444,6 +447,10 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "nuxy": float(dm.nuxy),
             "gamma": float(dm.gamma) * 1e-3,
             "alpha": float(dm.alpha),
+            "source": getattr(dm, "source", "DMAT"),
+            "multiplier": getattr(dm, "multiplier", None),
+            "reference_drift": getattr(dm, "reference_drift", None),
+            "equivalent_gt": getattr(dm, "equivalent_gt", None),
         })
 
     diaphragms = []
@@ -452,9 +459,60 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "id": d.id,
             "name": d.name,
             "type": d.type,
-            "material_id": d.mat.id,
-            "thickness": float(d.t),
+            "material_id": d.mat.id if d.mat is not None else None,
+            "thickness": float(d.t) if d.t is not None else None,
             "theta": float(d.theta),
+            "source": getattr(d, "source", "DMAT"),
+            "hmax": getattr(d, "hmax", None),
+            "reference_drift": getattr(d, "reference_drift", None),
+            "timber_multiplier": getattr(d, "timber_multiplier", None),
+        })
+
+    diaphragm_loads = []
+    for dl in getattr(mdl, "dloads", []):
+        diaphragm_loads.append({
+            "diaphragm_id": dl.diap_id,
+            "lc": dl.lc,
+            "type": dl.load_type,
+            "px": float(dl.px) * 1e-3,
+            "py": float(dl.py) * 1e-3,
+            "nodes": list(dl.node_ids),
+            "member_id": dl.member_id,
+            "mass": float(dl.mass),
+            "weight": float(dl.weight) * 1e-3,
+            "ax": float(dl.ax),
+            "ay": float(dl.ay),
+        })
+
+    wood_rated_walls = []
+    for w in getattr(mdl, "wwalls", []):
+        wood_rated_walls.append({
+            "id": w.id,
+            "name": w.name,
+            "model_requested": w.model_requested,
+            "model_active": w.model_active,
+            "multiplier": float(w.multiplier),
+            "length": float(w.length),
+            "height": float(w.height),
+            "direction": w.direction,
+            "reference_drift": float(w.reference_drift),
+            "qa_kN": float(w.qa_kN),
+            "delta": float(w.delta),
+            "k_n_per_m": float(w.k_n_per_m),
+            "diagonal_length": float(w.diagonal_length),
+            "generated_elem_ids": list(w.generated_elem_ids),
+            "diaphragm_id": w.diap_id,
+        })
+
+    wood_shear_panels = []
+    for sp in getattr(mdl, "wshears", []):
+        wood_shear_panels.append({
+            "id": sp.id,
+            "wall_id": sp.wall_id,
+            "name": sp.name,
+            "nodes": [sp.n1.id, sp.n2.id, sp.n3.id, sp.n4.id],
+            "direction": sp.direction,
+            "k_n_per_m": float(sp.k),
         })
 
     membrane_elements = []
@@ -535,6 +593,9 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
         "element_loads": element_loads,
         "diaphragm_materials": diaphragm_materials,
         "diaphragms": diaphragms,
+        "diaphragm_loads": diaphragm_loads,
+        "wood_rated_walls": wood_rated_walls,
+        "wood_shear_panels": wood_shear_panels,
         "membrane_elements": membrane_elements,
     }
 

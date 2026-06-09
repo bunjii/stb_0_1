@@ -47,7 +47,7 @@
   ],
   "member_classes": [
     {
-      "name": "roof_beams",
+      "name": "floor_beams",
       "kind": "beam",
       "element_ids": [
         1,
@@ -56,8 +56,8 @@
         4
       ],
       "story": "1",
-      "use": "roof perimeter beams",
-      "notes": ""
+      "use": "floor perimeter beams tied to 2x timber diaphragm",
+      "notes": "DIAP 10: TIMBER_FLOOR FLOOR_MAG=2.0"
     },
     {
       "name": "wood_columns",

@@ -282,6 +282,38 @@ def render_confirmation_draft_markdown(
                 "status": "判定",
             },
         ))
+        lines.append("")
+        lines.append("### 耐力壁別")
+        lines.append("")
+        lines.extend(_dict_table(
+            (
+                "wall_id",
+                "wall_name",
+                "direction",
+                "wall_magnification",
+                "wall_length",
+                "wall_height",
+                "allowable_shear_capacity_Qa",
+                "analysis_shear_force_Q",
+                "utilization_ratio",
+                "governing_load_case",
+                "status",
+            ),
+            wood.tables.wall_checks,
+            {
+                "wall_id": "壁ID",
+                "wall_name": "壁名",
+                "direction": "方向",
+                "wall_magnification": "壁倍率",
+                "wall_length": "壁長 m",
+                "wall_height": "壁高 m",
+                "allowable_shear_capacity_Qa": "Qa kN",
+                "analysis_shear_force_Q": "Q kN",
+                "utilization_ratio": "検定比",
+                "governing_load_case": "支配LC",
+                "status": "判定",
+            },
+        ))
     lines.append("")
 
     lines.append("## 7. 照合メモ")

@@ -1,5 +1,6 @@
 # --- PRACTICE SAMPLE INPUT ---
-# Wood single-story practice model for stb_practice summaries.
+# Wood single-story practice model with timber floor diaphragm (FLOOR_MAG=2.0).
+# 3.64 m x 3.64 m plan, floor level z=3.0 m, semi-rigid diaphragm at 2x floor multiplier.
 
 # --- MATERIAL(MATE) ---
 #         ID,   NAME,        E,        G,    Gamma,    Alpha,       Fy
@@ -40,6 +41,27 @@ ELEM,      8,      8,      4,      1,      0.0
 ELEM,      9,      5,      3,      3,      0.0
 ELEM,     10,      6,      4,      3,      0.0
 
+# --- DIAPHRAGM REGION(DIAP) ---
+# Timber floor diaphragm: FLOOR_MAG=2.0 (床倍率2倍).
+# Converted internally to equivalent G*t using REFERENCE_DRIFT (default 1/150).
+DIAP,     10,  2F_MAIN,     SEMI,  TIMBER_FLOOR,  FLOOR_MAG=2.0,  THETA=0,  HMAX=1820
+
+# --- DIAPHRAGM OUTER POLYGON(DREG) ---
+#    DIAP ID,  NODE1,  NODE2,  NODE3, ...
+DREG,     10,      1,      2,      3,      4
+
+# --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---
+#         ID,    DIAP,     N1,     N2,     N3
+DMEM,   1001,     10,      1,      2,      3
+DMEM,   1002,     10,      1,      3,      4
+
+# --- DIAPHRAGM CONNECTION(DCON) ---
+# Tie floor perimeter beams to the timber diaphragm for in-plane transfer.
+DCON,     10,   MEMBER,      1,  CONNECTED_RIGID,  TOL=0.01
+DCON,     10,   MEMBER,      2,  CONNECTED_RIGID,  TOL=0.01
+DCON,     10,   MEMBER,      3,  CONNECTED_RIGID,  TOL=0.01
+DCON,     10,   MEMBER,      4,  CONNECTED_RIGID,  TOL=0.01
+
 # --- CONSTRAINT(CONS) ---
 #    NODE ID,   TX,   TY,   TZ,   RX,   RY,   RZ
 #   (0:FREE, 1:FIXED)
@@ -48,27 +70,32 @@ CONS,      6,    1,    1,    1,    1,    1,    1
 CONS,      7,    1,    1,    1,    1,    1,    1
 CONS,      8,    1,    1,    1,    1,    1,    1
 
+# --- LOAD NAME(LNME) ---
+#       LC,     NAME
+LNME,      1,       DL
+LNME,      2,      EQX
+LNME,      3,      EQY
+
 # --- POINT LOAD(PLOD) ---
 #    NODE ID,   LC,     PX,     PY,     PZ,     MX,     MY,     MZ
 #                      (kN)    (kN)    (kN)   (kNm)   (kNm)   (kNm)
-# LC 1: gravity, LC 2: X seismic sample, LC 3: Y seismic sample
+# LC 1: gravity at floor corners
 PLOD,      1,    1,   0.00,   0.00,  -1.50,   0.00,   0.00,   0.00
 PLOD,      2,    1,   0.00,   0.00,  -1.50,   0.00,   0.00,   0.00
 PLOD,      3,    1,   0.00,   0.00,  -1.50,   0.00,   0.00,   0.00
 PLOD,      4,    1,   0.00,   0.00,  -1.50,   0.00,   0.00,   0.00
-PLOD,      1,    2,   0.50,   0.00,   0.00,   0.00,   0.00,   0.00
-PLOD,      2,    2,   0.50,   0.00,   0.00,   0.00,   0.00,   0.00
-PLOD,      3,    2,   0.50,   0.00,   0.00,   0.00,   0.00,   0.00
-PLOD,      4,    2,   0.50,   0.00,   0.00,   0.00,   0.00,   0.00
-PLOD,      1,    3,   0.00,   0.50,   0.00,   0.00,   0.00,   0.00
-PLOD,      2,    3,   0.00,   0.50,   0.00,   0.00,   0.00,   0.00
-PLOD,      3,    3,   0.00,   0.50,   0.00,   0.00,   0.00,   0.00
-PLOD,      4,    3,   0.00,   0.50,   0.00,   0.00,   0.00,   0.00
+
+# --- DIAPHRAGM LOAD(DLOD) ---
+#    DIAP ID,    LC,            TYPE,  PX/PY or MASS/WEIGHT
+# Seismic in-plane area loads on the 2x timber floor (total 2.0 kN per direction).
+# Floor area = 3.64 x 3.64 = 13.25 m2 -> 2.0 / 13.25 = 0.151 kN/m2
+DLOD,     10,     2,            AREA,  PX=0.151, PY=0.0
+DLOD,     10,     3,            AREA,  PX=0.0, PY=0.151
 
 # --- ELEMENT LOAD(ELOD) ---
 #    ELEM ID,   LC,  E/G,    WXi,    WYi,    WZi,    WXj,    WYj,    WZj
 #                          (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)  (kN/m)
-# Gravity line loads on roof beams in global Z.
+# Gravity line loads on floor perimeter beams in global Z.
 ELOD,      1,    1,    1,   0.00,   0.00,  -0.40,   0.00,   0.00,  -0.40
 ELOD,      2,    1,    1,   0.00,   0.00,  -0.40,   0.00,   0.00,  -0.40
 ELOD,      3,    1,    1,   0.00,   0.00,  -0.40,   0.00,   0.00,  -0.40

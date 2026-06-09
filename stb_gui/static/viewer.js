@@ -17,6 +17,7 @@ const COLORS = {
   ejnt: 0xff8c00,
   selected: 0xff8c00,
   selectedNode: 0xe85d5d,
+  distance: 0x2563eb,
   deform: 0x4E8AC6,
   membraneFill: 0x6b8f71,
   membraneEdge: 0x2f5d3a,
@@ -157,7 +158,9 @@ const el = {
   btnToggleOptions: document.getElementById("btnToggleOptions"),
   btnToggleAxes: document.getElementById("btnToggleAxes"),
   btnToggleSelect: document.getElementById("btnToggleSelect"),
+  btnToggleDistance: document.getElementById("btnToggleDistance"),
   btnToggleSelectionPanel: document.getElementById("btnToggleSelectionPanel"),
+  distanceOverlay: document.getElementById("distanceOverlay"),
   selectionMarquee: document.getElementById("selectionMarquee"),
   selectionPanel: document.getElementById("selectionPanel"),
   selectionPanelHeader: document.getElementById("selectionPanelHeader"),
@@ -204,9 +207,12 @@ const el = {
 };
 
 let scene, camera, renderer, controls;
-let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup;
+let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
 let currentModel = null;
 let selectionModeActive = false;
+let distanceModeActive = false;
+let distanceNodeIds = [];
+let distanceMeters = null;
 let selectedElementIds = new Set();
 let selectedNodeIds = new Set();
 let selectionDrag = null;
@@ -400,10 +406,10 @@ function getSceneDisplayState() {
   return { lc, defFac, deformed };
 }
 
-function applySelectionModeControls() {
+function applyViewerInteractionControls() {
   if (!controls) return;
-  if (selectionModeActive) {
-    // Left drag = box select; right drag = orbit (left is disabled, not enableRotate).
+  if (selectionModeActive || distanceModeActive) {
+    // Left click = pick; right drag = orbit (left is disabled, not enableRotate).
     controls.mouseButtons.LEFT = null;
     controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
     controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
@@ -417,12 +423,155 @@ function applySelectionModeControls() {
 
 function setSelectionMode(active) {
   selectionModeActive = !!active;
+  if (selectionModeActive) {
+    setDistanceMode(false, { skipInteractionUpdate: true });
+  }
   if (el.btnToggleSelect) {
     el.btnToggleSelect.classList.toggle("active", selectionModeActive);
   }
-  applySelectionModeControls();
+  applyViewerInteractionControls();
   if (selectionModeActive && el.selectionPanel) {
     el.selectionPanel.classList.remove("hidden");
+  }
+}
+
+function clearDistanceMeasurement() {
+  distanceNodeIds = [];
+  distanceMeters = null;
+  updateDistanceVisual();
+  updateDistanceOverlay();
+}
+
+function setDistanceMode(active, opts) {
+  const skipInteractionUpdate = !!(opts && opts.skipInteractionUpdate);
+  distanceModeActive = !!active;
+  if (distanceModeActive) {
+    selectionModeActive = false;
+    if (el.btnToggleSelect) el.btnToggleSelect.classList.remove("active");
+  }
+  if (el.btnToggleDistance) {
+    el.btnToggleDistance.classList.toggle("active", distanceModeActive);
+  }
+  if (!distanceModeActive) {
+    clearDistanceMeasurement();
+  } else {
+    updateDistanceOverlay();
+  }
+  if (!skipInteractionUpdate) {
+    applyViewerInteractionControls();
+  }
+}
+
+function formatLengthValue(meters) {
+  const av = Math.abs(meters);
+  if (av < 1e-9) return "0 m";
+  if (av < 0.01) return meters.toFixed(4) + " m";
+  if (av < 1) return meters.toFixed(3) + " m";
+  if (av < 100) return meters.toFixed(2) + " m";
+  return meters.toFixed(1) + " m";
+}
+
+function nodeWorldPositionById(nodeId) {
+  if (!currentModel) return null;
+  const nm = nodeMap(currentModel);
+  const n = nm[nodeId];
+  if (!n) return null;
+  const display = getSceneDisplayState();
+  return nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+}
+
+function computeDistanceBetweenNodes(id0, id1) {
+  const p0 = nodeWorldPositionById(id0);
+  const p1 = nodeWorldPositionById(id1);
+  if (!p0 || !p1) return null;
+  return p0.distanceTo(p1);
+}
+
+function addDistancePick(nodeId) {
+  if (distanceNodeIds.length >= 2) {
+    distanceNodeIds = [nodeId];
+    distanceMeters = null;
+  } else {
+    distanceNodeIds.push(nodeId);
+    if (distanceNodeIds.length === 2) {
+      distanceMeters = computeDistanceBetweenNodes(distanceNodeIds[0], distanceNodeIds[1]);
+    }
+  }
+  updateDistanceVisual();
+  updateDistanceOverlay();
+}
+
+function updateDistanceOverlay() {
+  if (!el.distanceOverlay) return;
+  if (!distanceModeActive) {
+    el.distanceOverlay.hidden = true;
+    el.distanceOverlay.textContent = "";
+    return;
+  }
+  el.distanceOverlay.hidden = false;
+  if (distanceNodeIds.length === 0) {
+    el.distanceOverlay.textContent = "Distance: click 2 nodes (0/2)";
+    return;
+  }
+  if (distanceNodeIds.length === 1) {
+    el.distanceOverlay.textContent = "Distance: click 2nd node (1/2) — N" + distanceNodeIds[0];
+    return;
+  }
+  const n0 = distanceNodeIds[0];
+  const n1 = distanceNodeIds[1];
+  const distText = distanceMeters == null ? "?" : formatLengthValue(distanceMeters);
+  el.distanceOverlay.textContent = "Distance: N" + n0 + " → N" + n1 + " = " + distText;
+}
+
+function updateDistanceVisual() {
+  clearGroup(distanceGroup);
+  if (!currentModel || distanceNodeIds.length === 0) return;
+
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  const nodePts = [];
+  const positions = [];
+  for (const id of distanceNodeIds) {
+    const n = nm[id];
+    if (!n) continue;
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    nodePts.push(p.x, p.y, p.z);
+    positions.push(p);
+  }
+  if (nodePts.length > 0) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(nodePts, 3));
+    const mat = nodePointsMaterial({
+      color: COLORS.distance,
+      size: 14,
+      sizeAttenuation: false,
+      depthTest: true,
+    });
+    const points = new THREE.Points(geo, mat);
+    points.renderOrder = 22;
+    distanceGroup.add(points);
+  }
+  if (positions.length === 2) {
+    const p0 = positions[0];
+    const p1 = positions[1];
+    addWideLineSegmentsFromPts(
+      [p0.x, p0.y, p0.z, p1.x, p1.y, p1.z],
+      COLORS.distance,
+      distanceGroup,
+      23,
+      elementLineWidthPx() + 2,
+      ALPHA.opaque
+    );
+    const mid = p0.clone().add(p1).multiplyScalar(0.5);
+    const span = modelSpan(currentModel);
+    const label = makeTextSprite(formatLengthValue(distanceMeters || 0), span, {
+      fg: "#1d4ed8",
+      bg: "rgba(255, 255, 255, 0.9)",
+      pad: 4,
+    });
+    label.position.copy(mid);
+    label.renderOrder = 24;
+    distanceGroup.add(label);
   }
 }
 
@@ -618,11 +767,12 @@ function nodesInScreenRect(x0, y0, x1, y1) {
   return ids;
 }
 
-function pickTargetAtScreen(px, py) {
+function pickNodeAtScreen(px, py, thresholdPx) {
   if (!currentModel) return null;
   const display = getSceneDisplayState();
+  const limit = thresholdPx == null ? SELECTION_NODE_PICK_PX : thresholdPx;
   let bestNode = null;
-  let bestNodeDist = SELECTION_NODE_PICK_PX;
+  let bestNodeDist = limit;
   for (const n of currentModel.nodes) {
     const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
     const s = worldToScreenPoint(p);
@@ -630,6 +780,23 @@ function pickTargetAtScreen(px, py) {
     if (d < bestNodeDist) {
       bestNodeDist = d;
       bestNode = n.id;
+    }
+  }
+  return bestNode;
+}
+
+function pickTargetAtScreen(px, py) {
+  if (!currentModel) return null;
+  const bestNode = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
+  let bestNodeDist = SELECTION_NODE_PICK_PX;
+  if (bestNode != null) {
+    const display = getSceneDisplayState();
+    const nm = nodeMap(currentModel);
+    const n = nm[bestNode];
+    if (n) {
+      const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+      const s = worldToScreenPoint(p);
+      bestNodeDist = Math.hypot(px - s.x, py - s.y);
     }
   }
   const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
@@ -903,8 +1070,25 @@ function initSelectionInteraction() {
 
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && !isViewerTextInputTarget(ev.target)) {
-      clearSelection();
+      if (distanceModeActive) clearDistanceMeasurement();
+      else clearSelection();
     }
+  });
+}
+
+function initDistanceInteraction() {
+  if (!el.viewport) return;
+
+  el.viewport.addEventListener("mousedown", (ev) => {
+    if (!distanceModeActive) return;
+    if (ev.button !== 0) return;
+    if (isViewerOverlayTarget(ev.target)) return;
+    const pt = viewportMousePoint(ev);
+    const nodeId = pickNodeAtScreen(pt.x, pt.y, SELECTION_NODE_PICK_PX);
+    if (nodeId == null) return;
+    addDistancePick(nodeId);
+    ev.preventDefault();
+    ev.stopPropagation();
   });
 }
 
@@ -1415,6 +1599,8 @@ function initThree() {
   scene.add(modelGroup);
   selectionGroup = new THREE.Group();
   scene.add(selectionGroup);
+  distanceGroup = new THREE.Group();
+  scene.add(distanceGroup);
   labelGroup = new THREE.Group();
   scene.add(labelGroup);
   forceGroup = new THREE.Group();
@@ -1425,7 +1611,7 @@ function initThree() {
   scene.add(axesGroup);
 
   window.addEventListener("resize", onResize);
-  applySelectionModeControls();
+  applyViewerInteractionControls();
   animate();
 }
 
@@ -2255,6 +2441,7 @@ function buildModelScene(model) {
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
   updateSelectionHighlight();
+  updateDistanceVisual();
 }
 
 function formatForceValue(val) {
@@ -4232,6 +4419,7 @@ async function bootstrap() {
   initThree();
   initViewerOptions();
   initSelectionInteraction();
+  initDistanceInteraction();
   initContextMenu();
   initEditHistoryShortcuts();
   initDraggablePanel({
@@ -4309,6 +4497,13 @@ document.addEventListener("keydown", (ev) => {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     ev.preventDefault();
     setSelectionMode(!selectionModeActive);
+    return;
+  }
+
+  if (ev.key === "d" || ev.key === "D") {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    ev.preventDefault();
+    setDistanceMode(!distanceModeActive);
   }
 });
 
@@ -4325,6 +4520,12 @@ el.btnToggleAxes.addEventListener("click", () => {
 if (el.btnToggleSelect) {
   el.btnToggleSelect.addEventListener("click", () => {
     setSelectionMode(!selectionModeActive);
+  });
+}
+
+if (el.btnToggleDistance) {
+  el.btnToggleDistance.addEventListener("click", () => {
+    setDistanceMode(!distanceModeActive);
   });
 }
 
