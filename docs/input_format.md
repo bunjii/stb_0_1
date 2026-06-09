@@ -331,8 +331,8 @@ WWLL, ID, NAME, MODEL, M, L, H, DIR, RA, N1, N2, N3, N4, DIAP, LAYO
 | DIR | — | `0` = X, `1` = Y |
 | RA | rad | Reference drift angle (default `1/120`) |
 | N1..N4 | — | Corner node IDs (bottom line, then top line) |
-| DIAP | — | Optional diaphragm ID for MPC tie |
-| LAYO | — | `0` = single brace, `1` = X-brace pair (default) |
+| DIAP | — | Diaphragm ID for in-plane MPC tie to the wall line (blank = none) |
+| LAYO | — | Brace layout: `0` = single brace, `1` = X-brace pair (default) |
 
 The parser converts wall multiplier to allowable shear and stiffness:
 

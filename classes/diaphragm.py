@@ -3,6 +3,18 @@ import math
 import numpy as np
 
 import common
+from dat_format import (
+    DCON_FMTS,
+    DIAP_FMTS,
+    DLOD_AREA_FMTS,
+    DLOD_LINE_FMTS,
+    DLOD_MASS_FMTS,
+    DLOD_MBTR_FMTS,
+    DLOD_WGHT_FMTS,
+    DMAT_FMTS,
+    DMEM_FMTS,
+    record_line,
+)
 
 
 CONN_CONNECTED_RIGID = "CONNECTED_RIGID"
@@ -239,18 +251,17 @@ class DiaphragmMaterial:
         ], dtype=np.float64)
 
     def OutputDMatInfo(self):
-        props = [
-            "DMAT",
-            "{0: >6}".format(self.id),
-            "{0: >10}".format(self.name),
-            "{0: >10.3f}".format(self.Ex * 1e-6),
-            "{0: >10.3f}".format(self.Ey * 1e-6),
-            "{0: >10.3f}".format(self.Gxy * 1e-6),
-            "{0: >10.5f}".format(self.nuxy),
-            "{0: >8.1f}".format(self.gamma * 1e-3),
-            "{0: 8.1e}".format(self.alpha),
+        values = [
+            self.id,
+            self.name,
+            self.Ex * 1e-6,
+            self.Ey * 1e-6,
+            self.Gxy * 1e-6,
+            self.nuxy,
+            self.gamma * 1e-3,
+            self.alpha,
         ]
-        return ", ".join(props) + "\n"
+        return record_line("DMAT", DMAT_FMTS, values) + "\n"
 
 
 class DiaphragmRegion:
@@ -279,27 +290,23 @@ class DiaphragmRegion:
         type_code = diap_type_to_code(self.type)
         src_code = diap_src_to_code(self.source)
         if self.source in [TIMBER_FLOOR, TIMBER_ROOF]:
-            mag_id = "{0:.6g}".format(self.timber_multiplier)
+            mag_id = self.timber_multiplier
         elif self.mat is not None:
-            mag_id = "{0: >6}".format(self.mat.id)
+            mag_id = self.mat.id
         else:
             mag_id = ""
-        t_mm = "" if self.t is None else "{0:.3f}".format(self.t * 1e3)
-        ra = "" if self.reference_drift is None else "{0:.8g}".format(self.reference_drift)
-        hmax = "" if self.hmax is None else "{0:.3f}".format(self.hmax * 1e3)
-        props = [
-            "DIAP",
-            "{0: >6}".format(self.id),
-            "{0: >10}".format(self.name),
-            "{0: >4}".format(type_code),
-            "{0: >4}".format(src_code),
+        values = [
+            self.id,
+            self.name,
+            type_code,
+            src_code,
             mag_id,
-            t_mm,
-            "{0:.3f}".format(self.theta),
-            ra,
-            hmax,
+            "" if self.t is None else self.t * 1e3,
+            self.theta,
+            "" if self.reference_drift is None else self.reference_drift,
+            "" if self.hmax is None else self.hmax * 1e3,
         ]
-        return ", ".join(props) + "\n"
+        return record_line("DIAP", DIAP_FMTS, values) + "\n"
 
 
 class DiaphragmLoad:
@@ -331,43 +338,28 @@ class DiaphragmLoad:
 
     def OutputDLoadInfo(self):
         type_code = dlod_type_to_code(self.load_type)
-        props = [
-            "DLOD",
-            "{0: >6}".format(self.diap_id),
-            "{0: >4}".format(self.lc),
-            "{0: >4}".format(type_code),
-        ]
+        values = [self.diap_id, self.lc, type_code]
         if self.load_type == DiaphragmLoad.AREA:
-            props.extend([
-                "{0:.6g}".format(self.px * 1e-3),
-                "{0:.6g}".format(self.py * 1e-3),
-            ])
+            fmts = DLOD_AREA_FMTS
+            values.extend([self.px * 1e-3, self.py * 1e-3])
         elif self.load_type == DiaphragmLoad.LINE:
-            props.extend([
-                "{0: >6}".format(self.node_ids[0]),
-                "{0: >6}".format(self.node_ids[1]),
-                "{0:.6g}".format(self.px * 1e-3),
-                "{0:.6g}".format(self.py * 1e-3),
+            fmts = DLOD_LINE_FMTS
+            values.extend([
+                self.node_ids[0],
+                self.node_ids[1],
+                self.px * 1e-3,
+                self.py * 1e-3,
             ])
         elif self.load_type == DiaphragmLoad.MEMBER_TRANSFER:
-            props.extend([
-                "{0: >6}".format(self.member_id),
-                "{0:.6g}".format(self.px * 1e-3),
-                "{0:.6g}".format(self.py * 1e-3),
-            ])
+            fmts = DLOD_MBTR_FMTS
+            values.extend([self.member_id, self.px * 1e-3, self.py * 1e-3])
         elif self.load_type == DiaphragmLoad.MASS:
-            props.extend([
-                "{0:.6g}".format(self.mass),
-                "{0:.6g}".format(self.ax),
-                "{0:.6g}".format(self.ay),
-            ])
+            fmts = DLOD_MASS_FMTS
+            values.extend([self.mass, self.ax, self.ay])
         else:
-            props.extend([
-                "{0:.6g}".format(self.weight * 1e-3),
-                "{0:.6g}".format(self.ax),
-                "{0:.6g}".format(self.ay),
-            ])
-        return ", ".join(props) + "\n"
+            fmts = DLOD_WGHT_FMTS
+            values.extend([self.weight * 1e-3, self.ax, self.ay])
+        return record_line("DLOD", fmts, values) + "\n"
 
 
 def dlod_type_from_code(code):
@@ -425,20 +417,15 @@ class DiaphragmConnection:
         self.spring_properties = _spring_properties
 
     def OutputDConInfo(self):
-        trgt = dcon_trgt_to_code(self.target_type)
-        conn = dcon_conn_to_code(self.connection_type)
-        target_id = "" if self.target_id is None else "{0: >6}".format(self.target_id)
-        props = [
-            "DCON",
-            "{0: >6}".format(self.diaphragm_id),
-            "{0: >4}".format(trgt),
-            target_id,
-            "{0: >4}".format(conn),
-            "{0:.6g}".format(self.tolerance),
+        values = [
+            self.diaphragm_id,
+            dcon_trgt_to_code(self.target_type),
+            "" if self.target_id is None else self.target_id,
+            dcon_conn_to_code(self.connection_type),
+            self.tolerance,
+            "" if self.constraint_spacing is None else self.constraint_spacing,
         ]
-        if self.constraint_spacing is not None:
-            props.append("{0:.6g}".format(self.constraint_spacing))
-        return ", ".join(props) + "\n"
+        return record_line("DCON", DCON_FMTS, values) + "\n"
 
 
 class DiaphragmMemberAssociation:
@@ -970,12 +957,5 @@ class CSTMembrane3:
             self.mforces[:, i] = stress * self.diap.t
 
     def OutputDMemInfo(self):
-        props = [
-            "DMEM",
-            "{0: >6}".format(self.id),
-            "{0: >6}".format(self.diap.id),
-            "{0: >6}".format(self.n0.id),
-            "{0: >6}".format(self.n1.id),
-            "{0: >6}".format(self.n2.id),
-        ]
-        return ", ".join(props) + "\n"
+        values = [self.id, self.diap.id, self.n0.id, self.n1.id, self.n2.id]
+        return record_line("DMEM", DMEM_FMTS, values) + "\n"

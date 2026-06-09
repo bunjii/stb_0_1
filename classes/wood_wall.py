@@ -1,6 +1,7 @@
 import math
 
 import common
+from dat_format import WWLL_FMTS, record_line
 from ejnt import EJnt
 from elm import Elm1D
 from mat import Mat
@@ -144,26 +145,23 @@ class WoodRatedWall:
         return ea_total / max(brace_count, 1)
 
     def output_info(self):
-        n1 = "" if self.n1 is None else "{0: >6}".format(self.n1)
-        n2 = "" if self.n2 is None else "{0: >6}".format(self.n2)
-        n3 = "" if self.n3 is None else "{0: >6}".format(self.n3)
-        n4 = "" if self.n4 is None else "{0: >6}".format(self.n4)
-        diap = "" if self.diap_id is None else "{0: >6}".format(self.diap_id)
-        props = [
-            "WWLL",
-            "{0: >6}".format(self.id),
-            "{0: >10}".format(self.name),
-            "{0: >4}".format(wwll_model_to_code(self.model_requested)),
-            "{0:.6g}".format(self.multiplier),
-            "{0:.6g}".format(self.length),
-            "{0:.6g}".format(self.height),
-            "{0: >4}".format(wwll_dir_to_code(self.direction)),
-            "{0:.8g}".format(self.reference_drift),
-            n1, n2, n3, n4,
-            diap,
-            "{0: >4}".format(wwll_layo_to_code(self.brace_layout)),
+        values = [
+            self.id,
+            self.name,
+            wwll_model_to_code(self.model_requested),
+            self.multiplier,
+            self.length,
+            self.height,
+            wwll_dir_to_code(self.direction),
+            self.reference_drift,
+            "" if self.n1 is None else self.n1,
+            "" if self.n2 is None else self.n2,
+            "" if self.n3 is None else self.n3,
+            "" if self.n4 is None else self.n4,
+            "" if self.diap_id is None else self.diap_id,
+            wwll_layo_to_code(self.brace_layout),
         ]
-        return ", ".join(props) + "\n"
+        return record_line("WWLL", WWLL_FMTS, values) + "\n"
 
     def generate_mvp_equivalent_braces(self, nds, mats, secs, elms, ejnts, dcons):
         if self.model_requested == WOOD_WALL_MODEL_MEMBRANE:
