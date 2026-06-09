@@ -6,7 +6,7 @@ _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _STB_ROOT not in sys.path:
     sys.path.insert(0, _STB_ROOT)
 
-from stb_engine import run_from_file, StbParseError
+from stb_engine import run_from_file, run_from_lines, StbParseError, StbSolveError
 from stb_engine.errors import StbError
 from stb_engine.run import parse_input
 
@@ -52,6 +52,19 @@ class TestStbEngine(unittest.TestCase):
             raised = True
 
         self.assertTrue(raised)
+
+    def test_solve_error_on_loaded_mechanism(self):
+        lines = [
+            "MATE, 1, M, 205000, 79000, 78.5, 1.2e-5, 235",
+            "SECT, 1, S, 1, 0, 100, 100",
+            "NODE, 1, 0, 0, 0",
+            "NODE, 2, 0, 0, 3",
+            "CONS, 1, 1, 1, 1, 1, 1, 1",
+            "PLOD, 2, 1, 1, 0, 0, 0, 0, 0",
+        ]
+
+        with self.assertRaises(StbSolveError):
+            run_from_lines(lines)
 
     def test_stb_error_base(self):
         self.assertTrue(issubclass(StbParseError, StbError))

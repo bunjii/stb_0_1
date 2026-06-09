@@ -902,6 +902,77 @@ function elementSummaryText(elem) {
   return mat ? sec + " / " + mat : sec;
 }
 
+function formatOutInt(v) {
+  const s = String(v);
+  return s.length >= 6 ? s : s.padStart(6, " ");
+}
+
+function formatOutScientific(val) {
+  if (!isFinite(val)) return "         ?";
+  if (val === 0 || Math.abs(val) < PRES_ZERO) return " 0.000e+00";
+  const neg = val < 0;
+  const av = Math.abs(val);
+  let exp = Math.floor(Math.log10(av));
+  let mant = av / Math.pow(10, exp);
+  if (mant >= 10) {
+    mant /= 10;
+    exp += 1;
+  }
+  const m = (neg ? -mant : mant).toFixed(3);
+  const e = (exp >= 0 ? "+" : "-") + String(Math.abs(exp)).padStart(2, "0");
+  return (m + "e" + e).padStart(10, " ");
+}
+
+const NDSP_OUT_HEADER = [
+  "# --- NODAL DISPLACEMENT ---",
+  "#        LC,  NODE,         X,         Y,         Z,   Theta X,   Theta Y,   Theta Z",
+  "#                          (m)        (m)        (m)      (rad)      (rad)      (rad)",
+];
+
+const EFRC_OUT_HEADER = [
+  "# --- ELEMENT FORCE ---",
+  "#        LC,  ELEM,        Ni,       Qyi,       Qzi,       Mxi,       Myi,       Mzi         Nj,       Qyj,       Qzj,       Mxj,       Myj,       Mzj,       Myc,       Mzc",
+  "#                         (kN)       (kN)       (kN)      (kNm)      (kNm)      (kNm)       (kN)       (kN)       (kN)      (kNm)      (kNm)      (kNm)      (kNm)      (kNm)",
+];
+
+function formatNdspOutLine(lc, nodeId, disps) {
+  const props = ["NDSP", formatOutInt(lc), formatOutInt(nodeId)];
+  for (let i = 0; i < 6; i++) {
+    props.push(formatOutScientific(disps[i]));
+  }
+  return props.join(",");
+}
+
+function formatEfrcOutLine(lc, elemId, forces) {
+  const props = ["EFRC", formatOutInt(lc), formatOutInt(elemId)];
+  for (let i = 0; i < 14; i++) {
+    const raw = forces[i] || 0;
+    const v = Math.abs(raw) < PRES_ZERO ? 0 : raw;
+    props.push(formatOutScientific(v * 1e-3));
+  }
+  return props.join(",");
+}
+
+function nodeNdspOutBlock(model, nodeId, lcKey) {
+  const nm = {};
+  for (const n of model.nodes || []) nm[n.id] = n;
+  const n = nm[nodeId];
+  if (!n || !n.disps) return null;
+  const disps = n.disps[String(lcKey)];
+  if (!disps || disps.length < 6) return null;
+  return NDSP_OUT_HEADER.join("\n") + "\n" + formatNdspOutLine(lcKey, nodeId, disps);
+}
+
+function elementEfrcOutBlock(model, elemId, lcKey) {
+  const byId = {};
+  for (const e of model.elements || []) byId[e.id] = e;
+  const e = byId[elemId];
+  if (!e || !e.forces) return null;
+  const forces = e.forces[String(lcKey)];
+  if (!forces || forces.length < 14) return null;
+  return EFRC_OUT_HEADER.join("\n") + "\n" + formatEfrcOutLine(lcKey, elemId, forces);
+}
+
 function updateSelectionPanel() {
   if (!el.selectionSummary || !el.selectionList) return;
   const elemCount = selectedElementIds.size;
@@ -956,6 +1027,8 @@ function updateSelectionPanel() {
   for (const n of currentModel ? currentModel.nodes : []) {
     byNode[n.id] = n;
   }
+  const solved = currentModel && analysisComplete(currentModel);
+  const lcKey = String(el.lcSelect ? el.lcSelect.value : "");
   const show = rows.slice(0, SELECTION_LIST_LIMIT);
   for (const row of show) {
     const li = document.createElement("li");
@@ -964,13 +1037,37 @@ function updateSelectionPanel() {
       const pos = n
         ? " (" + n.x.toFixed(2) + ", " + n.y.toFixed(2) + ", " + n.z.toFixed(2) + ")"
         : "";
-      li.textContent = "NODE " + row.id + pos;
+      const title = document.createElement("div");
+      title.className = "selection-row-title";
+      title.textContent = "NODE " + row.id + pos;
+      li.appendChild(title);
+      if (solved) {
+        const outLine = document.createElement("div");
+        outLine.className = "selection-out-line";
+        const line = nodeNdspOutBlock(currentModel, row.id, lcKey);
+        outLine.textContent = line != null
+          ? line
+          : "(no NDSP for LC " + lcKey + ")";
+        li.appendChild(outLine);
+      }
       li.addEventListener("click", function () {
         replacePickSelection([row.id], []);
       });
     } else {
       const e = byElem[row.id];
-      li.textContent = "ELEM " + row.id + " — " + (e ? elementSummaryText(e) : "?");
+      const title = document.createElement("div");
+      title.className = "selection-row-title";
+      title.textContent = "ELEM " + row.id + " — " + (e ? elementSummaryText(e) : "?");
+      li.appendChild(title);
+      if (solved) {
+        const outLine = document.createElement("div");
+        outLine.className = "selection-out-line";
+        const line = elementEfrcOutBlock(currentModel, row.id, lcKey);
+        outLine.textContent = line != null
+          ? line
+          : "(no EFRC for LC " + lcKey + ")";
+        li.appendChild(outLine);
+      }
       li.addEventListener("click", function () {
         replacePickSelection([], [row.id]);
       });
@@ -4621,6 +4718,7 @@ el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
   if (currentModel) rebuildScene();
+  updateSelectionPanel();
 });
 el.defFactor.addEventListener("change", () => {
   dispContourScaleKey = null;

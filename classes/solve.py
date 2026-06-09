@@ -44,6 +44,8 @@ class Solve:
             T = None
             kG, lm = self.ApplySupportConstraints(kG, lm)
 
+        self.CheckStability(kG, lm)
+
         # Solve
         kG = csc_matrix(kG)
         lm = csc_matrix(lm) 
@@ -65,6 +67,56 @@ class Solve:
         self.isModelSolved = True
 
         return
+
+    def CheckStability(self, _kG, _lm):
+        """Reject near-mechanisms before sparse solve returns meaningless drifts."""
+
+        if _kG.size == 0:
+            return
+
+        try:
+            vals, vecs = np.linalg.eigh(_kG)
+        except np.linalg.LinAlgError:
+            return
+
+        scale = float(np.max(np.abs(vals))) if vals.size else 0.0
+        if scale <= common.PRES_ZERO:
+            raise ValueError("Model stiffness matrix is singular: no effective stiffness")
+
+        # Near-pin releases intentionally use tiny springs; if the loaded
+        # structure relies on them, the resulting displacement is not meaningful.
+        rel_tol = 1.0e-12
+        load_tol = 1.0e-8
+        weak = np.where(np.abs(vals) / scale < rel_tol)[0]
+        if weak.size == 0:
+            return
+
+        load_cols = _lm if np.ndim(_lm) == 2 else np.expand_dims(_lm, axis=1)
+        loaded_cases = []
+        for col in range(load_cols.shape[1]):
+            load_norm = float(np.linalg.norm(load_cols[:, col]))
+            if load_norm <= common.PRES_ZERO:
+                continue
+            for idx in weak:
+                projection = abs(float(vecs[:, idx].T @ load_cols[:, col]))
+                if projection > load_tol * load_norm:
+                    if getattr(self.mdl, "lcs", None) is not None and col < len(self.mdl.lcs):
+                        loaded_cases.append(self.mdl.lcs[col])
+                    else:
+                        loaded_cases.append(col)
+                    break
+
+        if not loaded_cases:
+            return
+
+        min_idx = int(weak[np.argmin(np.abs(vals[weak]))])
+        rel = abs(float(vals[min_idx])) / scale
+        raise ValueError(
+            "Model is unstable or ill-conditioned under load case(s) {0}: "
+            "weak stiffness mode detected (min eigenvalue={1:.3e}, relative={2:.3e}). "
+            "Add lateral resistance/constraints or remove loads on the mechanism."
+            .format(loaded_cases, vals[min_idx], rel)
+        )
 
     def CalcMembraneForces(self):
         for m in getattr(self.mdl, "dmems", []):
@@ -732,19 +784,28 @@ class Solve:
         lm[row + 1, col] += fy
 
     def _diaphragm_area_nodal_loads(self, dl, by_diap):
+        from diaphragm import dreg_polygon_xy, diaphragm_floor_nodes
+
         diap = by_diap.get(dl.diap_id)
         if diap is None:
             return []
 
-        loads = []
+        _, area = dreg_polygon_xy(self.mdl, dl.diap_id)
+        nodes = diaphragm_floor_nodes(self.mdl, dl.diap_id)
+        if area > common.PRES_ZERO and len(nodes) >= 1:
+            f = area / float(len(nodes))
+            return [(n, dl.px * f, dl.py * f) for n in nodes]
+
         dmems = [m for m in getattr(self.mdl, "dmems", []) if m.diap.id == dl.diap_id]
         if dmems:
+            loads = []
             for m in dmems:
                 f = m.area / 3.0
                 for n in [m.n0, m.n1, m.n2]:
                     loads.append((n, dl.px * f, dl.py * f))
             return loads
 
+        loads = []
         for reg in getattr(self.mdl, "dregs", []):
             if reg.diap_id != dl.diap_id:
                 continue
@@ -755,15 +816,15 @@ class Solve:
                     nodes.append(n)
             if len(nodes) < 3:
                 continue
-            area = 0.0
+            poly_area = 0.0
             for i in range(len(nodes)):
                 n0 = nodes[i]
                 n1 = nodes[(i + 1) % len(nodes)]
-                area += n0.x * n1.y - n0.y * n1.x
-            area = abs(area) * 0.5
-            if area <= common.PRES_ZERO:
+                poly_area += n0.x * n1.y - n0.y * n1.x
+            poly_area = abs(poly_area) * 0.5
+            if poly_area <= common.PRES_ZERO:
                 continue
-            f = area / float(len(nodes))
+            f = poly_area / float(len(nodes))
             for n in nodes:
                 loads.append((n, dl.px * f, dl.py * f))
         return loads

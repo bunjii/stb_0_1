@@ -559,6 +559,81 @@ def _polygon_area_2d(points):
     return 0.5 * area
 
 
+def dreg_polygon_xy(mdl, diap_id):
+    """Return DREG polygon vertices (x, y) and signed area for one diaphragm."""
+
+    for reg in getattr(mdl, "dregs", []):
+        if reg.diap_id != diap_id:
+            continue
+        poly_nodes = []
+        for nid in reg.node_ids:
+            n = mdl.FindNodeFromId(nid)
+            if n != -1:
+                poly_nodes.append(n)
+        if len(poly_nodes) < 3:
+            return [], 0.0
+        poly = [(n.x, n.y) for n in poly_nodes]
+        area = _polygon_area_2d(poly)
+        if area < 0.0:
+            poly = list(reversed(poly))
+            area = -area
+        return poly, area
+    return [], 0.0
+
+
+def diaphragm_floor_nodes(mdl, diap_id, tolerance=common.PRES_LEN):
+    """Return all nodes on the diaphragm floor elevation inside DREG."""
+
+    poly, _ = dreg_polygon_xy(mdl, diap_id)
+    if len(poly) < 3:
+        return []
+    z_vals = []
+    for reg in getattr(mdl, "dregs", []):
+        if reg.diap_id != diap_id:
+            continue
+        for nid in reg.node_ids:
+            n = mdl.FindNodeFromId(nid)
+            if n != -1:
+                z_vals.append(n.z)
+        break
+    if not z_vals:
+        return []
+    z0 = sum(z_vals) / float(len(z_vals))
+    out = []
+    for n in getattr(mdl, "nds", []):
+        if abs(n.z - z0) > tolerance:
+            continue
+        if _point_in_polygon_2d(n.x, n.y, poly, tolerance):
+            out.append(n)
+    return out
+
+
+def append_inplane_rigid_mpc(mdl, node, host_nodes, weights, dof, ndof=6):
+    """Tie a slave node UX/UY to diaphragm host nodes (CST interpolation)."""
+
+    slave = node.cid * ndof + dof
+    master_dofs = []
+    coeffs = []
+    self_coeff = 0.0
+    for hn, w in zip(host_nodes, weights):
+        w = float(w)
+        if abs(w) < common.PRES_ZERO:
+            continue
+        mdof = hn.cid * ndof + dof
+        if mdof == slave:
+            self_coeff += w
+            continue
+        master_dofs.append(mdof)
+        coeffs.append(w)
+    if not master_dofs:
+        return
+    denom = 1.0 - self_coeff
+    if abs(denom) < common.PRES_ZERO:
+        return
+    scale = 1.0 / denom
+    mdl.mpcs.append(MPCConstraint(slave, master_dofs, [c * scale for c in coeffs]))
+
+
 def _point_in_polygon_2d(x, y, polygon, tolerance=common.PRES_LEN):
     if len(polygon) < 3:
         return False
@@ -772,20 +847,9 @@ def build_diaphragm_mpcs(mdl, ndof=6):
 
                 if dc.connection_type == CONN_CONNECTED_RIGID:
                     for dof in [0, 1]:
-                        slave = node.cid * ndof + dof
-                        master_dofs = []
-                        coeffs = []
-                        for hn, w in zip(cp.host_nodes, cp.shape_function_weights):
-                            mdof = hn.cid * ndof + dof
-                            if mdof == slave:
-                                continue
-                            if abs(w) < common.PRES_ZERO:
-                                continue
-                            master_dofs.append(mdof)
-                            coeffs.append(float(w))
-                        if not master_dofs:
-                            continue
-                        mdl.mpcs.append(MPCConstraint(slave, master_dofs, coeffs))
+                        append_inplane_rigid_mpc(
+                            mdl, node, cp.host_nodes, cp.shape_function_weights, dof, ndof
+                        )
 
         if not cps:
             assoc_type = ASSOC_NONE
@@ -823,19 +887,9 @@ def build_diaphragm_mpcs(mdl, ndof=6):
         )
         if dc.connection_type == CONN_CONNECTED_RIGID:
             for dof in [0, 1]:
-                slave = node.cid * ndof + dof
-                master_dofs = []
-                coeffs = []
-                for hn, w in zip(cp.host_nodes, cp.shape_function_weights):
-                    mdof = hn.cid * ndof + dof
-                    if mdof == slave:
-                        continue
-                    if abs(w) < common.PRES_ZERO:
-                        continue
-                    master_dofs.append(mdof)
-                    coeffs.append(float(w))
-                if master_dofs:
-                    mdl.mpcs.append(MPCConstraint(slave, master_dofs, coeffs))
+                append_inplane_rigid_mpc(
+                    mdl, node, cp.host_nodes, cp.shape_function_weights, dof, ndof
+                )
 
     return mdl.dassocs, mdl.mpcs
 

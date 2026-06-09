@@ -36,6 +36,7 @@ class TestDiaphragmFeatures(unittest.TestCase):
             "NODE, 2, 1, 0, 0",
             "NODE, 3, 0, 1, 0",
             "DIAP, 1, F1, 1, 0, 1, 100, 0, ,",
+            "DREG, 1, 1, 2, 3",
             "DMEM, 1, 1, 1, 2, 3",
             "CONS, 1, 1, 1, 1, 1, 1, 1",
             "CONS, 2, 0, 1, 1, 1, 1, 1",

@@ -1249,8 +1249,8 @@ DMEM,   1247,     20,     85,     86,    251
 #   CONN: 0=RIGID in-plane  1=OPEN/disconnected
 #   SPACING: optional metadata (blank allowed)
 
-DCON,     10,    0,       ,    0,     0.01
-DCON,     20,    0,       ,    0,     0.01
+# DCON AUTO removed: ties every member to the diaphragm and is not needed when
+# floor nodes are shared with DMEM. Use explicit DCON per beam if required.
 
 # --- WOOD RATED WALL(WWLL) ---
 # WWLL,   ID,       NAME, MODEL,        M,        L,        H,  DIR,             RA,     N1,     N2,     N3,     N4,   DIAP, LAYO
@@ -1263,7 +1263,18 @@ DCON,     20,    0,       ,    0,     0.01
 
 # 1F west edge (x=0) between y=6.885-7.795, wall multiplier M=2.0
 
-WWLL,      1,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,      2,      0,      3,      1,       ,    1
+WWLL,      1,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,      0,      1,      3,      2,       ,    1
+WWLL,      2,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,     62,      63,     55,      54,       ,    1
+WWLL,      3,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,     63,     117,     114,      55,       ,    1
+WWLL,      4,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,     28,     29,     53,      52,       ,    1
+WWLL,      5,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,     30,     31,     1,      0,       ,    1
+WWLL,     11,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,    115,     116,     119,      57,       ,    1
+WWLL,     12,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,    64,     65,     57,      56,       ,    1
+WWLL,     13,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,    115,     116,     119,      57,       ,    1
+WWLL,     14,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,     63,     117,     114,      55,       ,    1
+WWLL,     15,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,    115,     116,     119,      57,       ,    1
+WWLL,     16,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,     29,     100,     113,      53,       ,    1
+WWLL,     17,    W1_WEST,    0,      2.0,     0.91,    2.735,    0,   0.0083333333,    31,     101,     80,      1,       ,    1
 
 # --- LOAD NAME(LNME) ---
 # LNME,   LC,       NAME
