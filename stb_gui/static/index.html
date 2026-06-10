@@ -4,11 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Structural Toolbox</title>
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" href="/static/icons/st-icon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/static/icons/st-icon-48.png" type="image/png" sizes="48x48">
+  <link rel="icon" href="/static/icons/st-icon-256.png" type="image/png" sizes="256x256">
+  <link rel="icon" href="/static/icons/favicon.ico" sizes="48x48">
+  <link rel="apple-touch-icon" href="/static/icons/st-icon-192.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div id="toolbar">
-    <span class="title">Structural Toolbox</span>
     <button id="btnNew" type="button">New</button>
     <button id="btnOpen" type="button">Open</button>
     <button id="btnSave" type="button">Save</button>
@@ -18,12 +24,12 @@
     <button id="btnReload" type="button">Reload</button>
     <button id="btnSolve" type="button" title="Solve (F5)">Solve</button>
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
+    <button id="btnProject" type="button" class="btn-secondary" title="project.json sidecar settings">Project…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
     <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P)">Pick mode</button>
     <button id="btnToggleDistance" type="button" class="btn-secondary" title="Distance (D)">Distance</button>
-    <button id="btnToggleSelectionPanel" type="button" class="btn-secondary" title="Show/hide list of picked elements">Picked list</button>
     <span id="status">Loading…</span>
   </div>
   <div id="viewport">
@@ -32,6 +38,53 @@
       <div id="contextMenuTitle" class="context-menu-title"></div>
       <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
       <button type="button" id="contextMenuDeleteNodes" class="context-menu-item context-menu-danger" data-action="delete-nodes">Delete nodes…</button>
+      <button type="button" id="contextMenuDeleteDmem" class="context-menu-item context-menu-danger" data-action="delete-dmem">Delete DMEM…</button>
+      <button type="button" id="contextMenuDeleteWrw" class="context-menu-item context-menu-danger" data-action="delete-wrw">Delete WRW…</button>
+      <div id="contextMenuWrwEdits" class="context-menu-group">
+        <div class="context-menu-label">WRW type / multiplier</div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuWrwModel" class="context-menu-input" title="MODEL">
+            <option value="1">せん断ばね</option>
+            <option value="0">ブレース</option>
+          </select>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="set-wrw-model">Apply</button>
+        </div>
+        <div class="context-menu-field-row">
+          <input type="number" id="contextMenuWrwMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" placeholder="M">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="set-wrw-multiplier">Apply</button>
+        </div>
+      </div>
+      <div id="contextMenuDmemEdits" class="context-menu-group">
+        <div class="context-menu-label">Floor/roof multiplier (DIAP)</div>
+        <div class="context-menu-field-row">
+          <input type="number" id="contextMenuDiapMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" placeholder="MAG">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="set-diap-multiplier">Apply</button>
+        </div>
+        <div id="contextMenuDiapHint" class="context-menu-hint"></div>
+      </div>
+      <div id="contextMenuDmemCreate" class="context-menu-group">
+        <div class="context-menu-label">Create DMEM (3 nodes)</div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuDmemCreateDiap" class="context-menu-input"></select>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="create-dmem">Create</button>
+        </div>
+        <div id="contextMenuDmemCreateHint" class="context-menu-hint"></div>
+      </div>
+      <div id="contextMenuWrwCreate" class="context-menu-group">
+        <div class="context-menu-label">Create WRW (4 nodes)</div>
+        <div class="context-menu-field-row">
+          <input type="number" id="contextMenuWrwCreateMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" value="2" placeholder="M">
+          <select id="contextMenuWrwCreateModel" class="context-menu-input" title="MODEL">
+            <option value="1">せん断ばね</option>
+            <option value="0">ブレース</option>
+          </select>
+        </div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuWrwCreateDiap" class="context-menu-input"></select>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="create-wrw">Create</button>
+        </div>
+        <div id="contextMenuWrwCreateHint" class="context-menu-hint"></div>
+      </div>
       <div id="contextMenuElemEdits" class="context-menu-elem-edits">
       <div class="context-menu-group">
         <div class="context-menu-label">Change section</div>
@@ -146,12 +199,22 @@
         <label class="panel-check">
           <input type="checkbox" id="chkSection"> Section
         </label>
-        <label class="panel-check">
-          <input type="checkbox" id="chkMembrane" checked> DMEM
-        </label>
-        <label class="panel-check">
-          <input type="checkbox" id="chkWoodWall" checked> WRW
-        </label>
+        <div class="panel-check-row">
+          <label class="panel-check panel-check-compact">
+            <input type="checkbox" id="chkMembrane" checked> DMEM
+          </label>
+          <label class="panel-check panel-check-compact panel-check-edge" title="Show DMEM region edge lines">
+            <input type="checkbox" id="chkMembraneEdge" checked> Edge
+          </label>
+        </div>
+        <div class="panel-check-row">
+          <label class="panel-check panel-check-compact">
+            <input type="checkbox" id="chkWoodWall" checked> WRW
+          </label>
+          <label class="panel-check panel-check-compact panel-check-edge" title="Show WRW region edge lines">
+            <input type="checkbox" id="chkWoodWallEdge" checked> Edge
+          </label>
+        </div>
       </section>
 
       <section class="panel-section">
@@ -186,13 +249,34 @@
     </div>
   </div>
 
-  <div id="selectionPanel" class="float-panel float-panel-selection">
+  <div id="selectionPanel" class="float-panel float-panel-selection hidden">
     <div id="selectionPanelHeader" class="float-panel-header">
-      <span class="float-panel-title">Picked elements</span>
+      <span class="float-panel-title">Picked list</span>
       <button type="button" id="btnSelectionCollapse" class="btn-icon" title="Collapse">−</button>
     </div>
     <div id="selectionPanelBody" class="float-panel-body">
-      <p class="panel-hint">Pick mode: left drag = box pick (nodes + elements), click = nearest, right-click = edit menu. Ctrl+click toggles. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <p class="panel-hint">Pick mode: left drag = box pick, click = nearest, right-click = edit menu. Ctrl+click toggles. Pick 3 nodes → DMEM, 4 nodes → WRW. DMEM / WRW can be picked when visible. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <section id="pickWrwCreateOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">New WRW (4 nodes)</div>
+        <label class="panel-row">
+          <span>Type</span>
+          <select id="pickWrwCreateModel">
+            <option value="1">せん断ばね</option>
+            <option value="0">ブレース</option>
+          </select>
+        </label>
+      </section>
+      <section id="pickWrwEditOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">Selected WRW</div>
+        <label class="panel-row">
+          <span>Type</span>
+          <select id="pickWrwEditModel">
+            <option value="1">せん断ばね</option>
+            <option value="0">ブレース</option>
+          </select>
+        </label>
+        <button type="button" id="btnPickWrwApplyModel" class="btn-block btn-secondary">Apply type change</button>
+      </section>
       <div id="selectionSummary" class="selection-summary">Nothing picked</div>
       <ul id="selectionList" class="selection-list"></ul>
       <button id="btnClearSelection" type="button" class="btn-block btn-secondary">Clear picked</button>

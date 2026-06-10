@@ -50,6 +50,7 @@ const ALPHA = {
 
 const OPTIONS_STORAGE_KEY = "stb_gui_options";
 const MODEL_STORAGE_KEY = "stb_gui_last_model";
+const WRW_CREATE_MODEL_KEY = "stb_gui_wwll_create_model";
 const LABEL_BG = {
   elem: "rgba(47, 75, 124, 1.0)",
   material: "rgba(150, 95, 35, " + ALPHA.labelMaterial + ")",
@@ -119,6 +120,7 @@ const el = {
   btnReload: document.getElementById("btnReload"),
   btnSolve: document.getElementById("btnSolve"),
   btnInput: document.getElementById("btnInput"),
+  btnProject: document.getElementById("btnProject"),
   btnOutput: document.getElementById("btnOutput"),
   lcSelect: document.getElementById("lcSelect"),
   defFactor: document.getElementById("defFactor"),
@@ -145,7 +147,9 @@ const el = {
   chkMaterial: document.getElementById("chkMaterial"),
   chkSection: document.getElementById("chkSection"),
   chkMembrane: document.getElementById("chkMembrane"),
+  chkMembraneEdge: document.getElementById("chkMembraneEdge"),
   chkWoodWall: document.getElementById("chkWoodWall"),
+  chkWoodWallEdge: document.getElementById("chkWoodWallEdge"),
   chkForceValues: document.getElementById("chkForceValues"),
   forceSelect: document.getElementById("forceSelect"),
   frcDiv: document.getElementById("frcDiv"),
@@ -164,7 +168,6 @@ const el = {
   btnToggleAxes: document.getElementById("btnToggleAxes"),
   btnToggleSelect: document.getElementById("btnToggleSelect"),
   btnToggleDistance: document.getElementById("btnToggleDistance"),
-  btnToggleSelectionPanel: document.getElementById("btnToggleSelectionPanel"),
   distanceOverlay: document.getElementById("distanceOverlay"),
   selectionMarquee: document.getElementById("selectionMarquee"),
   selectionPanel: document.getElementById("selectionPanel"),
@@ -173,12 +176,33 @@ const el = {
   selectionSummary: document.getElementById("selectionSummary"),
   selectionList: document.getElementById("selectionList"),
   btnClearSelection: document.getElementById("btnClearSelection"),
+  pickWrwCreateOptions: document.getElementById("pickWrwCreateOptions"),
+  pickWrwCreateModel: document.getElementById("pickWrwCreateModel"),
+  pickWrwEditOptions: document.getElementById("pickWrwEditOptions"),
+  pickWrwEditModel: document.getElementById("pickWrwEditModel"),
+  btnPickWrwApplyModel: document.getElementById("btnPickWrwApplyModel"),
   elemContextMenu: document.getElementById("elemContextMenu"),
   contextMenuTitle: document.getElementById("contextMenuTitle"),
   contextMenuSections: document.getElementById("contextMenuSections"),
   contextMenuMaterials: document.getElementById("contextMenuMaterials"),
   contextMenuDeleteElems: document.getElementById("contextMenuDeleteElems"),
   contextMenuDeleteNodes: document.getElementById("contextMenuDeleteNodes"),
+  contextMenuDeleteDmem: document.getElementById("contextMenuDeleteDmem"),
+  contextMenuDeleteWrw: document.getElementById("contextMenuDeleteWrw"),
+  contextMenuWrwEdits: document.getElementById("contextMenuWrwEdits"),
+  contextMenuDmemEdits: document.getElementById("contextMenuDmemEdits"),
+  contextMenuDmemCreate: document.getElementById("contextMenuDmemCreate"),
+  contextMenuDmemCreateDiap: document.getElementById("contextMenuDmemCreateDiap"),
+  contextMenuDmemCreateHint: document.getElementById("contextMenuDmemCreateHint"),
+  contextMenuWrwCreate: document.getElementById("contextMenuWrwCreate"),
+  contextMenuWrwCreateMultiplier: document.getElementById("contextMenuWrwCreateMultiplier"),
+  contextMenuWrwCreateModel: document.getElementById("contextMenuWrwCreateModel"),
+  contextMenuWrwCreateDiap: document.getElementById("contextMenuWrwCreateDiap"),
+  contextMenuWrwCreateHint: document.getElementById("contextMenuWrwCreateHint"),
+  contextMenuWrwModel: document.getElementById("contextMenuWrwModel"),
+  contextMenuWrwMultiplier: document.getElementById("contextMenuWrwMultiplier"),
+  contextMenuDiapMultiplier: document.getElementById("contextMenuDiapMultiplier"),
+  contextMenuDiapHint: document.getElementById("contextMenuDiapHint"),
   contextMenuElemEdits: document.getElementById("contextMenuElemEdits"),
   ejntEditPanel: document.getElementById("ejntEditPanel"),
   ejntEditText: document.getElementById("ejntEditText"),
@@ -220,6 +244,8 @@ let distanceNodeIds = [];
 let distanceMeters = null;
 let selectedElementIds = new Set();
 let selectedNodeIds = new Set();
+let selectedDmemIds = new Set();
+let selectedWrwIds = new Set();
 let selectionDrag = null;
 const _worldProj = new THREE.Vector3();
 const _ndcScratch = new THREE.Vector3();
@@ -435,9 +461,7 @@ function setSelectionMode(active) {
     el.btnToggleSelect.classList.toggle("active", selectionModeActive);
   }
   applyViewerInteractionControls();
-  if (selectionModeActive && el.selectionPanel) {
-    el.selectionPanel.classList.remove("hidden");
-  }
+  updateSelectionPanelVisibility();
 }
 
 function clearDistanceMeasurement() {
@@ -581,13 +605,46 @@ function updateDistanceVisual() {
 }
 
 function hasPickSelection() {
-  return selectedElementIds.size > 0 || selectedNodeIds.size > 0;
+  return selectedElementIds.size > 0 || selectedNodeIds.size > 0
+    || selectedDmemIds.size > 0 || selectedWrwIds.size > 0;
 }
 
 function clearSelection() {
   if (!hasPickSelection()) return;
   selectedElementIds = new Set();
   selectedNodeIds = new Set();
+  selectedDmemIds = new Set();
+  selectedWrwIds = new Set();
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function setSelectedWrwIds(ids, mode) {
+  const next = mode === "replace" ? new Set() : new Set(selectedWrwIds);
+  for (const id of ids) {
+    if (mode === "toggle") {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      next.add(id);
+    }
+  }
+  selectedWrwIds = next;
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function setSelectedDmemIds(ids, mode) {
+  const next = mode === "replace" ? new Set() : new Set(selectedDmemIds);
+  for (const id of ids) {
+    if (mode === "toggle") {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      next.add(id);
+    }
+  }
+  selectedDmemIds = next;
   updateSelectionHighlight();
   updateSelectionPanel();
 }
@@ -622,14 +679,18 @@ function setSelectedNodeIds(ids, mode) {
   updateSelectionPanel();
 }
 
-function replacePickSelection(nodeIds, elemIds) {
+function replacePickSelection(nodeIds, elemIds, dmemIds, wrwIds) {
   setSelectedNodeIds(nodeIds, "replace");
   setSelectedElementIds(elemIds, "replace");
+  setSelectedDmemIds(dmemIds == null ? [] : dmemIds, "replace");
+  setSelectedWrwIds(wrwIds == null ? [] : wrwIds, "replace");
 }
 
-function addPickSelection(nodeIds, elemIds) {
+function addPickSelection(nodeIds, elemIds, dmemIds, wrwIds) {
   setSelectedNodeIds(nodeIds, "add");
   setSelectedElementIds(elemIds, "add");
+  setSelectedDmemIds(dmemIds == null ? [] : dmemIds, "add");
+  setSelectedWrwIds(wrwIds == null ? [] : wrwIds, "add");
 }
 
 function viewportMousePoint(ev) {
@@ -710,6 +771,137 @@ function segmentIntersectsRect(ax, ay, bx, by, x0, y0, x1, y1) {
   return false;
 }
 
+function pointInTriangle2d(px, py, ax, ay, bx, by, cx, cy) {
+  function sign(p1x, p1y, p2x, p2y, p3x, p3y) {
+    return (p1x - p3x) * (p2y - p3y) - (p2x - p3x) * (p1y - p3y);
+  }
+  const d1 = sign(px, py, ax, ay, bx, by);
+  const d2 = sign(px, py, bx, by, cx, cy);
+  const d3 = sign(px, py, cx, cy, ax, ay);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
+
+function distToPolygonEdges2d(px, py, verts) {
+  let best = Infinity;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    const d = distPointToSegment2d(px, py, a.x, a.y, b.x, b.y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function polygonIntersectsRect(verts, x0, y0, x1, y1) {
+  for (const v of verts) {
+    if (pointInRect(v.x, v.y, x0, y0, x1, y1)) return true;
+  }
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    if (segmentIntersectsRect(a.x, a.y, b.x, b.y, x0, y0, x1, y1)) return true;
+  }
+  return false;
+}
+
+function membraneScreenVerts(mem, nm, display) {
+  const ids = mem.nodes;
+  if (!ids || ids.length !== 3) return null;
+  const verts = [];
+  for (let i = 0; i < 3; i++) {
+    const n = nm[ids[i]];
+    if (!n) return null;
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    verts.push(worldToScreenPoint(p));
+  }
+  return verts;
+}
+
+function woodWallScreenVerts(wall, nm, display) {
+  const ids = wall.nodes;
+  if (!ids || ids.length !== 4) return null;
+  const verts = [];
+  for (let i = 0; i < 4; i++) {
+    const n = nm[ids[i]];
+    if (!n) return null;
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    verts.push(worldToScreenPoint(p));
+  }
+  return verts;
+}
+
+function pickMembraneAtScreen(px, py, thresholdPx) {
+  if (!currentModel || !(el.chkMembrane && el.chkMembrane.checked)) return null;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  let bestId = null;
+  let bestScore = thresholdPx;
+  for (const mem of currentModel.membrane_elements || []) {
+    const verts = membraneScreenVerts(mem, nm, display);
+    if (!verts) continue;
+    const inside = pointInTriangle2d(
+      px, py,
+      verts[0].x, verts[0].y,
+      verts[1].x, verts[1].y,
+      verts[2].x, verts[2].y
+    );
+    const edgeDist = distToPolygonEdges2d(px, py, verts);
+    const score = inside ? 0 : edgeDist;
+    if (score < bestScore) {
+      bestScore = score;
+      bestId = mem.id;
+    }
+  }
+  return bestId == null ? null : { id: bestId, score: bestScore };
+}
+
+function pickWoodWallAtScreen(px, py, thresholdPx) {
+  if (!currentModel || !(el.chkWoodWall && el.chkWoodWall.checked)) return null;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  let bestId = null;
+  let bestScore = thresholdPx;
+  for (const wall of currentModel.wood_rated_walls || []) {
+    const verts = woodWallScreenVerts(wall, nm, display);
+    if (!verts) continue;
+    const inside = pointInTriangle2d(px, py, verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y)
+      || pointInTriangle2d(px, py, verts[0].x, verts[0].y, verts[2].x, verts[2].y, verts[3].x, verts[3].y);
+    const edgeDist = distToPolygonEdges2d(px, py, verts);
+    const score = inside ? 0 : edgeDist;
+    if (score < bestScore) {
+      bestScore = score;
+      bestId = wall.id;
+    }
+  }
+  return bestId == null ? null : { id: bestId, score: bestScore };
+}
+
+function membranesInScreenRect(x0, y0, x1, y1) {
+  const ids = [];
+  if (!currentModel || !(el.chkMembrane && el.chkMembrane.checked)) return ids;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  for (const mem of currentModel.membrane_elements || []) {
+    const verts = membraneScreenVerts(mem, nm, display);
+    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(mem.id);
+  }
+  return ids;
+}
+
+function woodWallsInScreenRect(x0, y0, x1, y1) {
+  const ids = [];
+  if (!currentModel || !(el.chkWoodWall && el.chkWoodWall.checked)) return ids;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  for (const wall of currentModel.wood_rated_walls || []) {
+    const verts = woodWallScreenVerts(wall, nm, display);
+    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(wall.id);
+  }
+  return ids;
+}
+
 function elementScreenSegment(elem, nm, display) {
   const n0 = nm[elem.n0];
   const n1 = nm[elem.n1];
@@ -736,7 +928,7 @@ function pickElementAtScreen(px, py, thresholdPx) {
       bestId = e.id;
     }
   }
-  return bestId;
+  return bestId == null ? null : { id: bestId, score: bestDist };
 }
 
 function elementsInScreenRect(x0, y0, x1, y1) {
@@ -804,15 +996,29 @@ function pickTargetAtScreen(px, py) {
       bestNodeDist = Math.hypot(px - s.x, py - s.y);
     }
   }
+
+  const candidates = [];
+  const bestDmem = pickMembraneAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestDmem != null) candidates.push(Object.assign({ kind: "dmem" }, bestDmem));
+  const bestWrw = pickWoodWallAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestWrw != null) candidates.push(Object.assign({ kind: "wrw" }, bestWrw));
   const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestNode != null && bestElem == null) return { kind: "node", id: bestNode };
-  if (bestElem != null && bestNode == null) return { kind: "elem", id: bestElem };
-  if (bestNode != null && bestElem != null) {
-    if (bestNodeDist <= SELECTION_PICK_PX) {
+  if (bestElem != null) candidates.push(Object.assign({ kind: "elem" }, bestElem));
+
+  if (bestNode != null && bestNodeDist <= SELECTION_NODE_PICK_PX) {
+    if (candidates.length === 0 || bestNodeDist <= SELECTION_PICK_PX * 0.75) {
       return { kind: "node", id: bestNode };
     }
-    return { kind: "elem", id: bestElem };
   }
+  if (candidates.length > 0) {
+    const kindPriority = { dmem: 0, wrw: 1, elem: 2 };
+    candidates.sort(function (a, b) {
+      if (a.score !== b.score) return a.score - b.score;
+      return (kindPriority[a.kind] || 9) - (kindPriority[b.kind] || 9);
+    });
+    return candidates[0];
+  }
+  if (bestNode != null) return { kind: "node", id: bestNode };
   return null;
 }
 
@@ -894,6 +1100,77 @@ function updateSelectionHighlight() {
       selectionGroup.add(points);
     }
   }
+
+  const selFillPos = [];
+  const selEdgePts = [];
+  for (const mem of currentModel.membrane_elements || []) {
+    if (!selectedDmemIds.has(mem.id)) continue;
+    const ids = mem.nodes;
+    if (!ids || ids.length !== 3) continue;
+    const p0 = nodePosition(nm[ids[0]], currentModel, display.lc, display.defFac, display.deformed);
+    const p1 = nodePosition(nm[ids[1]], currentModel, display.lc, display.defFac, display.deformed);
+    const p2 = nodePosition(nm[ids[2]], currentModel, display.lc, display.defFac, display.deformed);
+    if (!p0 || !p1 || !p2) continue;
+    selFillPos.push(
+      p0.x, p0.y, p0.z,
+      p1.x, p1.y, p1.z,
+      p2.x, p2.y, p2.z
+    );
+    selEdgePts.push(
+      p0.x, p0.y, p0.z, p1.x, p1.y, p1.z,
+      p1.x, p1.y, p1.z, p2.x, p2.y, p2.z,
+      p2.x, p2.y, p2.z, p0.x, p0.y, p0.z
+    );
+  }
+  for (const wall of currentModel.wood_rated_walls || []) {
+    if (!selectedWrwIds.has(wall.id)) continue;
+    const ids = wall.nodes;
+    if (!ids || ids.length !== 4) continue;
+    const pts = ids.map(function (nid) {
+      const n = nm[nid];
+      return n ? nodePosition(n, currentModel, display.lc, display.defFac, display.deformed) : null;
+    });
+    if (pts.some(function (p) { return !p; })) continue;
+    selFillPos.push(
+      pts[0].x, pts[0].y, pts[0].z,
+      pts[1].x, pts[1].y, pts[1].z,
+      pts[2].x, pts[2].y, pts[2].z,
+      pts[0].x, pts[0].y, pts[0].z,
+      pts[2].x, pts[2].y, pts[2].z,
+      pts[3].x, pts[3].y, pts[3].z
+    );
+    selEdgePts.push(
+      pts[0].x, pts[0].y, pts[0].z, pts[1].x, pts[1].y, pts[1].z,
+      pts[1].x, pts[1].y, pts[1].z, pts[2].x, pts[2].y, pts[2].z,
+      pts[2].x, pts[2].y, pts[2].z, pts[3].x, pts[3].y, pts[3].z,
+      pts[3].x, pts[3].y, pts[3].z, pts[0].x, pts[0].y, pts[0].z
+    );
+  }
+  if (selFillPos.length > 0) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(selFillPos, 3));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshBasicMaterial({
+      color: COLORS.selected,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 20;
+    selectionGroup.add(mesh);
+  }
+  if (selEdgePts.length > 0) {
+    addWideLineSegmentsFromPts(
+      selEdgePts,
+      COLORS.selected,
+      selectionGroup,
+      22,
+      elementLineWidthPx() + 2.5,
+      ALPHA.opaque
+    );
+  }
 }
 
 function elementSummaryText(elem) {
@@ -973,13 +1250,23 @@ function elementEfrcOutBlock(model, elemId, lcKey) {
   return EFRC_OUT_HEADER.join("\n") + "\n" + formatEfrcOutLine(lcKey, elemId, forces);
 }
 
+function updateSelectionPanelVisibility() {
+  if (!el.selectionPanel) return;
+  const show = selectionModeActive && hasPickSelection();
+  el.selectionPanel.classList.toggle("hidden", !show);
+}
+
 function updateSelectionPanel() {
   if (!el.selectionSummary || !el.selectionList) return;
   const elemCount = selectedElementIds.size;
   const nodeCount = selectedNodeIds.size;
+  const dmemCount = selectedDmemIds.size;
+  const wrwCount = selectedWrwIds.size;
   if (!hasPickSelection()) {
     el.selectionSummary.textContent = "Nothing picked";
     el.selectionList.innerHTML = "";
+    updatePickWrwOptions();
+    updateSelectionPanelVisibility();
     return;
   }
   const parts = [];
@@ -988,6 +1275,12 @@ function updateSelectionPanel() {
   }
   if (nodeCount > 0) {
     parts.push(nodeCount + " node" + (nodeCount === 1 ? "" : "s"));
+  }
+  if (dmemCount > 0) {
+    parts.push(dmemCount + " DMEM");
+  }
+  if (wrwCount > 0) {
+    parts.push(wrwCount + " WRW");
   }
   let summary = parts.join(", ") + " picked";
   if (elemCount > 0 && currentModel) {
@@ -1016,6 +1309,12 @@ function updateSelectionPanel() {
   for (const id of Array.from(selectedNodeIds).sort((a, b) => a - b)) {
     rows.push({ kind: "node", id: id });
   }
+  for (const id of Array.from(selectedDmemIds).sort((a, b) => a - b)) {
+    rows.push({ kind: "dmem", id: id });
+  }
+  for (const id of Array.from(selectedWrwIds).sort((a, b) => a - b)) {
+    rows.push({ kind: "wrw", id: id });
+  }
   for (const id of Array.from(selectedElementIds).sort((a, b) => a - b)) {
     rows.push({ kind: "elem", id: id });
   }
@@ -1026,6 +1325,18 @@ function updateSelectionPanel() {
   const byNode = {};
   for (const n of currentModel ? currentModel.nodes : []) {
     byNode[n.id] = n;
+  }
+  const byDmem = {};
+  for (const m of currentModel ? currentModel.membrane_elements || [] : []) {
+    byDmem[m.id] = m;
+  }
+  const byWrw = {};
+  for (const w of currentModel ? currentModel.wood_rated_walls || [] : []) {
+    byWrw[w.id] = w;
+  }
+  const byDiap = {};
+  for (const d of currentModel ? currentModel.diaphragms || [] : []) {
+    byDiap[d.id] = d;
   }
   const solved = currentModel && analysisComplete(currentModel);
   const lcKey = String(el.lcSelect ? el.lcSelect.value : "");
@@ -1051,7 +1362,35 @@ function updateSelectionPanel() {
         li.appendChild(outLine);
       }
       li.addEventListener("click", function () {
-        replacePickSelection([row.id], []);
+        replacePickSelection([row.id], [], [], []);
+      });
+    } else if (row.kind === "dmem") {
+      const m = byDmem[row.id];
+      const diap = m ? byDiap[m.diaphragm_id] : null;
+      const title = document.createElement("div");
+      title.className = "selection-row-title";
+      let label = "DMEM " + row.id;
+      if (m) label += " — DIAP " + m.diaphragm_id;
+      if (diap && diap.timber_multiplier != null) {
+        label += " (MAG " + diap.timber_multiplier + ")";
+      }
+      title.textContent = label;
+      li.appendChild(title);
+      li.addEventListener("click", function () {
+        replacePickSelection([], [], [row.id], []);
+      });
+    } else if (row.kind === "wrw") {
+      const w = byWrw[row.id];
+      const title = document.createElement("div");
+      title.className = "selection-row-title";
+      let label = "WRW " + row.id;
+      if (w) {
+        label += " — " + (w.name || "?") + " (" + wwllModelLabelFromWall(w) + ", M " + w.multiplier + ")";
+      }
+      title.textContent = label;
+      li.appendChild(title);
+      li.addEventListener("click", function () {
+        replacePickSelection([], [], [], [row.id]);
       });
     } else {
       const e = byElem[row.id];
@@ -1069,7 +1408,7 @@ function updateSelectionPanel() {
         li.appendChild(outLine);
       }
       li.addEventListener("click", function () {
-        replacePickSelection([], [row.id]);
+        replacePickSelection([], [row.id], [], []);
       });
     }
     el.selectionList.appendChild(li);
@@ -1080,6 +1419,8 @@ function updateSelectionPanel() {
     li.textContent = "... and " + (rows.length - SELECTION_LIST_LIMIT) + " more";
     el.selectionList.appendChild(li);
   }
+  updatePickWrwOptions();
+  updateSelectionPanelVisibility();
 }
 
 function updateSelectionMarquee(x0, y0, x1, y1) {
@@ -1102,6 +1443,22 @@ function hideSelectionMarquee() {
   el.selectionMarquee.style.height = "0";
 }
 
+function applyPickedTarget(picked, extend) {
+  if (picked == null) return false;
+  if (extend) {
+    if (picked.kind === "node") setSelectedNodeIds([picked.id], "toggle");
+    else if (picked.kind === "elem") setSelectedElementIds([picked.id], "toggle");
+    else if (picked.kind === "dmem") setSelectedDmemIds([picked.id], "toggle");
+    else if (picked.kind === "wrw") setSelectedWrwIds([picked.id], "toggle");
+    return true;
+  }
+  if (picked.kind === "node") replacePickSelection([picked.id], [], [], []);
+  else if (picked.kind === "elem") replacePickSelection([], [picked.id], [], []);
+  else if (picked.kind === "dmem") replacePickSelection([], [], [picked.id], []);
+  else if (picked.kind === "wrw") replacePickSelection([], [], [], [picked.id]);
+  return true;
+}
+
 function finishSelectionDrag(ev) {
   if (!selectionDrag) return;
   const drag = selectionDrag;
@@ -1118,25 +1475,22 @@ function finishSelectionDrag(ev) {
     const picked = pickTargetAtScreen(end.x, end.y);
     if (picked == null) {
       if (!extend) clearSelection();
-    } else if (extend) {
-      if (picked.kind === "node") setSelectedNodeIds([picked.id], "toggle");
-      else setSelectedElementIds([picked.id], "toggle");
-    } else if (picked.kind === "node") {
-      replacePickSelection([picked.id], []);
     } else {
-      replacePickSelection([], [picked.id]);
+      applyPickedTarget(picked, extend);
     }
     return;
   }
 
   const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
   const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  if (elemIds.length === 0 && nodeIds.length === 0) {
+  const dmemIds = membranesInScreenRect(drag.startX, drag.startY, end.x, end.y);
+  const wrwIds = woodWallsInScreenRect(drag.startX, drag.startY, end.x, end.y);
+  if (elemIds.length === 0 && nodeIds.length === 0 && dmemIds.length === 0 && wrwIds.length === 0) {
     if (!extend) clearSelection();
     return;
   }
-  if (extend) addPickSelection(nodeIds, elemIds);
-  else replacePickSelection(nodeIds, elemIds);
+  if (extend) addPickSelection(nodeIds, elemIds, dmemIds, wrwIds);
+  else replacePickSelection(nodeIds, elemIds, dmemIds, wrwIds);
 }
 
 function initSelectionInteraction() {
@@ -1206,6 +1560,231 @@ function selectedElementIdList() {
 
 function selectedNodeIdList() {
   return Array.from(selectedNodeIds).sort(function (a, b) { return a - b; });
+}
+
+function selectedDmemIdList() {
+  return Array.from(selectedDmemIds).sort(function (a, b) { return a - b; });
+}
+
+function selectedWrwIdList() {
+  return Array.from(selectedWrwIds).sort(function (a, b) { return a - b; });
+}
+
+function isTimberDiaphragm(diap) {
+  if (!diap) return false;
+  const src = String(diap.source || "").toUpperCase();
+  return src === "TIMBER_FLOOR" || src === "TIMBER_ROOF";
+}
+
+function findDmemIdByNodes(diapId, nodeIds) {
+  if (!currentModel) return null;
+  const sorted = nodeIds.slice().sort(function (a, b) { return a - b; });
+  for (const m of currentModel.membrane_elements || []) {
+    if (m.diaphragm_id !== diapId) continue;
+    const mn = (m.nodes || []).slice().sort(function (a, b) { return a - b; });
+    if (mn.length !== 3) continue;
+    if (mn[0] === sorted[0] && mn[1] === sorted[1] && mn[2] === sorted[2]) {
+      return m.id;
+    }
+  }
+  return null;
+}
+
+function findWrwIdByNodes(nodeIds) {
+  if (!currentModel) return null;
+  const sorted = nodeIds.slice().sort(function (a, b) { return a - b; });
+  for (const w of currentModel.wood_rated_walls || []) {
+    const wn = (w.nodes || []).slice().sort(function (a, b) { return a - b; });
+    if (wn.length !== 4) continue;
+    if (wn[0] === sorted[0] && wn[1] === sorted[1]
+      && wn[2] === sorted[2] && wn[3] === sorted[3]) {
+      return w.id;
+    }
+  }
+  return null;
+}
+
+function populateWrwCreateDiapSelect() {
+  if (!el.contextMenuWrwCreateDiap || !currentModel) return;
+  const sel = el.contextMenuWrwCreateDiap;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "No DIAP";
+  sel.appendChild(none);
+  for (const d of currentModel.diaphragms || []) {
+    const opt = document.createElement("option");
+    opt.value = String(d.id);
+    let label = "DIAP " + d.id;
+    if (d.name) label += " — " + d.name;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+    sel.value = prev;
+  }
+}
+
+function populateDmemCreateDiapSelect() {
+  if (!el.contextMenuDmemCreateDiap || !currentModel) return;
+  const sel = el.contextMenuDmemCreateDiap;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const diaps = currentModel.diaphragms || [];
+  for (const d of diaps) {
+    const opt = document.createElement("option");
+    opt.value = String(d.id);
+    let label = "DIAP " + d.id;
+    if (d.name) label += " — " + d.name;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+    sel.value = prev;
+  }
+}
+
+function timberDiapIdsFromSelectedDmem() {
+  if (!currentModel) return [];
+  const byDiap = {};
+  for (const d of currentModel.diaphragms || []) byDiap[d.id] = d;
+  const byDmem = {};
+  for (const m of currentModel.membrane_elements || []) byDmem[m.id] = m;
+  const ids = new Set();
+  for (const dmemId of selectedDmemIds) {
+    const mem = byDmem[dmemId];
+    if (!mem) continue;
+    const diap = byDiap[mem.diaphragm_id];
+    if (isTimberDiaphragm(diap)) ids.add(diap.id);
+  }
+  return Array.from(ids).sort(function (a, b) { return a - b; });
+}
+
+function commonNumericValue(values) {
+  if (!values.length) return null;
+  const first = values[0];
+  for (let i = 1; i < values.length; i++) {
+    if (Math.abs(values[i] - first) > 1e-9) return null;
+  }
+  return first;
+}
+
+function commonWrwMultiplier() {
+  if (!currentModel) return null;
+  const byWrw = {};
+  for (const w of currentModel.wood_rated_walls || []) byWrw[w.id] = w;
+  const vals = [];
+  for (const id of selectedWrwIds) {
+    const w = byWrw[id];
+    if (w && w.multiplier != null) vals.push(Number(w.multiplier));
+  }
+  return commonNumericValue(vals);
+}
+
+function wwllModelCodeFromWall(w) {
+  if (!w) return null;
+  const m = w.model_requested;
+  if (m === "EQUIVALENT_BRACE") return 0;
+  if (m === "SHEAR_PANEL") return 1;
+  if (m === 0 || m === "0") return 0;
+  if (m === 1 || m === "1") return 1;
+  return null;
+}
+
+function wwllModelLabelFromWall(w) {
+  const code = wwllModelCodeFromWall(w);
+  if (code === 0) return "ブレース";
+  if (code === 1) return "せん断ばね";
+  return "?";
+}
+
+function wwllModelLabelFromCode(model) {
+  return parseInt(model, 10) === 0 ? "ブレース" : "せん断ばね";
+}
+
+function commonWrwModel() {
+  if (!currentModel) return null;
+  const byWrw = {};
+  for (const w of currentModel.wood_rated_walls || []) byWrw[w.id] = w;
+  const vals = [];
+  for (const id of selectedWrwIds) {
+    const code = wwllModelCodeFromWall(byWrw[id]);
+    if (code != null) vals.push(code);
+  }
+  return commonNumericValue(vals);
+}
+
+function getPickWrwCreateModel() {
+  const sel = el.pickWrwCreateModel || el.contextMenuWrwCreateModel;
+  const raw = sel ? sel.value : "1";
+  return parseInt(raw, 10) === 0 ? 0 : 1;
+}
+
+function setPickWrwCreateModelValue(model) {
+  const v = parseInt(model, 10) === 0 ? "0" : "1";
+  if (el.pickWrwCreateModel) el.pickWrwCreateModel.value = v;
+  if (el.contextMenuWrwCreateModel) el.contextMenuWrwCreateModel.value = v;
+  try {
+    localStorage.setItem(WRW_CREATE_MODEL_KEY, v);
+  } catch (e) { /* ignore */ }
+}
+
+function loadPickWrwCreateModel() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(WRW_CREATE_MODEL_KEY);
+  } catch (e) { /* ignore */ }
+  if (saved === "0" || saved === "1") {
+    setPickWrwCreateModelValue(parseInt(saved, 10));
+  }
+}
+
+function updatePickWrwOptions() {
+  if (el.pickWrwCreateOptions) {
+    const showCreate = selectedNodeIds.size === 4
+      && selectedElementIds.size === 0 && selectedDmemIds.size === 0
+      && selectedWrwIds.size === 0;
+    el.pickWrwCreateOptions.hidden = !showCreate;
+  }
+  if (el.pickWrwEditOptions) {
+    const showEdit = selectedWrwIds.size > 0
+      && selectedNodeIds.size === 0 && selectedElementIds.size === 0
+      && selectedDmemIds.size === 0;
+    el.pickWrwEditOptions.hidden = !showEdit;
+    if (showEdit && el.pickWrwEditModel) {
+      const m = commonWrwModel();
+      el.pickWrwEditModel.value = m == null ? "1" : String(m);
+    }
+  }
+}
+
+function applyWrwModelChange(model) {
+  const m = parseInt(model, 10);
+  if (m !== 0 && m !== 1) {
+    window.alert("WRW type must be shear panel or brace.");
+    return;
+  }
+  if (selectedWrwIds.size === 0) return;
+  const label = wwllModelLabelFromCode(m);
+  const count = selectedWrwIds.size;
+  const ok = window.confirm(
+    "Change " + count + " WRW record" + (count === 1 ? "" : "s") + " to " + label + "?"
+  );
+  if (!ok) return;
+  applyModelEdit({ action: "set_wwll_model", model: m });
+}
+
+function commonDiapTimberMultiplier() {
+  if (!currentModel) return null;
+  const byDiap = {};
+  for (const d of currentModel.diaphragms || []) byDiap[d.id] = d;
+  const vals = [];
+  for (const id of timberDiapIdsFromSelectedDmem()) {
+    const d = byDiap[id];
+    if (d && d.timber_multiplier != null) vals.push(Number(d.timber_multiplier));
+  }
+  return commonNumericValue(vals);
 }
 
 function hideEjntEditor() {
@@ -1305,14 +1884,86 @@ function showContextMenu(clientX, clientY) {
   if (selectedElementIds.size > 0) populateContextMenuCatalog();
   const elemCount = selectedElementIds.size;
   const nodeCount = selectedNodeIds.size;
+  const dmemCount = selectedDmemIds.size;
+  const wrwCount = selectedWrwIds.size;
   if (el.contextMenuDeleteElems) {
     el.contextMenuDeleteElems.hidden = elemCount === 0;
   }
   if (el.contextMenuDeleteNodes) {
     el.contextMenuDeleteNodes.hidden = nodeCount === 0;
   }
+  if (el.contextMenuDeleteDmem) {
+    el.contextMenuDeleteDmem.hidden = dmemCount === 0;
+  }
+  if (el.contextMenuDeleteWrw) {
+    el.contextMenuDeleteWrw.hidden = wrwCount === 0;
+  }
   if (el.contextMenuElemEdits) {
     el.contextMenuElemEdits.hidden = elemCount === 0;
+  }
+  if (el.contextMenuWrwEdits) {
+    el.contextMenuWrwEdits.hidden = wrwCount === 0;
+    if (wrwCount > 0) {
+      if (el.contextMenuWrwMultiplier) {
+        const m = commonWrwMultiplier();
+        el.contextMenuWrwMultiplier.value = m == null ? "" : String(m);
+      }
+      if (el.contextMenuWrwModel) {
+        const model = commonWrwModel();
+        el.contextMenuWrwModel.value = model == null ? "1" : String(model);
+      }
+    }
+  }
+  if (el.contextMenuDmemCreate) {
+    const diaps = currentModel ? (currentModel.diaphragms || []) : [];
+    const canCreate = nodeCount === 3 && elemCount === 0 && dmemCount === 0
+      && wrwCount === 0 && diaps.length > 0;
+    el.contextMenuDmemCreate.hidden = !canCreate;
+    if (canCreate) {
+      populateDmemCreateDiapSelect();
+      if (el.contextMenuDmemCreateHint) {
+        const ids = selectedNodeIdList();
+        el.contextMenuDmemCreateHint.textContent =
+          "Nodes " + ids.join(", ") + " → triangle";
+      }
+    } else if (el.contextMenuDmemCreateHint) {
+      el.contextMenuDmemCreateHint.textContent = "";
+    }
+  }
+  if (el.contextMenuWrwCreate) {
+    const canCreateWrw = nodeCount === 4 && elemCount === 0 && dmemCount === 0
+      && wrwCount === 0;
+    el.contextMenuWrwCreate.hidden = !canCreateWrw;
+    if (canCreateWrw) {
+      if (el.contextMenuWrwCreateModel && el.pickWrwCreateModel) {
+        el.contextMenuWrwCreateModel.value = el.pickWrwCreateModel.value;
+      }
+      populateWrwCreateDiapSelect();
+      if (el.contextMenuWrwCreateHint) {
+        const ids = selectedNodeIdList();
+        el.contextMenuWrwCreateHint.textContent =
+          "Nodes " + ids.join(", ") + " → wall rectangle";
+      }
+    } else if (el.contextMenuWrwCreateHint) {
+      el.contextMenuWrwCreateHint.textContent = "";
+    }
+  }
+  const timberDiapIds = timberDiapIdsFromSelectedDmem();
+  if (el.contextMenuDmemEdits) {
+    el.contextMenuDmemEdits.hidden = dmemCount === 0 || timberDiapIds.length === 0;
+    if (dmemCount > 0 && timberDiapIds.length > 0 && el.contextMenuDiapMultiplier) {
+      const m = commonDiapTimberMultiplier();
+      el.contextMenuDiapMultiplier.value = m == null ? "" : String(m);
+    }
+    if (el.contextMenuDiapHint) {
+      if (dmemCount > 0 && timberDiapIds.length === 0) {
+        el.contextMenuDiapHint.textContent = "Selected DMEM uses explicit DMAT (SRC=0); multiplier edit unavailable.";
+      } else if (timberDiapIds.length > 0) {
+        el.contextMenuDiapHint.textContent = "Updates DIAP id(s): " + timberDiapIds.join(", ");
+      } else {
+        el.contextMenuDiapHint.textContent = "";
+      }
+    }
   }
   if (el.contextMenuTitle) {
     const titleParts = [];
@@ -1321,6 +1972,12 @@ function showContextMenu(clientX, clientY) {
     }
     if (nodeCount > 0) {
       titleParts.push(nodeCount + " node" + (nodeCount === 1 ? "" : "s"));
+    }
+    if (dmemCount > 0) {
+      titleParts.push(dmemCount + " DMEM");
+    }
+    if (wrwCount > 0) {
+      titleParts.push(wrwCount + " WRW");
     }
     el.contextMenuTitle.textContent = titleParts.join(", ") + " picked";
   }
@@ -1357,11 +2014,19 @@ function pruneSelectionToModel() {
   if (!currentModel) return;
   const validElems = new Set(currentModel.elements.map(function (e) { return e.id; }));
   const validNodes = new Set(currentModel.nodes.map(function (n) { return n.id; }));
+  const validDmem = new Set((currentModel.membrane_elements || []).map(function (m) { return m.id; }));
+  const validWrw = new Set((currentModel.wood_rated_walls || []).map(function (w) { return w.id; }));
   selectedElementIds = new Set(
     Array.from(selectedElementIds).filter(function (id) { return validElems.has(id); })
   );
   selectedNodeIds = new Set(
     Array.from(selectedNodeIds).filter(function (id) { return validNodes.has(id); })
+  );
+  selectedDmemIds = new Set(
+    Array.from(selectedDmemIds).filter(function (id) { return validDmem.has(id); })
+  );
+  selectedWrwIds = new Set(
+    Array.from(selectedWrwIds).filter(function (id) { return validWrw.has(id); })
   );
   updateSelectionHighlight();
   updateSelectionPanel();
@@ -1450,6 +2115,68 @@ async function applyModelEdit(extra) {
       action: "delete_nodes",
       node_ids: selectedNodeIdList(),
     };
+  } else if (extra.action === "create_dmem") {
+    if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
+      || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
+    const diapId = parseInt(extra.diap_id, 10);
+    if (!isFinite(diapId)) return;
+    payload = {
+      action: "create_dmem",
+      node_ids: selectedNodeIdList(),
+      diap_id: diapId,
+    };
+  } else if (extra.action === "create_wwll") {
+    if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
+      || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
+    const multiplier = parseFloat(extra.multiplier);
+    if (!isFinite(multiplier) || multiplier <= 0) return;
+    payload = {
+      action: "create_wwll",
+      node_ids: selectedNodeIdList(),
+      multiplier: multiplier,
+      model: extra.model,
+      layo: extra.layo,
+    };
+    if (extra.diap_id !== "" && extra.diap_id != null) {
+      const diapId = parseInt(extra.diap_id, 10);
+      if (isFinite(diapId)) payload.diap_id = diapId;
+    }
+  } else if (extra.action === "delete_dmem") {
+    if (selectedDmemIds.size === 0) return;
+    payload = {
+      action: "delete_dmem",
+      dmem_ids: selectedDmemIdList(),
+    };
+  } else if (extra.action === "delete_wwll") {
+    if (selectedWrwIds.size === 0) return;
+    payload = {
+      action: "delete_wwll",
+      wwll_ids: selectedWrwIdList(),
+    };
+  } else if (extra.action === "set_wwll_multiplier") {
+    if (selectedWrwIds.size === 0) return;
+    payload = {
+      action: "set_wwll_multiplier",
+      wwll_ids: selectedWrwIdList(),
+      multiplier: extra.multiplier,
+    };
+  } else if (extra.action === "set_wwll_model") {
+    if (selectedWrwIds.size === 0) return;
+    const model = parseInt(extra.model, 10);
+    if (model !== 0 && model !== 1) return;
+    payload = {
+      action: "set_wwll_model",
+      wwll_ids: selectedWrwIdList(),
+      model: model,
+    };
+  } else if (extra.action === "set_diap_timber_multiplier") {
+    const diapIds = timberDiapIdsFromSelectedDmem();
+    if (diapIds.length === 0) return;
+    payload = {
+      action: "set_diap_timber_multiplier",
+      diap_ids: diapIds,
+      multiplier: extra.multiplier,
+    };
   } else {
     if (selectedElementIds.size === 0) return;
     payload = Object.assign({ element_ids: selectedElementIdList() }, extra);
@@ -1472,13 +2199,36 @@ async function applyModelEdit(extra) {
       throw new Error(err.detail || res.statusText);
     }
     const body = await res.json();
-    const destructive = payload.action === "delete" || payload.action === "delete_nodes";
+    const destructive = payload.action === "delete" || payload.action === "delete_nodes"
+      || payload.action === "delete_dmem" || payload.action === "delete_wwll";
+    const createdDmem = payload.action === "create_dmem";
+    const createdWrw = payload.action === "create_wwll";
     const prevElems = new Set(selectedElementIds);
     const prevNodes = new Set(selectedNodeIds);
-    await loadSelectedModel(false, { keepSelection: !destructive });
-    if (!destructive) {
+    const prevDmem = new Set(selectedDmemIds);
+    const prevWrw = new Set(selectedWrwIds);
+    await loadSelectedModel(false, {
+      keepSelection: !destructive && !createdDmem && !createdWrw,
+    });
+    if (createdDmem) {
+      const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
+      if (newId != null) {
+        replacePickSelection([], [], [newId], []);
+      } else {
+        clearSelection();
+      }
+    } else if (createdWrw) {
+      const newId = findWrwIdByNodes(payload.node_ids);
+      if (newId != null) {
+        replacePickSelection([], [], [], [newId]);
+      } else {
+        clearSelection();
+      }
+    } else if (!destructive) {
       selectedElementIds = prevElems;
       selectedNodeIds = prevNodes;
+      selectedDmemIds = prevDmem;
+      selectedWrwIds = prevWrw;
       pruneSelectionToModel();
     }
     let msg = path + " — edit saved";
@@ -1529,6 +2279,97 @@ function initContextMenu() {
       applyModelEdit({ action: "delete_nodes" });
       return;
     }
+    if (action === "delete-dmem") {
+      const count = selectedDmemIds.size;
+      const ok = window.confirm("Delete " + count + " DMEM record" + (count === 1 ? "" : "s") + "?");
+      if (!ok) return;
+      applyModelEdit({ action: "delete_dmem" });
+      return;
+    }
+    if (action === "delete-wrw") {
+      const count = selectedWrwIds.size;
+      const ok = window.confirm("Delete " + count + " WRW record" + (count === 1 ? "" : "s") + "?");
+      if (!ok) return;
+      applyModelEdit({ action: "delete_wwll" });
+      return;
+    }
+    if (action === "set-wrw-model") {
+      const raw = el.contextMenuWrwModel ? el.contextMenuWrwModel.value : "1";
+      applyWrwModelChange(raw);
+      return;
+    }
+    if (action === "set-wrw-multiplier") {
+      const raw = el.contextMenuWrwMultiplier ? el.contextMenuWrwMultiplier.value.trim() : "";
+      const m = parseFloat(raw);
+      if (!isFinite(m) || m <= 0) {
+        window.alert("Enter a positive wall multiplier.");
+        return;
+      }
+      applyModelEdit({ action: "set_wwll_multiplier", multiplier: m });
+      return;
+    }
+    if (action === "set-diap-multiplier") {
+      const raw = el.contextMenuDiapMultiplier ? el.contextMenuDiapMultiplier.value.trim() : "";
+      const m = parseFloat(raw);
+      if (!isFinite(m) || m <= 0) {
+        window.alert("Enter a positive floor/roof multiplier.");
+        return;
+      }
+      applyModelEdit({ action: "set_diap_timber_multiplier", multiplier: m });
+      return;
+    }
+    if (action === "create-dmem") {
+      if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
+        || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
+        window.alert("Pick exactly 3 nodes (no elements / DMEM / WRW) to create a DMEM triangle.");
+        return;
+      }
+      const diapRaw = el.contextMenuDmemCreateDiap ? el.contextMenuDmemCreateDiap.value : "";
+      const diapId = parseInt(diapRaw, 10);
+      if (!isFinite(diapId)) {
+        window.alert("Select a DIAP for the new DMEM.");
+        return;
+      }
+      const ids = selectedNodeIdList();
+      const ok = window.confirm(
+        "Create DMEM on DIAP " + diapId + " with nodes " + ids.join(", ") + "?"
+      );
+      if (!ok) return;
+      applyModelEdit({ action: "create_dmem", diap_id: diapId });
+      return;
+    }
+    if (action === "create-wrw") {
+      if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
+        || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
+        window.alert("Pick exactly 4 nodes (no elements / DMEM / WRW) to create a WRW wall.");
+        return;
+      }
+      const multRaw = el.contextMenuWrwCreateMultiplier
+        ? el.contextMenuWrwCreateMultiplier.value.trim() : "2";
+      const multiplier = parseFloat(multRaw);
+      if (!isFinite(multiplier) || multiplier <= 0) {
+        window.alert("Enter a positive wall multiplier.");
+        return;
+      }
+      const model = getPickWrwCreateModel();
+      const diapRaw = el.contextMenuWrwCreateDiap ? el.contextMenuWrwCreateDiap.value : "";
+      const modelLabel = wwllModelLabelFromCode(model);
+      const ids = selectedNodeIdList();
+      const diapText = diapRaw ? ("DIAP " + diapRaw) : "no DIAP tie";
+      const ok = window.confirm(
+        "Create WRW (" + modelLabel + ", M=" + multiplier + ", " + diapText +
+        ") with nodes " + ids.join(", ") + "?"
+      );
+      if (!ok) return;
+      applyModelEdit({
+        action: "create_wwll",
+        multiplier: multiplier,
+        model: model,
+        diap_id: diapRaw,
+        layo: model === 0 ? 1 : 1,
+      });
+      return;
+    }
     if (action === "ejnt-edit") {
       openEjntEditor();
       return;
@@ -1543,6 +2384,26 @@ function initContextMenu() {
   }
   if (el.btnEjntEditClose) {
     el.btnEjntEditClose.addEventListener("click", () => hideEjntEditor());
+  }
+
+  if (el.pickWrwCreateModel) {
+    el.pickWrwCreateModel.addEventListener("change", function () {
+      setPickWrwCreateModelValue(getPickWrwCreateModel());
+    });
+  }
+  if (el.contextMenuWrwCreateModel) {
+    el.contextMenuWrwCreateModel.addEventListener("change", function () {
+      if (el.pickWrwCreateModel) {
+        el.pickWrwCreateModel.value = el.contextMenuWrwCreateModel.value;
+      }
+      setPickWrwCreateModelValue(el.contextMenuWrwCreateModel.value);
+    });
+  }
+  if (el.btnPickWrwApplyModel) {
+    el.btnPickWrwApplyModel.addEventListener("click", function () {
+      const raw = el.pickWrwEditModel ? el.pickWrwEditModel.value : "1";
+      applyWrwModelChange(raw);
+    });
   }
 
   document.addEventListener("mousedown", function (ev) {
@@ -2285,7 +3146,11 @@ function buildModelScene(model) {
   const showMaterial = el.chkMaterial.checked;
   const showSection = el.chkSection.checked;
   const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  const showMembraneEdge = showMembrane
+    && !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
   const showWoodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
+  const showWoodWallEdge = showWoodWall
+    && !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
   const nm = nodeMap(model);
   const em = elemMap(model);
   const span = modelSpan(model);
@@ -2425,6 +3290,7 @@ function buildModelScene(model) {
       deformed,
       nm,
       group: modelGroup,
+      showEdge: showMembraneEdge,
     });
   }
 
@@ -2435,6 +3301,7 @@ function buildModelScene(model) {
       deformed,
       nm,
       group: modelGroup,
+      showEdge: showWoodWallEdge,
     });
   }
 
@@ -2845,14 +3712,16 @@ function drawWoodRatedWalls(model, opts) {
   mesh.renderOrder = 3;
   group.add(mesh);
 
-  addWideLineSegmentsFromPts(
-    edgePts,
-    COLORS.woodWallEdge,
-    group,
-    4,
-    Math.max(elementLineWidthPx() * 0.9, 0.5),
-    ALPHA.woodWallEdge
-  );
+  if (opts.showEdge !== false) {
+    addWideLineSegmentsFromPts(
+      edgePts,
+      COLORS.woodWallEdge,
+      group,
+      4,
+      Math.max(elementLineWidthPx() * 0.9, 0.5),
+      ALPHA.woodWallEdge
+    );
+  }
 }
 
 function drawMembraneElements(model, opts) {
@@ -2901,14 +3770,23 @@ function drawMembraneElements(model, opts) {
   mesh.renderOrder = 4;
   group.add(mesh);
 
-  addWideLineSegmentsFromPts(
-    edgePts,
-    COLORS.membraneEdge,
-    group,
-    5,
-    Math.max(elementLineWidthPx() * 0.85, 0.5),
-    ALPHA.membraneEdge
-  );
+  if (opts.showEdge !== false) {
+    addWideLineSegmentsFromPts(
+      edgePts,
+      COLORS.membraneEdge,
+      group,
+      5,
+      Math.max(elementLineWidthPx() * 0.85, 0.5),
+      ALPHA.membraneEdge
+    );
+  }
+}
+
+function syncRegionEdgeCheckboxes() {
+  const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  const showWoodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
+  if (el.chkMembraneEdge) el.chkMembraneEdge.disabled = !showMembrane;
+  if (el.chkWoodWallEdge) el.chkWoodWallEdge.disabled = !showWoodWall;
 }
 
 function axisPerpendiculars(d) {
@@ -4260,6 +5138,123 @@ async function fetchModelList() {
   return res.json();
 }
 
+function guiApiOrigin(targetWindow) {
+  const readOrigin = (win) => {
+    try {
+      if (!win || win.closed) return null;
+      if (win.__stbGuiOrigin && win.__stbGuiOrigin !== "null") {
+        return win.__stbGuiOrigin;
+      }
+      const origin = win.location && win.location.origin;
+      if (origin && origin !== "null") {
+        return origin;
+      }
+    } catch (_) {
+      /* cross-origin opener access may fail */
+    }
+    return null;
+  };
+
+  if (targetWindow) {
+    const pinned = readOrigin(targetWindow);
+    if (pinned) return pinned;
+    const fromOpener = readOrigin(targetWindow.opener);
+    if (fromOpener) return fromOpener;
+    const fromTarget = readOrigin(targetWindow);
+    if (fromTarget) return fromTarget;
+  }
+  return readOrigin(window) || "";
+}
+
+function guiApiUrl(path, targetWindow) {
+  const rel = path.startsWith("/") ? path : "/" + path;
+  const origin = guiApiOrigin(targetWindow);
+  if (!origin || origin === "null") {
+    throw new Error("GUI API の接続先を特定できません。メイン画面を再読み込みしてください。");
+  }
+  return origin + rel;
+}
+
+function primeStbPopupOrigin(popupWin) {
+  if (!popupWin || popupWin.closed) return;
+  const origin = guiApiOrigin(window);
+  if (!origin || origin === "null") return;
+  try {
+    popupWin.__stbGuiOrigin = origin;
+  } catch (_) {
+    /* popup may be cross-origin until navigation completes */
+  }
+}
+
+function openStbPopup(features) {
+  const url = guiApiUrl("/static/popup.html", window);
+  const w = window.open(url, "_blank", features);
+  primeStbPopupOrigin(w);
+  return w;
+}
+
+function runWhenPopupReady(w, initFn) {
+  if (!w) return;
+  const run = () => {
+    primeStbPopupOrigin(w);
+    try {
+      initFn();
+    } catch (ex) {
+      setStatus("Error: " + ex.message);
+      alert(String(ex.message || ex));
+    }
+  };
+  if (w.document.readyState === "complete" || w.document.readyState === "interactive") {
+    run();
+    return;
+  }
+  w.addEventListener("load", run, { once: true });
+}
+
+function stbIconHeadHtml(targetWindow) {
+  const base = guiApiOrigin(targetWindow) || "";
+  return "<meta name=\"theme-color\" content=\"#000000\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-32.png\" type=\"image/png\" sizes=\"32x32\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-48.png\" type=\"image/png\" sizes=\"48x48\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-256.png\" type=\"image/png\" sizes=\"256x256\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/favicon.ico\" sizes=\"48x48\">"
+    + "<link rel=\"apple-touch-icon\" href=\"" + base + "/static/icons/st-icon-192.png\">";
+}
+
+async function fetchApiJson(path, targetWindow, options) {
+  const url = guiApiUrl(path, targetWindow);
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (ex) {
+    throw new Error("API 接続に失敗しました (" + url + "): " + ex.message);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = err.detail;
+    if (Array.isArray(detail)) {
+      throw new Error(detail.map((d) => d.msg || String(d)).join("; "));
+    }
+    throw new Error(detail || res.statusText || "request failed");
+  }
+  return res.json();
+}
+
+async function fetchApiText(path, targetWindow) {
+  const url = guiApiUrl(path, targetWindow);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (ex) {
+    throw new Error("API 接続に失敗しました (" + url + "): " + ex.message);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.text();
+}
+
 async function fetchModel(path, solve) {
   const url = "/api/model?path=" + encodeURIComponent(path) + "&solve=" + (solve ? "1" : "0");
   const res = await fetch(url);
@@ -4277,85 +5272,722 @@ function outputFileName(path) {
   return dir + stem + ".out";
 }
 
-function showTextDocumentWindow(text, title) {
-  const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
-  const saveName = title;
-  const w = window.open("", "_blank", "width=920,height=720,scrollbars=yes,resizable=yes");
+async function fetchProjectView(path, targetWindow) {
+  return fetchApiJson("/api/project?path=" + encodeURIComponent(path), targetWindow || window);
+}
+
+async function saveProjectJson(datPath, project, targetWindow) {
+  return fetchApiJson(
+    "/api/project?path=" + encodeURIComponent(datPath),
+    targetWindow || window,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: project }),
+    },
+  );
+}
+
+function escapeHtml(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const DEFAULT_SEISMIC_RT = 1.0;
+
+function deepCloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function deepSet(obj, path, value) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (cur[key] == null || typeof cur[key] !== "object") {
+      cur[key] = {};
+    }
+    cur = cur[key];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+function parseCsvInts(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+    const n = Number(s);
+    if (!Number.isFinite(n) || Math.trunc(n) !== n) {
+      throw new Error("整数リストの形式が不正です: " + text);
+    }
+    return n;
+  });
+}
+
+function formatCsvInts(values) {
+  if (!values || !values.length) return "";
+  return values.join(", ");
+}
+
+function parseProjectFieldValue(type, raw, path) {
+  const text = String(raw ?? "").trim();
+  if (type === "optional_int") {
+    if (!text || text === "—") return null;
+    const n = Number(text);
+    if (!Number.isFinite(n) || Math.trunc(n) !== n) {
+      throw new Error("整数を入力してください: " + raw);
+    }
+    return n;
+  }
+  if (type === "csv_int") {
+    return parseCsvInts(text);
+  }
+  if (type === "bool") {
+    return text === "true" || text === "1" || text === "はい";
+  }
+  if (type === "number") {
+    if (!text) {
+      if (path === "load_conditions.seismic.rt") {
+        return undefined;
+      }
+      return 0;
+    }
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      throw new Error("数値を入力してください: " + raw);
+    }
+    return n;
+  }
+  return text;
+}
+
+function parseProjectTableCellValue(type, raw) {
+  const text = String(raw ?? "").trim();
+  if (type === "number") {
+    if (!text) return null;
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      throw new Error("数値を入力してください: " + raw);
+    }
+    return n;
+  }
+  if (type === "optional_int") {
+    if (!text || text === "—") return null;
+    const n = Number(text);
+    if (!Number.isFinite(n) || Math.trunc(n) !== n) {
+      throw new Error("整数を入力してください: " + raw);
+    }
+    return n;
+  }
+  if (type === "csv_int") {
+    if (!text) return [];
+    return parseCsvInts(text);
+  }
+  if (type === "bool") {
+    return text === "true" || text === "1" || text === "はい";
+  }
+  return text;
+}
+
+function shouldIncludeProjectTableRow(row, columns) {
+  const keyColumn = columns.find((c) => c.path === "name")
+    || columns.find((c) => c.path === "id")
+    || columns[0];
+  if (!keyColumn) return false;
+  const value = row[keyColumn.path];
+  if (keyColumn.type === "number" || keyColumn.type === "optional_int") {
+    return value != null && value !== "" && Number.isFinite(Number(value));
+  }
+  if (keyColumn.type === "csv_int") {
+    return Array.isArray(value) && value.length > 0;
+  }
+  return String(value ?? "").trim() !== "";
+}
+
+function filterEmptyProjectTableRows(project) {
+  if (!project || typeof project !== "object") return project;
+  if (Array.isArray(project.grids)) {
+    project.grids = project.grids.filter((row) => String(row && row.name || "").trim() !== "");
+  }
+  if (Array.isArray(project.stories)) {
+    project.stories = project.stories.filter((row) => String(row && row.name || "").trim() !== "");
+  }
+  if (Array.isArray(project.member_classes)) {
+    project.member_classes = project.member_classes.filter((row) => String(row && row.name || "").trim() !== "");
+  }
+  const diaps = project.load_conditions && project.load_conditions.diaphragms;
+  if (Array.isArray(diaps)) {
+    project.load_conditions.diaphragms = diaps.filter((row) => {
+      if (!row) return false;
+      const id = row.id;
+      return id != null && id !== "" && Number.isFinite(Number(id));
+    });
+  }
+  return project;
+}
+
+function normalizeSeismicSettings(project) {
+  const seismic = project.load_conditions && project.load_conditions.seismic;
+  if (!seismic) return;
+  const rt = Number(seismic.rt);
+  if (!Number.isFinite(rt) || rt <= 0) {
+    delete seismic.rt;
+  }
+  if (seismic.base_level != null && String(seismic.base_level).trim() === "") {
+    delete seismic.base_level;
+  }
+  if (seismic.base_elevation === "" || seismic.base_elevation == null) {
+    delete seismic.base_elevation;
+  }
+}
+
+function normalizeProjectPayload(project) {
+  if (!project || typeof project !== "object") return project;
+  if (project.schema != null && Number.isFinite(Number(project.schema))) {
+    project.schema = Math.trunc(Number(project.schema));
+  }
+  const diaps = project.load_conditions && project.load_conditions.diaphragms;
+  if (Array.isArray(diaps)) {
+    for (const item of diaps) {
+      if (item && item.id != null && Number.isFinite(Number(item.id))) {
+        item.id = Math.trunc(Number(item.id));
+      }
+    }
+  }
+  normalizeSeismicSettings(project);
+  return filterEmptyProjectTableRows(project);
+}
+
+function formatProjectFieldValue(type, value) {
+  if (type === "optional_int") {
+    return value == null ? "" : String(value);
+  }
+  if (type === "csv_int") {
+    return formatCsvInts(value);
+  }
+  if (type === "bool") {
+    return value ? "true" : "false";
+  }
+  if (type === "number") {
+    if (value == null || value === "") return "";
+    return String(value);
+  }
+  return value == null ? "" : String(value);
+}
+
+function renderProjectFieldInput(field, inputId) {
+  const value = formatProjectFieldValue(field.type, field.value);
+  const hint = field.hint ? "<span class=\"proj-hint\">" + escapeHtml(field.hint) + "</span>" : "";
+  if (field.type === "bool") {
+    return "<select class=\"proj-input\" data-path=\"" + escapeHtml(field.path) + "\" data-type=\"bool\" id=\"" + inputId + "\">"
+      + "<option value=\"true\"" + (value === "true" ? " selected" : "") + ">はい</option>"
+      + "<option value=\"false\"" + (value === "false" ? " selected" : "") + ">いいえ</option>"
+      + "</select>" + hint;
+  }
+  if (field.type === "select") {
+    let html = "<select class=\"proj-input\" data-path=\"" + escapeHtml(field.path) + "\" data-type=\"select\" id=\"" + inputId + "\">";
+    for (const opt of field.options || []) {
+      html += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(field.value) ? " selected" : "") + ">"
+        + escapeHtml(opt) + "</option>";
+    }
+    html += "</select>" + hint;
+    return html;
+  }
+  const inputType = field.type === "number" || field.type === "optional_int" ? "number" : "text";
+  const step = field.type === "optional_int" ? "1" : "any";
+  return "<input class=\"proj-input\" type=\"" + inputType + "\" step=\"" + step + "\" data-path=\""
+    + escapeHtml(field.path) + "\" data-type=\"" + escapeHtml(field.type) + "\" id=\"" + inputId + "\" value=\""
+    + escapeHtml(value) + "\">" + hint;
+}
+
+function renderProjectEditSectionHtml(section, sectionIndex) {
+  let html = "<section class=\"proj-section\" data-section-id=\"" + escapeHtml(section.id) + "\">";
+  html += "<h2>" + escapeHtml(section.title) + "</h2>";
+  if (section.fields && section.fields.length) {
+    html += "<dl class=\"proj-rows\">";
+    for (let i = 0; i < section.fields.length; i++) {
+      const field = section.fields[i];
+      const inputId = "proj-field-" + sectionIndex + "-" + i;
+      html += "<dt><label for=\"" + inputId + "\">" + escapeHtml(field.label) + "</label></dt>";
+      html += "<dd>" + renderProjectFieldInput(field, inputId) + "</dd>";
+    }
+    html += "</dl>";
+  }
+  if (section.readonly && section.readonly.length) {
+    html += "<dl class=\"proj-rows proj-readonly\">";
+    for (const row of section.readonly) {
+      html += "<dt>" + escapeHtml(row.label) + "</dt><dd>";
+      html += escapeHtml(row.value == null || row.value === "" ? "—" : row.value);
+      if (row.hint) {
+        html += "<span class=\"proj-hint\">" + escapeHtml(row.hint) + "</span>";
+      }
+      html += "</dd>";
+    }
+    html += "</dl>";
+  }
+  if (section.table) {
+    html += renderProjectEditTableHtml(section.table, sectionIndex);
+  }
+  html += "</section>";
+  return html;
+}
+
+function renderProjectEditTableHtml(table, sectionIndex) {
+  const tableId = "proj-table-" + sectionIndex;
+  let html = "<div class=\"proj-table-wrap\" data-table-path=\"" + escapeHtml(table.path) + "\" id=\"" + tableId + "\">";
+  if (table.label) {
+    html += "<h3>" + escapeHtml(table.label) + "</h3>";
+  }
+  html += "<table class=\"proj-edit-table\"><thead><tr>";
+  for (const col of table.columns) {
+    html += "<th>" + escapeHtml(col.label) + "</th>";
+  }
+  html += "<th class=\"proj-row-actions\">操作</th></tr></thead><tbody>";
+  const rows = table.rows || [];
+  if (!rows.length) {
+    html += renderProjectEditTableRowHtml(table.columns, {}, sectionIndex, 0);
+  } else {
+    for (let ri = 0; ri < rows.length; ri++) {
+      html += renderProjectEditTableRowHtml(table.columns, rows[ri], sectionIndex, ri);
+    }
+  }
+  html += "</tbody></table>";
+  html += "<button type=\"button\" class=\"btn-table-add\" data-table-id=\"" + tableId + "\">行を追加</button>";
+  html += "</div>";
+  return html;
+}
+
+function renderProjectEditTableRowHtml(columns, row, sectionIndex, rowIndex) {
+  let html = "<tr data-row-index=\"" + rowIndex + "\">";
+  for (let ci = 0; ci < columns.length; ci++) {
+    const col = columns[ci];
+    const cellId = "proj-cell-" + sectionIndex + "-" + rowIndex + "-" + ci;
+    const val = row[col.path];
+    let cellValue = val;
+    if (col.type === "csv_int") {
+      cellValue = formatCsvInts(val);
+    } else if (col.type === "select") {
+      let select = "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"select\" id=\"" + cellId + "\">";
+      for (const opt of col.options || []) {
+        select += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(val) ? " selected" : "") + ">"
+          + escapeHtml(opt) + "</option>";
+      }
+      select += "</select>";
+      html += "<td>" + select + "</td>";
+      continue;
+    }
+    const inputType = col.type === "number" ? "number" : "text";
+    html += "<td><input class=\"proj-cell-input\" type=\"" + inputType + "\" step=\"any\" data-col=\""
+      + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
+      + escapeHtml(formatProjectFieldValue(col.type, cellValue)) + "\"></td>";
+  }
+  html += "<td class=\"proj-row-actions\"><button type=\"button\" class=\"btn-table-del\">削除</button></td>";
+  html += "</tr>";
+  return html;
+}
+
+function collectProjectFromFormRoot(formRoot, editForm, baseProject) {
+  const out = deepCloneJson(baseProject);
+  if (!formRoot || !editForm) return out;
+
+  for (const input of formRoot.querySelectorAll(".proj-input[data-path]")) {
+    const path = input.getAttribute("data-path");
+    const type = input.getAttribute("data-type") || "text";
+    const value = parseProjectFieldValue(type, input.value, path);
+    if (value === undefined) {
+      continue;
+    }
+    deepSet(out, path, value);
+  }
+
+  for (const wrap of formRoot.querySelectorAll(".proj-table-wrap[data-table-path]")) {
+    const path = wrap.getAttribute("data-table-path");
+    const section = (editForm.sections || []).find((s) => s.table && s.table.path === path);
+    if (!section) continue;
+    const columns = section.table.columns;
+    const rows = [];
+    for (const tr of wrap.querySelectorAll("tbody tr")) {
+      const row = {};
+      for (const input of tr.querySelectorAll(".proj-cell-input")) {
+        const colPath = input.getAttribute("data-col");
+        const col = columns.find((c) => c.path === colPath);
+        const type = col ? col.type : (input.getAttribute("data-type") || "text");
+        row[colPath] = parseProjectTableCellValue(type, input.value);
+      }
+      if (shouldIncludeProjectTableRow(row, columns)) {
+        rows.push(row);
+      }
+    }
+    deepSet(out, path, rows);
+  }
+  return out;
+}
+
+function populateFormFromProject(formRoot, editForm, project) {
+  if (!formRoot || !editForm || !project) return;
+
+  for (const input of formRoot.querySelectorAll(".proj-input[data-path]")) {
+    const path = input.getAttribute("data-path");
+    const type = input.getAttribute("data-type") || "text";
+    const parts = path.split(".");
+    let cur = project;
+    for (const p of parts) {
+      cur = cur == null ? undefined : cur[p];
+    }
+    if (path === "load_conditions.seismic.rt" && (cur == null || cur === "")) {
+      cur = DEFAULT_SEISMIC_RT;
+    }
+    input.value = formatProjectFieldValue(type, cur);
+  }
+
+  for (const wrap of formRoot.querySelectorAll(".proj-table-wrap[data-table-path]")) {
+    const path = wrap.getAttribute("data-table-path");
+    const section = (editForm.sections || []).find((s) => s.table && s.table.path === path);
+    if (!section) continue;
+    const parts = path.split(".");
+    let cur = project;
+    for (const p of parts) {
+      cur = cur == null ? undefined : cur[p];
+    }
+    const rows = Array.isArray(cur) ? cur : [];
+    const tbody = wrap.querySelector("tbody");
+    if (!tbody) continue;
+    tbody.innerHTML = "";
+    const sectionIndex = Array.from(formRoot.querySelectorAll(".proj-section")).indexOf(wrap.closest(".proj-section"));
+    if (!rows.length) {
+      tbody.innerHTML = renderProjectEditTableRowHtml(section.table.columns, {}, sectionIndex, 0);
+    } else {
+      const html = rows.map((row, ri) =>
+        renderProjectEditTableRowHtml(section.table.columns, row, sectionIndex, ri),
+      ).join("");
+      tbody.innerHTML = html;
+    }
+  }
+}
+
+function showProjectWindow(view) {
+  const title = view.project_path || view.title || "project.json";
+  const w = openStbPopup("width=980,height=820,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
+  runWhenPopupReady(w, () => initProjectEditorWindow(w, view, title));
+}
+
+function initProjectEditorWindow(w, view, title) {
+  primeStbPopupOrigin(w);
   const doc = w.document;
   doc.open();
-  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>");
-  doc.write(title);
+  doc.write("<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"UTF-8\">");
+  doc.write(stbIconHeadHtml(w));
+  doc.write("<title>");
+  doc.write(escapeHtml(view.title || title));
   doc.write("</title><style>");
-  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
-  doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
-  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
+  doc.write("html,body{height:100%;margin:0;}");
+  doc.write("body{background:#f4f5f7;color:#1a1a22;font-family:'Segoe UI',system-ui,sans-serif;line-height:1.45;display:flex;flex-direction:column;overflow:hidden;}");
+  doc.write(".toolbar{padding:10px 16px;background:#252530;color:#e8e6ed;border-bottom:1px solid #3a3a48;display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex-shrink:0;}");
   doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
-  doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
-  doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
-  doc.write("@page{size:A4 landscape;margin:10mm;}");
-  doc.write("@media print{");
-  doc.write(".no-print{display:none !important;}");
-  doc.write("html,body{background:#fff;color:#000;margin:0;padding:0;}");
-  doc.write("header.doc-title{display:none;}");
-  doc.write("pre{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;}");
-  doc.write("}");
+  doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
+  doc.write(".toolbar .path{font-size:12px;color:#aaa;margin-left:auto;}");
+  doc.write(".toolbar .status{font-size:12px;color:#9cdcfe;}");
+  doc.write(".tabs{display:flex;gap:0;background:#252530;padding:0 16px;border-bottom:1px solid #3a3a48;flex-shrink:0;}");
+  doc.write(".tab{background:transparent;color:#aaa;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-weight:600;cursor:pointer;}");
+  doc.write(".tab.active{color:#e8e6ed;border-bottom-color:#e1dee4;}");
+  doc.write(".tab-panels{flex:1;min-height:0;overflow:hidden;}");
+  doc.write(".tab-panel{display:none;height:100%;box-sizing:border-box;padding:16px 20px 32px;max-width:960px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;}");
+  doc.write(".tab-panel.active{display:block;}");
+  doc.write(".banner{margin-bottom:16px;padding:10px 14px;border-radius:6px;background:#fff3cd;color:#664d03;border:1px solid #ffecb5;}");
+  doc.write(".proj-section{margin-bottom:24px;background:#fff;border:1px solid #d8dbe3;border-radius:8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.04);}");
+  doc.write(".proj-section h2{margin:0 0 12px;font-size:15px;font-weight:700;color:#111;border-bottom:1px solid #e5e7eb;padding-bottom:8px;}");
+  doc.write(".proj-section h3{margin:12px 0 8px;font-size:13px;font-weight:600;color:#374151;}");
+  doc.write(".proj-rows{display:grid;grid-template-columns:minmax(140px,34%) 1fr;gap:8px 12px;margin:0;align-items:start;}");
+  doc.write(".proj-rows dt{margin:0;font-size:12px;font-weight:600;color:#4b5563;padding-top:6px;}");
+  doc.write(".proj-rows dd{margin:0;font-size:13px;color:#111;}");
+  doc.write(".proj-readonly dt,.proj-readonly dd{color:#6b7280;}");
+  doc.write(".proj-hint{display:block;margin-top:4px;font-size:11px;color:#6b7280;font-weight:400;}");
+  doc.write(".proj-input,.proj-cell-input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;padding:6px 8px;font:inherit;background:#fff;}");
+  doc.write(".proj-table-wrap{margin-top:8px;overflow:auto;}");
+  doc.write("table{width:100%;border-collapse:collapse;font-size:12px;}");
+  doc.write("th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:top;}");
+  doc.write("th{background:#f3f4f6;font-weight:600;}");
+  doc.write(".proj-row-actions{width:72px;text-align:center;}");
+  doc.write(".btn-table-add{margin-top:8px;background:#eef2ff;color:#1e3a8a;border:1px solid #c7d2fe;border-radius:4px;padding:5px 10px;font-weight:600;cursor:pointer;}");
+  doc.write(".btn-table-del{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;}");
+  doc.write("#jsonEditor{width:100%;height:100%;min-height:100%;box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:monospace;font-size:12px;line-height:1.35;resize:none;}");
   doc.write("</style></head><body>");
-  doc.write("<div class=\"toolbar no-print\">");
-  doc.write("<button type=\"button\" id=\"btnSaveTxt\">Save text</button>");
-  doc.write("<button type=\"button\" id=\"btnPdf\">Save as PDF (A4 landscape)</button>");
+  doc.write("<div class=\"toolbar\">");
+  doc.write("<button type=\"button\" id=\"btnSave\">保存</button>");
+  doc.write("<button type=\"button\" id=\"btnReload\" class=\"secondary\">再読込</button>");
+  doc.write("<span class=\"status\" id=\"status\">ready</span>");
+  doc.write("<span class=\"path\">");
+  doc.write(escapeHtml(view.project_path || ""));
+  doc.write("</span></div>");
+  doc.write("<div class=\"tabs\">");
+  doc.write("<button type=\"button\" class=\"tab active\" data-tab=\"form\">設定</button>");
+  doc.write("<button type=\"button\" class=\"tab\" data-tab=\"json\">JSON</button>");
   doc.write("</div>");
-  doc.write("<header class=\"doc-title\">");
-  doc.write(title);
-  doc.write("</header><pre></pre></body></html>");
+  doc.write("<div class=\"tab-panels\">");
+  doc.write("<div id=\"tab-form\" class=\"tab-panel active\"></div>");
+  doc.write("<div id=\"tab-json\" class=\"tab-panel\"><textarea id=\"jsonEditor\" spellcheck=\"false\"></textarea></div>");
+  doc.write("</div>");
+  doc.write("</body></html>");
   doc.close();
-  doc.querySelector("pre").textContent = text;
-  doc.getElementById("btnSaveTxt").onclick = function () {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = doc.createElement("a");
-    a.href = url;
-    a.download = saveName;
-    doc.body.appendChild(a);
-    a.click();
-    doc.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
-  };
-  doc.getElementById("btnPdf").onclick = function () {
-    doc.title = pdfName;
-    w.print();
-  };
+
+  const statusEl = doc.getElementById("status");
+  const tabForm = doc.getElementById("tab-form");
+  const tabJson = doc.getElementById("tab-json");
+  const jsonEditor = doc.getElementById("jsonEditor");
+  const tabs = doc.querySelectorAll(".tab");
+  let activeTab = "form";
+  let baseProject = view.raw ? deepCloneJson(view.raw) : null;
+  let editForm = view.edit || null;
+
+  function setWinStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
+  }
+
+  function renderFormTab() {
+    if (!view.found || !editForm) {
+      tabForm.innerHTML = "<div class=\"banner\">対応する project.json が見つかりません。JSON タブから新規作成はできません。</div>";
+      return;
+    }
+    let html = "";
+    for (let i = 0; i < editForm.sections.length; i++) {
+      html += renderProjectEditSectionHtml(editForm.sections[i], i);
+    }
+    tabForm.innerHTML = html;
+
+    tabForm.querySelectorAll(".btn-table-add").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const wrap = doc.getElementById(btn.getAttribute("data-table-id"));
+        const path = wrap.getAttribute("data-table-path");
+        const section = editForm.sections.find((s) => s.table && s.table.path === path);
+        if (!section) return;
+        const tbody = wrap.querySelector("tbody");
+        const sectionIndex = Array.from(tabForm.querySelectorAll(".proj-section")).indexOf(wrap.closest(".proj-section"));
+        const rowIndex = tbody.querySelectorAll("tr").length;
+        tbody.insertAdjacentHTML("beforeend", renderProjectEditTableRowHtml(section.table.columns, {}, sectionIndex, rowIndex));
+      });
+    });
+  }
+
+  if (!tabForm.dataset.boundDelete) {
+    tabForm.dataset.boundDelete = "1";
+    tabForm.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".btn-table-del");
+      if (!btn) return;
+      const tr = btn.closest("tr");
+      const tbody = tr && tr.parentElement;
+      if (!tbody || !tr) return;
+      if (tbody.querySelectorAll("tr").length <= 1) {
+        for (const input of tr.querySelectorAll(".proj-cell-input")) {
+          input.value = "";
+        }
+        return;
+      }
+      tr.remove();
+    });
+  }
+
+  function syncFormToJson() {
+    if (!baseProject || !editForm) return;
+    const merged = collectProjectFromFormRoot(tabForm, editForm, baseProject);
+    jsonEditor.value = JSON.stringify(merged, null, 2);
+  }
+
+  function syncJsonToForm() {
+    if (!baseProject || !editForm) return;
+    const parsed = JSON.parse(jsonEditor.value);
+    populateFormFromProject(tabForm, editForm, parsed);
+  }
+
+  function switchTab(name) {
+    if (name === activeTab) return;
+    try {
+      if (activeTab === "form") {
+        syncFormToJson();
+      } else if (activeTab === "json") {
+        syncJsonToForm();
+      }
+    } catch (ex) {
+      alert("タブ切替前の反映に失敗しました: " + ex.message);
+      return;
+    }
+    activeTab = name;
+    tabs.forEach((t) => t.classList.toggle("active", t.getAttribute("data-tab") === name));
+    tabForm.classList.toggle("active", name === "form");
+    tabJson.classList.toggle("active", name === "json");
+  }
+
+  function getProjectForSave() {
+    let project;
+    if (activeTab === "json") {
+      project = JSON.parse(jsonEditor.value);
+    } else if (!editForm || !baseProject) {
+      throw new Error("編集可能な project.json がありません");
+    } else {
+      project = collectProjectFromFormRoot(tabForm, editForm, baseProject);
+    }
+    return normalizeProjectPayload(project);
+  }
+
+  function applySavedView(savedView) {
+    view = savedView;
+    baseProject = savedView.raw ? deepCloneJson(savedView.raw) : null;
+    editForm = savedView.edit || null;
+    renderFormTab();
+    if (baseProject) {
+      jsonEditor.value = JSON.stringify(baseProject, null, 2);
+      populateFormFromProject(tabForm, editForm, baseProject);
+    } else {
+      jsonEditor.value = "";
+    }
+    doc.title = savedView.title || title;
+  }
+
+  renderFormTab();
+  if (baseProject) {
+    jsonEditor.value = JSON.stringify(baseProject, null, 2);
+  } else {
+    jsonEditor.disabled = true;
+    doc.querySelector(".tab[data-tab=\"json\"]").style.display = "none";
+  }
+
+  tabs.forEach((tabBtn) => {
+    tabBtn.addEventListener("click", () => switchTab(tabBtn.getAttribute("data-tab")));
+  });
+
+  doc.getElementById("btnSave").addEventListener("click", async () => {
+    if (!view.found) {
+      alert("project.json が存在しないため保存できません。");
+      return;
+    }
+    try {
+      setWinStatus("saving...");
+      const project = getProjectForSave();
+      const result = await saveProjectJson(view.dat_path, project, w);
+      applySavedView(result.view);
+      syncFormToJson();
+      setWinStatus("saved");
+      setStatus((view.project_path || "project.json") + " — saved");
+    } catch (ex) {
+      setWinStatus("save failed");
+      alert("保存に失敗しました: " + ex.message);
+    }
+  });
+
+  doc.getElementById("btnReload").addEventListener("click", async () => {
+    if (!confirm("未保存の変更は破棄されます。再読込しますか？")) return;
+    try {
+      setWinStatus("reloading...");
+      const latest = await fetchProjectView(view.dat_path, w);
+      applySavedView(latest);
+      syncFormToJson();
+      setWinStatus("reloaded");
+    } catch (ex) {
+      setWinStatus("reload failed");
+      alert("再読込に失敗しました: " + ex.message);
+    }
+  });
+}
+
+async function openProjectWindow() {
+  const path = getCurrentModelPath();
+  if (!path) return;
+
+  setStatus("Loading project for " + path + "…");
+  try {
+    const view = await fetchProjectView(path);
+    showProjectWindow(view);
+    setStatus(path + " — project settings opened");
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+  }
+}
+
+function showTextDocumentWindow(text, title) {
+  const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
+  const saveName = title;
+  const w = openStbPopup("width=920,height=720,scrollbars=yes,resizable=yes");
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  runWhenPopupReady(w, () => {
+    const doc = w.document;
+    doc.open();
+    doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+    doc.write(stbIconHeadHtml(w));
+    doc.write("<title>");
+    doc.write(title);
+    doc.write("</title><style>");
+    doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
+    doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
+    doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
+    doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+    doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
+    doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
+    doc.write("@page{size:A4 landscape;margin:10mm;}");
+    doc.write("@media print{");
+    doc.write(".no-print{display:none !important;}");
+    doc.write("html,body{background:#fff;color:#000;margin:0;padding:0;}");
+    doc.write("header.doc-title{display:none;}");
+    doc.write("pre{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;}");
+    doc.write("}");
+    doc.write("</style></head><body>");
+    doc.write("<div class=\"toolbar no-print\">");
+    doc.write("<button type=\"button\" id=\"btnSaveTxt\">Save text</button>");
+    doc.write("<button type=\"button\" id=\"btnPdf\">Save as PDF (A4 landscape)</button>");
+    doc.write("</div>");
+    doc.write("<header class=\"doc-title\">");
+    doc.write(title);
+    doc.write("</header><pre></pre></body></html>");
+    doc.close();
+    doc.querySelector("pre").textContent = text;
+    doc.getElementById("btnSaveTxt").onclick = function () {
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = doc.createElement("a");
+      a.href = url;
+      a.download = saveName;
+      doc.body.appendChild(a);
+      a.click();
+      doc.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+    };
+    doc.getElementById("btnPdf").onclick = function () {
+      doc.title = pdfName;
+      w.print();
+    };
+  });
 }
 
 function showResultsWindow(text, path) {
   showTextDocumentWindow(text, outputFileName(path));
 }
 
-async function fetchInputText(path) {
-  const url = "/api/input?path=" + encodeURIComponent(path);
-  const res = await fetch(url);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || res.statusText);
-  }
-  return res.text();
+async function fetchInputText(path, targetWindow) {
+  return fetchApiText("/api/input?path=" + encodeURIComponent(path), targetWindow);
 }
 
-async function saveInputText(path, text) {
-  const url = "/api/input?path=" + encodeURIComponent(path);
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: text }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || res.statusText);
-  }
-  return res.json();
+function normalizeInputText(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+async function saveInputText(path, text, targetWindow) {
+  return fetchApiJson(
+    "/api/input?path=" + encodeURIComponent(path),
+    targetWindow,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: normalizeInputText(text) }),
+    },
+  );
 }
 
 function registerInputEditor(path, win, getText) {
@@ -4375,62 +6007,66 @@ function getInputEditorText(path) {
 }
 
 function showInputEditorWindow(text, path) {
-  const w = window.open("", "_blank", "width=980,height=760,scrollbars=yes,resizable=yes");
+  const w = openStbPopup("width=980,height=760,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
-  const doc = w.document;
-  doc.open();
-  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>");
-  doc.write(path);
-  doc.write("</title><style>");
-  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
-  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;}");
-  doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
-  doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
-  doc.write(".status{margin-left:auto;color:#aaa;font-size:12px;}");
-  doc.write("textarea{width:100%;height:calc(100vh - 52px);box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:12px;line-height:1.25;resize:none;}");
-  doc.write("</style></head><body>");
-  doc.write("<div class=\"toolbar\"><button id=\"btnSave\">Save</button><button id=\"btnReload\" class=\"secondary\">Reload</button><span id=\"status\" class=\"status\">ready</span></div>");
-  doc.write("<textarea id=\"txt\"></textarea>");
-  doc.write("</body></html>");
-  doc.close();
+  runWhenPopupReady(w, () => {
+    const doc = w.document;
+    doc.open();
+    doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+    doc.write(stbIconHeadHtml(w));
+    doc.write("<title>");
+    doc.write(path);
+    doc.write("</title><style>");
+    doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
+    doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;}");
+    doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+    doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
+    doc.write(".status{margin-left:auto;color:#aaa;font-size:12px;}");
+    doc.write("textarea{width:100%;height:calc(100vh - 52px);box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:12px;line-height:1.25;resize:none;}");
+    doc.write("</style></head><body>");
+    doc.write("<div class=\"toolbar\"><button id=\"btnSave\">Save</button><button id=\"btnReload\" class=\"secondary\">Reload</button><span id=\"status\" class=\"status\">ready</span></div>");
+    doc.write("<textarea id=\"txt\"></textarea>");
+    doc.write("</body></html>");
+    doc.close();
 
-  const textarea = doc.getElementById("txt");
-  const statusEl = doc.getElementById("status");
-  textarea.value = text;
-  registerInputEditor(path, w, () => textarea.value);
+    const textarea = doc.getElementById("txt");
+    const statusEl = doc.getElementById("status");
+    textarea.value = text;
+    registerInputEditor(path, w, () => textarea.value);
 
-  function setWinStatus(msg) {
-    if (statusEl) statusEl.textContent = msg;
-  }
-
-  doc.getElementById("btnSave").addEventListener("click", async () => {
-    try {
-      setWinStatus("saving...");
-      await saveInputText(path, textarea.value);
-      resetEditHistory();
-      setWinStatus("saved");
-      setStatus(path + " — input file saved (undo history cleared)");
-      if (getCurrentModelPath() === path) await loadSelectedModel(false);
-    } catch (ex) {
-      setWinStatus("save failed");
-      setStatus("Error: " + ex.message);
-      alert("Save failed: " + ex.message);
+    function setWinStatus(msg) {
+      if (statusEl) statusEl.textContent = msg;
     }
-  });
 
-  doc.getElementById("btnReload").addEventListener("click", async () => {
-    try {
-      setWinStatus("reloading...");
-      const latest = await fetchInputText(path);
-      textarea.value = latest;
-      setWinStatus("reloaded");
-    } catch (ex) {
-      setWinStatus("reload failed");
-      alert("Reload failed: " + ex.message);
-    }
+    doc.getElementById("btnSave").addEventListener("click", async () => {
+      try {
+        setWinStatus("saving...");
+        await saveInputText(path, textarea.value, w);
+        resetEditHistory();
+        setWinStatus("saved");
+        setStatus(path + " — input file saved (undo history cleared)");
+        if (getCurrentModelPath() === path) await loadSelectedModel(false);
+      } catch (ex) {
+        setWinStatus("save failed");
+        setStatus("Error: " + ex.message);
+        alert("Save failed: " + ex.message);
+      }
+    });
+
+    doc.getElementById("btnReload").addEventListener("click", async () => {
+      try {
+        setWinStatus("reloading...");
+        const latest = await fetchInputText(path, w);
+        textarea.value = latest;
+        setWinStatus("reloaded");
+      } catch (ex) {
+        setWinStatus("reload failed");
+        alert("Reload failed: " + ex.message);
+      }
+    });
   });
 }
 
@@ -4546,16 +6182,54 @@ async function openUploadedModelFile(file) {
   }
 }
 
-async function closeApplication() {
-  setStatus("Shutting down…");
-  try {
-    await fetch("/api/shutdown", { method: "POST" });
-  } catch (e) { /* server may exit before response completes */ }
-  currentModel = null;
-  currentModelPath = null;
-  document.body.innerHTML = "<p style=\"padding:2rem;font-family:system-ui,sans-serif;color:#333\">"
-    + "Structural Toolbox server stopped. You can close this tab.</p>";
+let stbShutdownRequested = false;
+let stbPageReloading = false;
+
+function requestServerShutdown() {
+  if (stbShutdownRequested) return;
+  stbShutdownRequested = true;
+  const url = "/api/shutdown";
+  if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+    navigator.sendBeacon(url, "");
+  } else {
+    fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+  }
 }
+
+function markStbPageReload() {
+  stbPageReloading = true;
+}
+
+function startGuiHeartbeat() {
+  const beat = () => {
+    fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => {});
+  };
+  beat();
+  window.setInterval(beat, 4000);
+}
+
+async function closeApplication() {
+  setStatus("Closing…");
+  requestServerShutdown();
+  window.close();
+}
+
+window.addEventListener("keydown", (ev) => {
+  const key = String(ev.key || "").toLowerCase();
+  if (key === "f5" || ((ev.ctrlKey || ev.metaKey) && key === "r")) {
+    markStbPageReload();
+  }
+});
+
+window.addEventListener("pagehide", (ev) => {
+  if (ev.persisted || stbPageReloading) {
+    stbPageReloading = false;
+    return;
+  }
+  requestServerShutdown();
+});
+
+startGuiHeartbeat();
 
 async function loadSelectedModel(solve, options) {
   options = options || {};
@@ -4596,6 +6270,7 @@ async function loadSelectedModel(solve, options) {
 }
 
 async function bootstrap() {
+  loadPickWrwCreateModel();
   initThree();
   initViewerOptions();
   initSelectionInteraction();
@@ -4606,10 +6281,11 @@ async function bootstrap() {
     panel: el.selectionPanel,
     header: el.selectionPanelHeader,
     collapseBtn: el.btnSelectionCollapse,
-    toggleBtn: el.btnToggleSelectionPanel,
     storageKey: "stb_gui_selection_panel",
     defaultHidden: true,
+    autoVisibility: true,
   });
+  updateSelectionPanelVisibility();
   initDraggablePanel({
     panel: el.resultsPanel,
     header: el.resultsPanelHeader,
@@ -4714,6 +6390,7 @@ if (el.btnClearSelection) {
 }
 
 el.btnInput.addEventListener("click", () => openInputWindow());
+el.btnProject.addEventListener("click", () => openProjectWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
@@ -4780,14 +6457,27 @@ el.chkSection.addEventListener("change", () => {
 });
 if (el.chkMembrane) {
   el.chkMembrane.addEventListener("change", () => {
+    syncRegionEdgeCheckboxes();
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.chkMembraneEdge) {
+  el.chkMembraneEdge.addEventListener("change", () => {
     if (currentModel) rebuildScene();
   });
 }
 if (el.chkWoodWall) {
   el.chkWoodWall.addEventListener("change", () => {
+    syncRegionEdgeCheckboxes();
     if (currentModel) rebuildScene();
   });
 }
+if (el.chkWoodWallEdge) {
+  el.chkWoodWallEdge.addEventListener("change", () => {
+    if (currentModel) rebuildScene();
+  });
+}
+syncRegionEdgeCheckboxes();
 el.forceSelect.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });
@@ -5018,11 +6708,16 @@ function initDraggablePanel(cfg) {
   }
 
   loadPanelState();
+  if (cfg.autoVisibility) {
+    panel.classList.add("hidden");
+  }
 
-  cfg.toggleBtn.addEventListener("click", () => {
-    panel.classList.toggle("hidden");
-    savePanelState();
-  });
+  if (cfg.toggleBtn) {
+    cfg.toggleBtn.addEventListener("click", () => {
+      panel.classList.toggle("hidden");
+      savePanelState();
+    });
+  }
 
   collapseBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();

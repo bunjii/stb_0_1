@@ -638,8 +638,6 @@ CONS, 188, 1, 1, 1, 0, 0, 0,
 #     ,     ,    kNm/rad,    kNm/rad,    kNm/rad,    kNm/rad
 #   blank field = default rigid offset
 
-#    ELEM ID,      Ryi,      Rzi,      Ryj,      Rzj
-
 EJNT, 15, 1E-06, 1E-06, 1E-06, 1E-06,
 EJNT, 16, 1E-06, 1E-06, 1E-06, 1E-06,
 EJNT, 17, 1E-06, 1E-06, 1E-06, 1E-06,

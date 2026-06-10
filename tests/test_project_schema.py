@@ -75,6 +75,36 @@ class TestProjectSchema(unittest.TestCase):
         self.assertEqual(project.member_classes[0].kind, "column")
         self.assertEqual(project.report.mode, "practice")
 
+    def test_seismic_rt_must_be_positive(self):
+        data = _minimal_project()
+        data["load_conditions"] = {"seismic": {"ci": 0.2, "rt": 0.0}}
+        with self.assertRaises(ProjectSchemaError):
+            validate_project_dict(data)
+
+    def test_seismic_base_mass_policy_round_trip(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "ci": 0.2,
+                "base_level": "1",
+                "base_mass_policy": "LUMP_TO_ABOVE_DIAPHRAGM",
+            }
+        }
+        project = validate_project_dict(data)
+        self.assertEqual(project.load_conditions.seismic.base_level, "1")
+        self.assertEqual(
+            project.load_conditions.seismic.base_mass_policy,
+            "LUMP_TO_ABOVE_DIAPHRAGM",
+        )
+
+    def test_seismic_rt_round_trip(self):
+        data = _minimal_project()
+        data["load_conditions"] = {"seismic": {"ci": 0.2, "rt": 0.85}}
+        project = validate_project_dict(data)
+        self.assertAlmostEqual(project.load_conditions.seismic.rt, 0.85)
+        reparsed = validate_project_dict(project.to_dict())
+        self.assertAlmostEqual(reparsed.load_conditions.seismic.rt, 0.85)
+
     def test_to_dict_round_trip(self):
         project = validate_project_dict(_minimal_project())
         reparsed = validate_project_dict(project.to_dict())

@@ -157,10 +157,11 @@ DIAP, ID, NAME, TYPE, SRC, MAG/ID, T, THETA, RA, HMAX
 | T | mm | Membrane thickness (`SRC=1/2` defaults internally to 1000 mm if blank) |
 | THETA | deg | Material axis angle in the membrane plane |
 | RA | rad | Reference drift for timber conversion (default `1/150`) |
-| HMAX | mm | Maximum mesh/constraint spacing metadata (optional) |
+| HMAX | mm | **Metadata only** — maximum mesh/constraint spacing hint; not used by the current solver |
 
 `TYPE=0` creates in-plane rigid-floor MPC constraints for nodes in the `DREG`
-polygon. `TYPE=1` uses `DMEM` membrane elements. `TYPE=2` stores metadata only.
+polygon (or an auto-derived polygon from `DMEM` when `DREG` is omitted).
+`TYPE=1` uses `DMEM` membrane elements. `TYPE=2` stores metadata only.
 
 Timber multipliers are converted internally to equivalent in-plane shear stiffness:
 
@@ -204,7 +205,7 @@ DCON, DIAP, TRGT, ID, CONN, TOL, SPACING
 | ID | — | Element or node ID (`TRGT=0` → blank) |
 | CONN | — | `0` = rigid in-plane tie, `1` = disconnected |
 | TOL | m | Geometry tolerance for edge/triangle matching |
-| SPACING | m | Optional constraint spacing metadata |
+| SPACING | m | **Metadata only** — optional constraint spacing hint; not used by the current MPC generator |
 
 `CONN=0` generates MPC constraints for horizontal `ux, uy` DOFs.
 
@@ -218,16 +219,31 @@ DCON, 1, 2, 35, 0, 0.01
 
 ---
 
-### `DREG` / `DOPN` — diaphragm region and opening polygons (reserved)
+### `DREG` / `DOPN` — diaphragm outer polygon and openings
 
 ```
 DREG, DIAP_ID, NODE1, NODE2, NODE3, ...
 DOPN, DIAP_ID, NODE1, NODE2, NODE3, ...
 ```
 
-These records are reserved for future automatic diaphragm meshing. `DREG`
-defines an outer polygon and `DOPN` defines an opening polygon. Phase 1 keeps
-these records as metadata; analysis uses manually supplied `DMEM` triangles.
+**`DREG`** defines the outer polygon of a diaphragm region.
+
+| Use | When `DREG` is needed |
+|-----|------------------------|
+| Rigid diaphragm (`TYPE=0`) | Required unless auto-derived from `DMEM` |
+| Semi-rigid (`TYPE=1`) + `DLOD` area/mass | Recommended; auto-derived from `DMEM` outer boundary if omitted |
+| Semi-rigid stiffness | Not used — stiffness comes from `DMEM` triangles |
+
+When `DMEM` elements are supplied and `DREG` is omitted, the parser derives
+the outer polygon by walking the exterior edges of the membrane mesh. An
+informational warning is recorded in `mdl.input_warnings`.
+
+When both explicit `DREG` and `DMEM` are supplied, the explicit polygon is used.
+A warning is emitted if its node set differs from the `DMEM` outer boundary.
+
+**`DOPN`** defines an opening polygon inside a diaphragm. Records are parsed
+and stored, but **opening cut-outs are not applied** in the current analysis
+engine. A warning is emitted when `DOPN` records are present.
 
 ---
 
@@ -327,7 +343,7 @@ WWLL, ID, NAME, MODEL, M, L, H, DIR, RA, N1, N2, N3, N4, DIAP, LAYO
 |-----|------|-------------|
 | MODEL | — | `0` = equivalent brace, `1` = shear panel, `2` = membrane (reserved) |
 | M | — | Wall multiplier |
-| L, H | m | Wall length and height for conversion |
+| L, H | m | Wall length and height for conversion (optional; derived from N1..N4 when blank) |
 | DIR | — | `0` = X, `1` = Y |
 | RA | rad | Reference drift angle (default `1/120`) |
 | N1..N4 | — | Corner node IDs (bottom line, then top line) |
@@ -351,8 +367,11 @@ EA = K * d^3 / L^2
 
 For an X-brace pair, each brace uses half of this `EA`.
 
-Users input rated-wall properties (`M, L, H, DIR, RA`) and node geometry only;
-explicit brace/EA input is not required.
+Users input rated-wall properties (`M, DIR, RA`) and corner nodes (`N1..N4`).
+`L` and `H` may be omitted; they are then computed from the node rectangle
+(bottom/top corners are identified by Z). When `L` or `H` is provided explicitly,
+that value is used and a warning is emitted if it differs from the node geometry
+by more than 1 mm. Explicit brace/EA input is not required.
 
 ---
 
@@ -368,11 +387,36 @@ Acceleration components in **m/s²** (e.g. `0, 0, -9.80665` for downward Z).
 
 ## Load cases and combinations (optional)
 
-### `LNME` — load case name (optional metadata)
+### `LNME` — load case type (optional metadata)
 
 ```
-LNME, LC_ID, NAME
+LNME, LC_ID, TYPE[, LABEL]
 ```
+
+| TYPE | Meaning | LABEL |
+|---:|---|---|
+| 1 | DL (dead / fixed load) | optional |
+| 2 | LL (live load) | optional |
+| 3 | LL(E) (live load for seismic weight) | optional |
+| 4 | S (snow) | optional |
+| 5 | W (wind) | optional |
+| 6 | E (earthquake / horizontal seismic) | optional (e.g. `EQX`, `EQY`) |
+| 7 | custom | **required** |
+
+Examples:
+
+```
+LNME, 0, 1
+LNME, 1, 2
+LNME, 2, 3
+LNME, 3, 6, EQX
+LNME, 4, 6, EQY
+LNME, 5, 7, COMB1
+```
+
+Legacy text names (`DL`, `EQX`, etc.) in the TYPE column are still accepted and mapped to the codes above.
+
+For Ai seismic weight aggregation (`stb loads seismic`), **Wi uses TYPE 1 (DL) + TYPE 3 (LL(E))** on the referenced load cases, assigned to **mass levels** (not raw story buckets) per `project.json` `load_conditions.seismic.base_level` / `base_elevation` and `base_mass_policy`. Mass at the base level is not written to DLOD by default (`LUMP_TO_ABOVE_DIAPHRAGM` is typical for wood frames). **DLOD AREA pressures use story seismic force Fi** (`Fi = Qi - Q(i+1)`; top story `Fi = Qi`), not layer shear Qi directly. Seismic force output uses **TYPE 6 (E)** load cases; axis hints come from LABEL (`EQX` → +X, `EQY` → +Y).
 
 ### `LCMB` — load combination
 

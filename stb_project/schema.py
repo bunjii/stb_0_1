@@ -20,6 +20,16 @@ ALLOWED_MEMBER_KINDS = (
 )
 ALLOWED_REPORT_MODES = ("practice", "education", "debug")
 ALLOWED_REPORT_FORMATS = ("markdown", "html", "pdf")
+ALLOWED_SEISMIC_AXES = ("x", "y")
+DEFAULT_SEISMIC_RT = 1.0
+ALLOWED_BASE_MASS_POLICIES = (
+    "IGNORE_AT_BASE",
+    "LUMP_TO_ABOVE_DIAPHRAGM",
+    "DISTRIBUTE_TO_ADJACENT_LEVELS",
+    "APPLY_TO_1F_DIAPHRAGM",
+    "APPLY_TO_WALL_NODES",
+)
+DEFAULT_BASE_MASS_POLICY = "LUMP_TO_ABOVE_DIAPHRAGM"
 
 
 PROJECT_JSON_SCHEMA = {
@@ -105,6 +115,52 @@ PROJECT_JSON_SCHEMA = {
                     "story": {"type": "string"},
                     "use": {"type": "string"},
                     "notes": {"type": "string"},
+                },
+            },
+        },
+        "load_conditions": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "seismic": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "ci": {"type": "number"},
+                        "rt": {
+                            "type": "number",
+                            "description": "Vibration characteristic factor Rt (default 1.0 when omitted).",
+                        },
+                        "dead_load_lc": {"type": "integer"},
+                        "live_load_lc": {"type": ["integer", "null"]},
+                        "live_load_factor": {"type": "number"},
+                        "directions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["name", "axis", "load_case"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "axis": {"enum": list(ALLOWED_SEISMIC_AXES)},
+                                    "load_case": {"type": "integer"},
+                                    "sign": {"type": "integer"},
+                                },
+                            },
+                        },
+                    },
+                },
+                "diaphragms": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "story"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "story": {"type": "string"},
+                        },
+                    },
                 },
             },
         },
@@ -230,6 +286,50 @@ class DesignCheckSettings:
 
 
 @dataclass(frozen=True)
+class SeismicDirectionSettings:
+    name: str
+    axis: str
+    load_case: int
+    sign: int = 1
+
+
+@dataclass(frozen=True)
+class SeismicLoadSettings:
+    ci: float = 0.0
+    rt: float = DEFAULT_SEISMIC_RT
+    base_level: Optional[str] = None
+    base_elevation: Optional[float] = None
+    base_mass_policy: str = DEFAULT_BASE_MASS_POLICY
+    dead_load_lc: Optional[int] = None
+    live_load_lc: Optional[int] = None
+    live_load_factor: float = 0.0
+    directions: Tuple[SeismicDirectionSettings, ...] = ()
+
+
+def effective_seismic_ci(seismic: SeismicLoadSettings) -> float:
+    """Base shear coefficient used in V = Ci_eff × ΣWi (Ci input × Rt)."""
+
+    if seismic.ci <= 0.0:
+        return 0.0
+    rt = seismic.rt if seismic.rt is not None else DEFAULT_SEISMIC_RT
+    if rt <= 0.0:
+        raise ValueError("load_conditions.seismic.rt must be positive")
+    return seismic.ci * rt
+
+
+@dataclass(frozen=True)
+class DiaphragmAssignment:
+    diaphragm_id: int
+    story: str
+
+
+@dataclass(frozen=True)
+class LoadConditionSettings:
+    seismic: SeismicLoadSettings = field(default_factory=SeismicLoadSettings)
+    diaphragms: Tuple[DiaphragmAssignment, ...] = ()
+
+
+@dataclass(frozen=True)
 class ProjectDefinition:
     schema: int
     dat_path: str
@@ -238,6 +338,7 @@ class ProjectDefinition:
     stories: Tuple[Story, ...]
     member_classes: Tuple[MemberClass, ...]
     design_checks: DesignCheckSettings
+    load_conditions: LoadConditionSettings
     report: ReportSettings
     source_path: Optional[str] = None
 
@@ -290,6 +391,13 @@ class ProjectDefinition:
                     },
                 },
             },
+            "load_conditions": {
+                "seismic": _seismic_settings_to_dict(self.load_conditions.seismic),
+                "diaphragms": [
+                    {"id": d.diaphragm_id, "story": d.story}
+                    for d in self.load_conditions.diaphragms
+                ],
+            },
             "report": {
                 "title": self.report.title,
                 "mode": self.report.mode,
@@ -299,6 +407,33 @@ class ProjectDefinition:
                 "include_warnings": self.report.include_warnings,
             },
         }
+
+
+def _seismic_settings_to_dict(seismic: SeismicLoadSettings):
+    out = {
+        "ci": seismic.ci,
+        "dead_load_lc": seismic.dead_load_lc,
+        "live_load_lc": seismic.live_load_lc,
+        "live_load_factor": seismic.live_load_factor,
+        "directions": [
+            {
+                "name": d.name,
+                "axis": d.axis,
+                "load_case": d.load_case,
+                "sign": d.sign,
+            }
+            for d in seismic.directions
+        ],
+    }
+    if abs(seismic.rt - DEFAULT_SEISMIC_RT) > 1.0e-12:
+        out["rt"] = seismic.rt
+    if seismic.base_level:
+        out["base_level"] = seismic.base_level
+    if seismic.base_elevation is not None:
+        out["base_elevation"] = seismic.base_elevation
+    if seismic.base_mass_policy != DEFAULT_BASE_MASS_POLICY:
+        out["base_mass_policy"] = seismic.base_mass_policy
+    return out
 
 
 def project_path_for_dat(dat_path):
@@ -336,7 +471,10 @@ def validate_project_dict(raw, source_path=None):
     _require_type(raw, dict, "project")
     _reject_unknown(
         raw,
-        ["schema", "model", "building", "grids", "stories", "member_classes", "design_checks", "report"],
+        [
+            "schema", "model", "building", "grids", "stories", "member_classes",
+            "design_checks", "load_conditions", "report",
+        ],
         "project",
     )
 
@@ -354,6 +492,7 @@ def validate_project_dict(raw, source_path=None):
     stories = tuple(_parse_stories(_required(raw, "stories", "project")))
     member_classes = tuple(_parse_member_classes(_required(raw, "member_classes", "project")))
     design_checks = _parse_design_checks(raw.get("design_checks", {}))
+    load_conditions = _parse_load_conditions(raw.get("load_conditions", {}))
     report = _parse_report(_required(raw, "report", "project"))
 
     return ProjectDefinition(
@@ -364,6 +503,7 @@ def validate_project_dict(raw, source_path=None):
         stories=stories,
         member_classes=member_classes,
         design_checks=design_checks,
+        load_conditions=load_conditions,
         report=report,
         source_path=source_path,
     )
@@ -494,6 +634,124 @@ def _parse_design_checks(raw):
     _require_type(raw, dict, "project.design_checks")
     _reject_unknown(raw, ["wood"], "project.design_checks")
     return DesignCheckSettings(wood=_parse_wood_check_settings(raw.get("wood", {})))
+
+
+def _parse_load_conditions(raw):
+    _require_type(raw, dict, "project.load_conditions")
+    _reject_unknown(raw, ["seismic", "diaphragms"], "project.load_conditions")
+    return LoadConditionSettings(
+        seismic=_parse_seismic_load_settings(raw.get("seismic", {})),
+        diaphragms=tuple(_parse_diaphragm_assignments(raw.get("diaphragms", []))),
+    )
+
+
+def _parse_seismic_load_settings(raw):
+    _require_type(raw, dict, "project.load_conditions.seismic")
+    _reject_unknown(
+        raw,
+        [
+            "ci",
+            "rt",
+            "base_level",
+            "base_elevation",
+            "base_mass_policy",
+            "dead_load_lc",
+            "live_load_lc",
+            "live_load_factor",
+            "directions",
+        ],
+        "project.load_conditions.seismic",
+    )
+    directions_raw = raw.get("directions", [])
+    _require_type(directions_raw, list, "project.load_conditions.seismic.directions")
+    directions = []
+    for idx, item in enumerate(directions_raw):
+        path = "project.load_conditions.seismic.directions[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(item, ["name", "axis", "load_case", "sign"], path)
+        axis = _required_string(item, "axis", path).lower()
+        if axis not in ALLOWED_SEISMIC_AXES:
+            raise ProjectSchemaError(path + ".axis must be x or y")
+        sign = int(_optional_number(item, "sign", path, default=1))
+        if sign not in (-1, 1):
+            raise ProjectSchemaError(path + ".sign must be -1 or 1")
+        directions.append(SeismicDirectionSettings(
+            name=_required_string(item, "name", path),
+            axis=axis,
+            load_case=int(_required_number(item, "load_case", path)),
+            sign=sign,
+        ))
+
+    live_lc_raw = raw.get("live_load_lc")
+    live_lc = None
+    if live_lc_raw is not None:
+        if type(live_lc_raw) is not int:
+            raise ProjectSchemaError("project.load_conditions.seismic.live_load_lc must be an integer or null")
+        live_lc = live_lc_raw
+
+    dead_lc_raw = raw.get("dead_load_lc")
+    dead_lc = None
+    if dead_lc_raw is not None:
+        if type(dead_lc_raw) is not int:
+            raise ProjectSchemaError("project.load_conditions.seismic.dead_load_lc must be an integer or null")
+        dead_lc = dead_lc_raw
+
+    rt = _optional_number(raw, "rt", "project.load_conditions.seismic", default=DEFAULT_SEISMIC_RT)
+    if rt <= 0.0:
+        raise ProjectSchemaError("project.load_conditions.seismic.rt must be positive")
+
+    base_level = _optional_string(raw, "base_level", "project.load_conditions.seismic")
+    base_elevation_raw = raw.get("base_elevation")
+    base_elevation = None
+    if base_elevation_raw is not None:
+        base_elevation = _optional_number(
+            raw, "base_elevation", "project.load_conditions.seismic", default=0.0
+        )
+
+    base_mass_policy = _optional_string(
+        raw,
+        "base_mass_policy",
+        "project.load_conditions.seismic",
+        default=DEFAULT_BASE_MASS_POLICY,
+    )
+    if base_mass_policy not in ALLOWED_BASE_MASS_POLICIES:
+        raise ProjectSchemaError(
+            "project.load_conditions.seismic.base_mass_policy is not supported: "
+            + str(base_mass_policy)
+        )
+
+    return SeismicLoadSettings(
+        ci=_optional_number(raw, "ci", "project.load_conditions.seismic", default=0.0),
+        rt=rt,
+        base_level=base_level,
+        base_elevation=base_elevation,
+        base_mass_policy=base_mass_policy,
+        dead_load_lc=dead_lc,
+        live_load_lc=live_lc,
+        live_load_factor=_optional_number(
+            raw, "live_load_factor", "project.load_conditions.seismic", default=0.0
+        ),
+        directions=tuple(directions),
+    )
+
+
+def _parse_diaphragm_assignments(raw):
+    _require_type(raw, list, "project.load_conditions.diaphragms")
+    seen = set()
+    out = []
+    for idx, item in enumerate(raw):
+        path = "project.load_conditions.diaphragms[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(item, ["id", "story"], path)
+        diap_id = int(_required_number(item, "id", path))
+        if diap_id in seen:
+            raise ProjectSchemaError(path + " duplicates diaphragm id " + str(diap_id))
+        seen.add(diap_id)
+        out.append(DiaphragmAssignment(
+            diaphragm_id=diap_id,
+            story=_required_string(item, "story", path),
+        ))
+    return out
 
 
 def _parse_wood_check_settings(raw):

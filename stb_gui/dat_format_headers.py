@@ -13,14 +13,18 @@ from dat_format import (  # noqa: E402
     SECTION_HEADERS,
     example_line,
     new_model_template,
+    prepare_dat_text_for_write,
     record_line,
     reformat_record_line,
+    write_dat_text,
 )
 
 __all__ = [
     "SECTION_HEADERS",
     "example_line",
     "new_model_template",
+    "prepare_dat_text_for_write",
     "record_line",
     "reformat_record_line",
+    "write_dat_text",
 ]

@@ -391,9 +391,10 @@ def dlod_type_to_code(load_type):
 
 
 class DiaphragmPolygon:
-    def __init__(self, _diap_id, _node_ids):
+    def __init__(self, _diap_id, _node_ids, _auto_generated=False):
         self.diap_id = _diap_id
         self.node_ids = _node_ids
+        self.auto_generated = bool(_auto_generated)
 
 
 class DiaphragmOpening:
@@ -738,6 +739,141 @@ def diaphragm_boundary_edges(dmems, diap):
                 "membrane": data["membrane"],
             })
     return edges
+
+
+def boundary_polygon_node_ids_from_dmems(dmems, diap):
+    """Return ordered outer-boundary node IDs derived from DMEM exterior edges."""
+
+    edges = diaphragm_boundary_edges(dmems, diap)
+    if len(edges) < 3:
+        return []
+
+    adj = {}
+    for edge in edges:
+        n0, n1 = edge["nodes"]
+        adj.setdefault(n0.id, []).append(n1.id)
+        adj.setdefault(n1.id, []).append(n0.id)
+
+    start = edges[0]["nodes"][0].id
+    ordered = [start]
+    prev = None
+    cur = start
+    for _ in range(len(edges)):
+        nbrs = adj.get(cur, [])
+        if not nbrs:
+            return []
+        if len(nbrs) == 1:
+            nxt = nbrs[0]
+        else:
+            nxt = nbrs[0] if nbrs[0] != prev else nbrs[1]
+            if nxt == prev:
+                nxt = next((n for n in nbrs if n != prev), nbrs[0])
+        prev, cur = cur, nxt
+        if cur == start:
+            break
+        ordered.append(cur)
+
+    if len(ordered) < 3:
+        return []
+    return ordered
+
+
+def _cyclic_polygon_equivalent(a, b):
+    if len(a) != len(b) or len(a) < 3:
+        return False
+    if set(a) != set(b):
+        return False
+    n = len(a)
+    a = list(a)
+    b = list(b)
+    candidates = []
+    for i in range(n):
+        rotated = b[i:] + b[:i]
+        candidates.append(rotated)
+        candidates.append(list(reversed(rotated)))
+    return a in candidates
+
+
+def ensure_diaphragm_dregs(diaps, dregs, dmems):
+    """Ensure each DMEM-backed diaphragm has a DREG polygon; auto-generate if missing."""
+
+    warnings = []
+    by_diap = {d.id: d for d in diaps}
+    existing = {}
+    for reg in dregs:
+        existing.setdefault(reg.diap_id, []).append(reg)
+
+    out = list(dregs)
+    for diap in diaps:
+        mesh = [m for m in dmems if m.diap.id == diap.id]
+        if not mesh:
+            continue
+
+        derived = boundary_polygon_node_ids_from_dmems(dmems, diap)
+        if not derived:
+            if not existing.get(diap.id):
+                warnings.append(
+                    "DIAP {0} ({1}): DMEM mesh has no closed outer boundary; "
+                    "DREG is required for area loads and rigid-diaphragm MPC.".format(
+                        diap.id, diap.name
+                    )
+                )
+            continue
+
+        regs = existing.get(diap.id, [])
+        if not regs:
+            out.append(DiaphragmPolygon(diap.id, derived, _auto_generated=True))
+            warnings.append(
+                "DIAP {0} ({1}): DREG was omitted; outer polygon {2} was derived from DMEM.".format(
+                    diap.id, diap.name, derived
+                )
+            )
+            continue
+
+        for reg in regs:
+            if _cyclic_polygon_equivalent(list(reg.node_ids), derived):
+                continue
+            warnings.append(
+                "DIAP {0} ({1}): DREG node order {2} differs from DMEM outer boundary {3}; "
+                "using explicit DREG.".format(
+                    diap.id, diap.name, list(reg.node_ids), derived
+                )
+            )
+
+    return out, warnings
+
+
+def collect_diaphragm_input_warnings(diaps, dopns, dcons):
+    """Warn about parsed diaphragm fields that are not used by the current solver."""
+
+    warnings = []
+
+    if dopns:
+        warnings.append(
+            "DOPN records were supplied ({0} opening polygon(s)) but opening cut-outs are "
+            "not applied in the current analysis engine.".format(len(dopns))
+        )
+
+    for diap in diaps:
+        if diap.hmax is not None:
+            warnings.append(
+                "DIAP {0} ({1}): HMAX={2:.4f} m is stored as metadata only and does not "
+                "affect meshing or constraints in the current solver.".format(
+                    diap.id, diap.name, diap.hmax
+                )
+            )
+
+    spacing_count = sum(
+        1 for dc in dcons
+        if dc.constraint_spacing is not None and not getattr(dc, "auto_generated", False)
+    )
+    if spacing_count:
+        warnings.append(
+            "DCON SPACING was supplied on {0} connection(s) but is not used by the "
+            "current MPC generator.".format(spacing_count)
+        )
+
+    return warnings
 
 
 def find_boundary_host(point, dmems, diap, tolerance=common.PRES_LEN):

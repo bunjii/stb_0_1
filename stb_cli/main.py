@@ -27,7 +27,7 @@ def _read_lines(path):
     if not os.path.isfile(path):
         raise IOError("Input file not found: " + path)
 
-    f = open(path, "r")
+    f = open(path, "r", encoding="utf-8")
     lines = f.read().splitlines()
     f.close()
     return lines
@@ -120,6 +120,59 @@ def cmd_solve(args):
             print("  written:    " + out_path)
     else:
         sys.stdout.write(txt)
+
+    return EXIT_OK
+
+
+def cmd_loads_seismic(args):
+    _ensure_project_root_on_path()
+    from stb_engine import parse_input
+    from stb_engine.errors import StbParseError
+    from stb_project import load_project_file, load_project_for_dat
+    from stb_loads import (
+        apply_seismic_to_dat,
+        compute_seismic_distribution,
+        generate_dlod_records,
+        render_seismic_markdown,
+    )
+
+    try:
+        input_path = os.path.abspath(args.project)
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            project_dir = os.path.dirname(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(project_dir, dat_path)
+        else:
+            dat_path = input_path
+            project = load_project_for_dat(dat_path, required=True)
+
+        lines = _read_lines(dat_path)
+        mdl = parse_input(lines)
+        mdl.filepath = dat_path
+        result = compute_seismic_distribution(mdl, project)
+        dloads = generate_dlod_records(result)
+        markdown = render_seismic_markdown(result)
+
+        if args.dry_run or not args.write_dat:
+            sys.stdout.write(markdown)
+            if not markdown.endswith("\n"):
+                sys.stdout.write("\n")
+        if args.write_dat:
+            apply_seismic_to_dat(dat_path, dloads)
+            if args.verbose:
+                print("Updated: " + dat_path)
+                print("  seismic DLOD records: " + str(len(dloads)))
+    except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except StbParseError as ex:
+        _stderr("Parse error: " + str(ex))
+        return EXIT_INPUT
+    except ValueError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
 
     return EXIT_OK
 
@@ -263,6 +316,36 @@ def _build_parser():
         help="Report format (default: project.report.format)",
     )
     p_rep.set_defaults(func=cmd_report)
+
+    p_loads = sub.add_parser(
+        "loads",
+        parents=[common],
+        help="Load generation utilities",
+    )
+    p_loads_sub = p_loads.add_subparsers(dest="loads_command")
+    p_loads_sub.required = True
+
+    p_seismic = p_loads_sub.add_parser(
+        "seismic",
+        parents=[common],
+        help="Generate seismic DLOD records from Ai distribution",
+    )
+    p_seismic.add_argument(
+        "--project",
+        required=True,
+        help="Project JSON sidecar path",
+    )
+    p_seismic.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print Wi/Ai/Qi table without modifying .dat",
+    )
+    p_seismic.add_argument(
+        "--write-dat",
+        action="store_true",
+        help="Write generated DLOD block into the linked .dat file",
+    )
+    p_seismic.set_defaults(func=cmd_loads_seismic)
 
     p_gui = sub.add_parser(
         "gui",

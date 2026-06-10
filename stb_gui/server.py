@@ -2,9 +2,13 @@ import os
 import signal
 import socket
 import threading
+import time
 
+from stb_gui.browser import open_gui_browser
 from stb_gui.dat_edit import apply_edit_action, validate_dat_text, ejnt_lines_for_elements
+from stb_gui.dat_format_headers import write_dat_text
 from stb_gui.input_format import EJNT_EDITOR_HEADER
+from stb_gui.project_view import load_project_view_for_model, save_project_json_for_model
 from stb_gui.model_json import (
     project_root,
     list_model_files,
@@ -19,8 +23,43 @@ from stb_gui.model_json import (
 
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
+_GUI_WATCH_CLIENT = False
+_GUI_LAST_HEARTBEAT = None
+_GUI_WATCHDOG_STARTED = False
+_GUI_HEARTBEAT_INTERVAL = 4.0
+_GUI_HEARTBEAT_TIMEOUT = 12.0
 
-def create_app(default_model=None):
+
+def _terminate_gui_server():
+    print("\nStructural Toolbox: server stopped.")
+    if os.name == "nt":
+        os._exit(0)
+    os.kill(os.getpid(), signal.SIGINT)
+
+
+def _start_gui_client_watchdog():
+    global _GUI_WATCHDOG_STARTED
+    if _GUI_WATCHDOG_STARTED or not _GUI_WATCH_CLIENT:
+        return
+    _GUI_WATCHDOG_STARTED = True
+
+    def _loop():
+        while True:
+            time.sleep(_GUI_HEARTBEAT_INTERVAL)
+            if not _GUI_WATCH_CLIENT:
+                continue
+            last = _GUI_LAST_HEARTBEAT
+            if last is None:
+                continue
+            if time.time() - last > _GUI_HEARTBEAT_TIMEOUT:
+                _terminate_gui_server()
+
+    threading.Thread(target=_loop, daemon=True, name="stb-gui-watchdog").start()
+
+
+def create_app(default_model=None, watch_client=False):
+    global _GUI_WATCH_CLIENT
+    _GUI_WATCH_CLIENT = bool(watch_client)
     default_model = normalize_model_relpath(default_model)
     try:
         from fastapi import FastAPI, HTTPException, Query, Body
@@ -32,6 +71,22 @@ def create_app(default_model=None):
         )
 
     app = FastAPI(title="Structural Toolbox", version="0.1.0")
+
+    @app.on_event("startup")
+    def _on_startup():
+        _start_gui_client_watchdog()
+
+    try:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    except ImportError:
+        pass
 
     @app.get("/")
     def index():
@@ -101,8 +156,7 @@ def create_app(default_model=None):
     ):
         try:
             full = resolve_model_path(path)
-            with open(full, "w", encoding="utf-8") as f:
-                f.write(text)
+            write_dat_text(full, text)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -119,8 +173,7 @@ def create_app(default_model=None):
             text = load_input_text(path)
             new_text, warnings = apply_edit_action(text, body)
             validate_dat_text(new_text)
-            with open(full, "w", encoding="utf-8") as f:
-                f.write(new_text)
+            write_dat_text(full, new_text)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -151,6 +204,34 @@ def create_app(default_model=None):
             "lines": rows,
         })
 
+    @app.get("/api/project")
+    def api_project(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+    ):
+        try:
+            resolve_model_path(path)
+            data = load_project_view_for_model(path)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return JSONResponse(data)
+
+    @app.put("/api/project")
+    def api_project_save(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+        body: dict = Body(..., description="Project JSON payload"),
+    ):
+        project = body.get("project")
+        if project is None:
+            raise HTTPException(status_code=400, detail="project is required")
+        try:
+            resolve_model_path(path)
+            data = save_project_json_for_model(path, project)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
+        return JSONResponse({"ok": True, "view": data})
+
     @app.post("/api/model/new")
     def api_model_new():
         try:
@@ -175,10 +256,16 @@ def create_app(default_model=None):
             raise HTTPException(status_code=500, detail=str(ex))
         return JSONResponse({"ok": True, "path": rel})
 
+    @app.post("/api/heartbeat")
+    def api_heartbeat():
+        global _GUI_LAST_HEARTBEAT
+        _GUI_LAST_HEARTBEAT = time.time()
+        return JSONResponse({"ok": True})
+
     @app.post("/api/shutdown")
     def api_shutdown():
         def _stop_server():
-            os.kill(os.getpid(), signal.SIGINT)
+            _terminate_gui_server()
 
         threading.Timer(0.3, _stop_server).start()
         return JSONResponse({"ok": True})
@@ -213,7 +300,7 @@ def run_server(
             "Install with: pip install -e \".[gui]\""
         )
 
-    app = create_app(default_model=default_model)
+    app = create_app(default_model=default_model, watch_client=open_browser)
     url = gui_open_url(host, port)
 
     if _port_is_open(host, port):
@@ -223,22 +310,20 @@ def run_server(
         print("  Or end the old server: close that window, or stop python.exe in Task Manager.")
         if open_browser:
             try:
-                import webbrowser
-                webbrowser.open(url)
+                open_gui_browser(url)
             except Exception:
                 pass
         return "already_running"
 
     if open_browser:
         try:
-            import webbrowser
-            webbrowser.open(url)
+            open_gui_browser(url)
         except Exception:
             pass
 
     print("Structural Toolbox: {0}".format(url))
     print("  project root: {0}".format(project_root()))
-    print("  Close this window to stop the server.")
+    print("  Close the GUI window or press Ctrl+C here to stop the server.")
     if log_file:
         print("  Log file: {0}".format(os.path.abspath(log_file)))
 

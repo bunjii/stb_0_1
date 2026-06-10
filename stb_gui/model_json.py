@@ -283,8 +283,9 @@ def write_model_file(rel_path, text):
     parent = os.path.dirname(full)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(full, "w", encoding="utf-8") as f:
-        f.write(text if text is not None else "")
+    from stb_gui.dat_format_headers import write_dat_text
+
+    write_dat_text(full, text if text is not None else "")
     return rel
 
 
@@ -578,12 +579,23 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "rzj": _ejnt_out(j.rzj),
         })
 
+    load_case_defs = []
+    for lc in getattr(mdl, "lcases", []):
+        load_case_defs.append({
+            "lc": lc.lc,
+            "type": getattr(lc, "load_type", 7),
+            "label": getattr(lc, "label", ""),
+            "name": getattr(lc, "lname", ""),
+        })
+
     return {
         "path": relpath,
         "solved": solved,
         "schema": 2,
+        "input_warnings": list(getattr(mdl, "input_warnings", []) or []),
         "date_analysis": mdl.date_analysis,
         "load_cases": mdl.lcs if mdl.lcs != None else [],
+        "load_case_definitions": load_case_defs,
         "bounds": bounds,
         "nodes": nodes,
         "elements": elements,

@@ -34,7 +34,8 @@ class Mdl:
                  _dcons = None,
                  _dloads = None,
                  _wwalls = None,
-                 _wshears = None):
+                 _wshears = None,
+                 _input_warnings = None):
 
         self.nds        = _nds
         self.elms       = _elms
@@ -60,6 +61,7 @@ class Mdl:
         self.dloads     = _dloads if _dloads is not None else []
         self.wwalls     = _wwalls if _wwalls is not None else []
         self.wshears    = _wshears if _wshears is not None else []
+        self.input_warnings = list(_input_warnings) if _input_warnings is not None else []
         self.dassocs    = []
         self.mpcs       = []
         self.lcs        =  None

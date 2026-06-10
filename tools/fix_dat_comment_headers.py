@@ -162,8 +162,9 @@ def fix_file(path: str) -> bool:
         changed = True
 
     if changed:
-        with open(path, "w", encoding="utf-8") as f:
-            f.writelines(lines)
+        from dat_format import write_dat_text
+
+        write_dat_text(path, "".join(lines))
     return changed
 
 

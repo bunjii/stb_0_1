@@ -9,14 +9,22 @@ if _STB_ROOT not in sys.path:
 from stb_gui.dat_edit import (
     apply_edit_action,
     apply_ejnt_lines_text,
+    create_dmem,
+    create_wwll,
+    delete_dmem,
     delete_elements,
     delete_nodes,
+    delete_wwll,
     ejnt_lines_for_elements,
+    set_diap_timber_multiplier,
     set_element_section,
     set_ejnt_for_elements,
     set_material_for_elements,
+    set_wwll_model,
+    set_wwll_multiplier,
     validate_dat_text,
 )
+from stb_gui.dat_format_headers import prepare_dat_text_for_write, write_dat_text
 
 
 SAMPLE = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
@@ -33,6 +41,23 @@ ELEM, 2, 3, 1, 1, 0.0
 ELEM, 3, 4, 2, 1, 0.0
 CONS, 3, 1, 1, 1, 1, 1, 1
 CONS, 4, 1, 1, 1, 1, 1, 1
+"""
+
+
+DIAPHRAGM_SAMPLE = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 3.0, 0.0, 3.0
+NODE, 3, 0.0, 0.0, 0.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+DMEM, 1001, 10, 1, 2, 3
+"""
+
+WWLL_SAMPLE = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 11, 0.0, 0.0, 0.0
+NODE, 12, 1.82, 0.0, 0.0
+NODE, 22, 1.82, 0.0, 2.73
+NODE, 21, 0.0, 0.0, 2.73
+WWLL, 1, W1_X, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 11, 12, 22, 21, 10, 1
 """
 
 
@@ -133,6 +158,164 @@ class TestDatEdit(unittest.TestCase):
         validate_dat_text(out)
         self.assertTrue(warnings)
 
+    def test_create_dmem_appends_record(self):
+        out, warnings = create_dmem(DIAPHRAGM_SAMPLE, 10, [1, 2, 3])
+        self.assertIn("DMEM, 1001,", out)
+        self.assertRegex(out, r"DMEM,\s+1002,\s+10,\s+1,\s+2,\s+3")
+        validate_dat_text(out)
+        self.assertTrue(any("Created DMEM 1002" in w for w in warnings))
+
+    def test_create_dmem_adds_section_when_missing(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 3.0, 0.0, 3.0
+NODE, 3, 0.0, 3.0, 3.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+"""
+        out, _ = create_dmem(sample, 10, [1, 2, 3])
+        self.assertIn("# --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---", out)
+        self.assertRegex(out, r"DMEM,\s+1001,\s+10,\s+1,\s+2,\s+3")
+        validate_dat_text(out)
+
+    def test_create_dmem_rejects_duplicate_nodes(self):
+        with self.assertRaises(ValueError):
+            create_dmem(DIAPHRAGM_SAMPLE, 10, [1, 1, 2])
+
+    def test_delete_dmem(self):
+        out, warnings = delete_dmem(DIAPHRAGM_SAMPLE, [1001])
+        self.assertNotIn("DMEM, 1001,", out)
+        self.assertIn("DIAP, 10,", out)
+        validate_dat_text(out)
+        self.assertTrue(any("DMEM" in w for w in warnings))
+
+    def test_create_wwll_appends_record(self):
+        out, warnings = create_wwll(WWLL_SAMPLE, [11, 12, 22, 21], multiplier=2.5)
+        self.assertIn("WWLL, 1,", out)
+        self.assertRegex(out, r"WWLL,\s+2,\s+W2,\s+1,\s+2\.5")
+        self.assertRegex(out, r"WWLL,\s+2,.*11,\s+12,\s+22,\s+21")
+        validate_dat_text(out)
+        self.assertTrue(any("Created WRW 2" in w for w in warnings))
+
+    def test_create_wwll_orders_corners_and_infers_dir(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 11, 0.0, 0.0, 0.0
+NODE, 12, 1.82, 0.0, 0.0
+NODE, 22, 1.82, 0.0, 2.73
+NODE, 21, 0.0, 0.0, 2.73
+"""
+        out, warnings = create_wwll(sample, [22, 11, 21, 12], multiplier=2.0, model=0)
+        self.assertRegex(out, r"WWLL,\s+1,\s+W1,\s+0,\s+2")
+        self.assertRegex(out, r"WWLL,\s+1,.*11,\s+12,\s+22,\s+21")
+        validate_dat_text(out)
+        self.assertTrue(any("DIR=X" in w for w in warnings))
+
+    def test_create_wwll_adds_section_when_missing(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 11, 0.0, 0.0, 0.0
+NODE, 12, 1.82, 0.0, 0.0
+NODE, 22, 1.82, 0.0, 2.73
+NODE, 21, 0.0, 0.0, 2.73
+CONS, 11, 1, 1, 1, 1, 1, 1
+"""
+        out, _ = create_wwll(sample, [11, 12, 22, 21])
+        self.assertIn("# --- WOOD RATED WALL(WWLL) ---", out)
+        self.assertRegex(out, r"WWLL,\s+1,")
+        validate_dat_text(out)
+
+    def test_create_wwll_rejects_non_rectangle(self):
+        sample = """NODE, 1, 0.0, 0.0, 0.0
+NODE, 2, 1.0, 0.0, 0.0
+NODE, 3, 0.5, 0.0, 1.0
+NODE, 4, 0.5, 0.0, 2.0
+"""
+        with self.assertRaises(ValueError):
+            create_wwll(sample, [1, 2, 3, 4])
+
+    def test_delete_wwll(self):
+        out, warnings = delete_wwll(WWLL_SAMPLE, [1])
+        self.assertNotIn("WWLL, 1,", out)
+        validate_dat_text(out)
+        self.assertTrue(any("WWLL" in w for w in warnings))
+
+    def test_set_wwll_multiplier(self):
+        out, _ = set_wwll_multiplier(WWLL_SAMPLE, [1], 3.5)
+        self.assertIn("WWLL, 1, W1_X, 0, 3.5,", out)
+        validate_dat_text(out)
+
+    def test_set_wwll_model(self):
+        out, warnings = set_wwll_model(WWLL_SAMPLE, [1], 1)
+        self.assertIn("WWLL, 1, W1_X, 1, 2.0,", out)
+        validate_dat_text(out)
+        self.assertTrue(any("panel" in w for w in warnings))
+
+    def test_apply_edit_action_set_wwll_model(self):
+        out, _ = apply_edit_action(WWLL_SAMPLE, {
+            "action": "set_wwll_model",
+            "wwll_ids": [1],
+            "model": 1,
+        })
+        self.assertIn("WWLL, 1, W1_X, 1, 2.0,", out)
+        validate_dat_text(out)
+
+    def test_set_diap_timber_multiplier(self):
+        out, _ = set_diap_timber_multiplier(DIAPHRAGM_SAMPLE, [10], 2.5)
+        self.assertIn("DIAP, 10, 2F_MAIN, 1, 1, 2.5,", out)
+        validate_dat_text(out)
+
+    def test_apply_edit_action_delete_dmem(self):
+        out, _ = apply_edit_action(DIAPHRAGM_SAMPLE, {
+            "action": "delete_dmem",
+            "dmem_ids": [1001],
+        })
+        self.assertNotIn("DMEM, 1001,", out)
+        validate_dat_text(out)
+
+    def test_apply_edit_action_create_dmem(self):
+        out, _ = apply_edit_action(DIAPHRAGM_SAMPLE, {
+            "action": "create_dmem",
+            "node_ids": [1, 2, 3],
+            "diap_id": 10,
+        })
+        self.assertRegex(out, r"DMEM,\s+1002,\s+10,\s+1,\s+2,\s+3")
+        validate_dat_text(out)
+
+    def test_apply_edit_action_create_wwll(self):
+        out, _ = apply_edit_action(WWLL_SAMPLE, {
+            "action": "create_wwll",
+            "node_ids": [11, 12, 22, 21],
+            "multiplier": 3.0,
+            "model": 1,
+        })
+        self.assertRegex(out, r"WWLL,\s+2,\s+W2,\s+1,\s+3")
+        validate_dat_text(out)
+
+
+class TestDatTextWrite(unittest.TestCase):
+
+    def test_prepare_dat_text_strips_cr_and_preserves_blank_lines(self):
+        text = "MATE, 1, A, 1, 1, 1, 0, 1\r\n\r\nNODE, 1, 0, 0, 0\r\n"
+        out = prepare_dat_text_for_write(text)
+        self.assertEqual(out, "MATE, 1, A, 1, 1, 1, 0, 1\n\nNODE, 1, 0, 0, 0\n")
+        self.assertNotIn("\r", out)
+
+    def test_write_dat_text_crlf_roundtrip_does_not_grow_blank_lines(self):
+        import os
+        import tempfile
+
+        original = "A\n\nB\n"
+        crlf = original.replace("\n", "\r\n")
+        fd, path = tempfile.mkstemp(suffix=".dat")
+        os.close(fd)
+        try:
+            for _ in range(3):
+                write_dat_text(path, crlf)
+                with open(path, encoding="utf-8") as fh:
+                    saved = fh.read()
+                self.assertEqual(saved, original)
+                crlf = saved.replace("\n", "\r\n")
+        finally:
+            os.remove(path)
+
 
 class TestGuiEditApi(unittest.TestCase):
 
@@ -145,6 +328,33 @@ class TestGuiEditApi(unittest.TestCase):
             cls.client = None
             return
         cls.client = TestClient(create_app())
+
+    def test_api_input_save_crlf_does_not_grow_blank_lines(self):
+        if self.client is None:
+            self.skipTest("fastapi not installed")
+        import os
+        import tempfile
+
+        original = "# sample\n\nMATE, 0, A, 1, 1, 1, 0, 1\n"
+        fd, full = tempfile.mkstemp(suffix=".dat", dir=os.path.join(_STB_ROOT, "examples"))
+        os.close(fd)
+        rel = os.path.relpath(full, _STB_ROOT).replace("\\", "/")
+        try:
+            write_dat_text(full, original)
+            crlf = original.replace("\n", "\r\n")
+            for _ in range(3):
+                r = self.client.put(
+                    "/api/input",
+                    params={"path": rel},
+                    json={"text": crlf},
+                )
+                self.assertEqual(r.status_code, 200, r.text)
+                got = self.client.get("/api/input", params={"path": rel})
+                self.assertEqual(got.status_code, 200)
+                self.assertEqual(got.text, original)
+                crlf = got.text.replace("\n", "\r\n")
+        finally:
+            os.remove(full)
 
     def test_api_model_edit_set_section(self):
         if self.client is None:

@@ -77,6 +77,115 @@ def wwll_layo_to_code(layout):
     return WWLL_LAYO_X if str(layout).strip().upper() == "X" else WWLL_LAYO_SINGLE
 
 
+def _horizontal_distance(na, nb):
+    return math.hypot(na.x - nb.x, na.y - nb.y)
+
+
+def wwll_length_height_from_nodes(n1, n2, n3, n4):
+    """Compute wall length and height from four corner nodes [m].
+
+    Bottom/top corners are identified by Z level so N1..N4 ordering may follow
+    either the documented bottom-line convention or the diagonal brace layout.
+    """
+    nodes = [n1, n2, n3, n4]
+    z_min = min(n.z for n in nodes)
+    z_max = max(n.z for n in nodes)
+    tol = common.PRES_LEN
+
+    if z_max - z_min < tol:
+        raise ValueError("WOOD_RATED_WALL nodes must span a positive height")
+
+    bottom = [n for n in nodes if n.z <= z_min + tol]
+    top = [n for n in nodes if n.z >= z_max - tol]
+    if len(bottom) != 2 or len(top) != 2:
+        raise ValueError(
+            "WOOD_RATED_WALL nodes must form a vertical rectangle "
+            "(two bottom corners and two top corners)"
+        )
+
+    bottom_len = _horizontal_distance(bottom[0], bottom[1])
+    top_len = _horizontal_distance(top[0], top[1])
+    length = 0.5 * (bottom_len + top_len)
+    height = z_max - z_min
+
+    if length < tol:
+        raise ValueError("WOOD_RATED_WALL computed length is not positive")
+    if height < tol:
+        raise ValueError("WOOD_RATED_WALL computed height is not positive")
+
+    return length, height
+
+
+def _node_xyz(node):
+    if hasattr(node, "x"):
+        return float(node.x), float(node.y), float(node.z)
+    return float(node[0]), float(node[1]), float(node[2])
+
+
+def order_wwll_corner_node_ids(node_ids, nodes_by_id):
+    """Reorder WRW corners to N1..N4 CCW rectangle convention.
+
+    N1,N2: bottom edge left-to-right along wall length.
+    N3: top corner above N2; N4: top corner above N1.
+    This matches GUI quads and X-brace pairs (N1-N3, N2-N4).
+    """
+    if len(node_ids) != 4:
+        raise ValueError("order_wwll_corner_node_ids requires exactly 4 node ids")
+    if len(set(node_ids)) != 4:
+        raise ValueError("WRW nodes must be distinct")
+
+    entries = []
+    for nid in node_ids:
+        node = nodes_by_id.get(int(nid))
+        if node is None:
+            raise ValueError("WOOD_RATED_WALL node id not found: {0}".format(nid))
+        x, y, z = _node_xyz(node)
+        entries.append((int(nid), x, y, z))
+
+    z_vals = [z for _, _, _, z in entries]
+    z_min = min(z_vals)
+    z_max = max(z_vals)
+    tol = common.PRES_LEN
+    if z_max - z_min < tol:
+        raise ValueError("WOOD_RATED_WALL nodes must span a positive height")
+
+    bottom = [item for item in entries if item[3] <= z_min + tol]
+    top = [item for item in entries if item[3] >= z_max - tol]
+    if len(bottom) != 2 or len(top) != 2:
+        raise ValueError(
+            "WOOD_RATED_WALL nodes must form a vertical rectangle "
+            "(two bottom corners and two top corners)"
+        )
+
+    dx = abs(bottom[0][1] - bottom[1][1])
+    dy = abs(bottom[0][2] - bottom[1][2])
+    direction = 0 if dx >= dy else 1
+    axis = 0 if direction == 0 else 1
+
+    def along_coord(item):
+        return item[1] if axis == 0 else item[2]
+
+    bottom.sort(key=along_coord)
+    top.sort(key=along_coord)
+
+    n1 = bottom[0][0]
+    n2 = bottom[1][0]
+
+    def nearest_top(bottom_item, top_items):
+        target = along_coord(bottom_item)
+        return min(top_items, key=lambda item: abs(along_coord(item) - target))
+
+    top_for_n1 = nearest_top(bottom[0], top)
+    top_for_n2 = nearest_top(bottom[1], top)
+    if top_for_n1[0] == top_for_n2[0]:
+        top.sort(key=along_coord)
+        top_for_n1, top_for_n2 = top[0], top[1]
+
+    n4 = top_for_n1[0]
+    n3 = top_for_n2[0]
+    return n1, n2, n3, n4, direction
+
+
 def _next_id(seq):
     ids = [x.id for x in seq] if seq else []
     return (max(ids) + 1) if ids else 1
@@ -93,8 +202,12 @@ class WoodRatedWall:
         self.id = int(_id)
         self.name = str(_name).strip()
         self.multiplier = float(_multiplier)
-        self.length = float(_length)     # [m]
-        self.height = float(_height)     # [m]
+        self.length_input = float(_length) if _length is not None else None  # [m]
+        self.height_input = float(_height) if _height is not None else None  # [m]
+        self.length = None
+        self.height = None
+        self.length_from_nodes = None
+        self.height_from_nodes = None
         self.direction = str(_direction).strip().upper()
         self.reference_drift = float(_reference_drift)
         self.model_requested = str(_model).strip().upper()
@@ -113,12 +226,77 @@ class WoodRatedWall:
 
         if self.multiplier <= 0.0:
             raise ValueError("WOOD_RATED_WALL multiplier must be positive")
-        if self.length <= 0.0 or self.height <= 0.0:
-            raise ValueError("WOOD_RATED_WALL length/height must be positive")
+        if self.length_input is not None and self.length_input <= 0.0:
+            raise ValueError("WOOD_RATED_WALL length must be positive")
+        if self.height_input is not None and self.height_input <= 0.0:
+            raise ValueError("WOOD_RATED_WALL height must be positive")
         if self.reference_drift <= 0.0:
             raise ValueError("WOOD_RATED_WALL RA must be positive")
         if self.direction not in ["X", "Y"]:
             raise ValueError("WOOD_RATED_WALL direction must be X or Y")
+
+    def resolve_length_height(self, nds):
+        """Resolve L/H from explicit input and/or corner nodes."""
+        warnings = []
+        needs_nodes = self.length_input is None or self.height_input is None
+
+        if needs_nodes and not all(v is not None for v in [self.n1, self.n2, self.n3, self.n4]):
+            raise ValueError(
+                "WOOD_RATED_WALL {0} requires N1..N4 when L or H is omitted".format(self.id)
+            )
+
+        geom_l = None
+        geom_h = None
+        if all(v is not None for v in [self.n1, self.n2, self.n3, self.n4]):
+            by_node = {n.id: n for n in nds}
+            corner_nodes = [by_node.get(self.n1), by_node.get(self.n2),
+                            by_node.get(self.n3), by_node.get(self.n4)]
+            if any(n is None for n in corner_nodes):
+                raise ValueError("WOOD_RATED_WALL {0} node id not found".format(self.id))
+            geom_l, geom_h = wwll_length_height_from_nodes(*corner_nodes)
+            self.length_from_nodes = geom_l
+            self.height_from_nodes = geom_h
+
+        if self.length_input is None:
+            if geom_l is None:
+                raise ValueError(
+                    "WOOD_RATED_WALL {0} requires N1..N4 to derive omitted L".format(self.id)
+                )
+            self.length = geom_l
+        else:
+            self.length = self.length_input
+
+        if self.height_input is None:
+            if geom_h is None:
+                raise ValueError(
+                    "WOOD_RATED_WALL {0} requires N1..N4 to derive omitted H".format(self.id)
+                )
+            self.height = geom_h
+        else:
+            self.height = self.height_input
+
+        tol = common.PRES_LEN
+        if geom_l is not None and self.length_input is not None:
+            if abs(self.length - geom_l) > tol:
+                warnings.append(
+                    "WOOD_RATED_WALL {0} ({1}): input L={2:.4f} m differs from "
+                    "node geometry {3:.4f} m; using input value.".format(
+                        self.id, self.name, self.length, geom_l
+                    )
+                )
+        if geom_h is not None and self.height_input is not None:
+            if abs(self.height - geom_h) > tol:
+                warnings.append(
+                    "WOOD_RATED_WALL {0} ({1}): input H={2:.4f} m differs from "
+                    "node geometry {3:.4f} m; using input value.".format(
+                        self.id, self.name, self.height, geom_h
+                    )
+                )
+
+        if self.length <= 0.0 or self.height <= 0.0:
+            raise ValueError("WOOD_RATED_WALL length/height must be positive")
+
+        return warnings
 
     @property
     def qa_kN(self):
