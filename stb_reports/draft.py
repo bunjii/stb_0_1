@@ -434,7 +434,10 @@ def _max_reaction(mdl):
 
 def _render_load_condition_section(mdl, project: ProjectDefinition):
     seismic = project.load_conditions.seismic
-    if not seismic.directions or seismic.ci <= 0.0:
+    try:
+        from stb_project import resolve_seismic_c0_z
+        resolve_seismic_c0_z(seismic)
+    except ValueError:
         return [
             "## 4. 荷重条件",
             "",
@@ -442,6 +445,7 @@ def _render_load_condition_section(mdl, project: ProjectDefinition):
         ]
 
     from stb_loads import compute_seismic_distribution
+    from stb_loads.format import render_seismic_markdown
 
     try:
         result = compute_seismic_distribution(mdl, project)
@@ -453,76 +457,9 @@ def _render_load_condition_section(mdl, project: ProjectDefinition):
         ]
 
     lines = ["## 4. 荷重条件", ""]
-    lines.extend(_table([
-        ("Ci (入力)", result.ci_input),
-        ("Rt", result.rt),
-        ("Ci (有効)", result.ci),
-        ("Wi LCs (TYPE 1+3)", ", ".join(str(lc) for lc in result.weight_result.weight_load_cases) or "-"),
-        ("DL 荷重ケース (legacy)", seismic.dead_load_lc if seismic.dead_load_lc is not None else "LNME"),
-        ("ΣWi kN", result.total_weight_kN),
-        ("V=Ci*ΣWi kN", result.base_shear_kN),
-        ("base_level", result.base_level),
-        ("base_mass_policy", result.base_mass_policy),
-        ("ΣQi kN", sum(s.qi_kN for s in result.stories)),
-        ("ΣFi kN", sum(s.fi_kN for s in result.stories)),
-    ]))
-    lines.append("")
-    lines.append("### 質量レベル重量・Ai・Qi・Fi")
-    lines.append("")
-    lines.extend(_dict_table(
-        ("story_name", "weight_kN", "mass_height_m", "beta", "ai", "qi_kN", "fi_kN"),
-        [
-            {
-                "story_name": s.story_name,
-                "weight_kN": s.weight_kN,
-                "mass_height_m": s.mass_height_m,
-                "beta": s.beta,
-                "ai": s.ai,
-                "qi_kN": s.qi_kN,
-                "fi_kN": s.fi_kN,
-            }
-            for s in result.stories
-        ],
-        {
-            "story_name": "階",
-            "weight_kN": "Wi kN",
-            "mass_height_m": "hi m",
-            "beta": "βi",
-            "ai": "Ai",
-            "qi_kN": "Qi kN",
-            "fi_kN": "Fi kN",
-        },
-    ))
-    if result.diaphragm_loads:
-        lines.append("")
-        lines.append("### 生成 DLOD (AREA)")
-        lines.append("")
-        lines.extend(_dict_table(
-            ("diaphragm_id", "story_name", "load_case", "axis", "pressure_kN_m2"),
-            [
-                {
-                    "diaphragm_id": d.diaphragm_id,
-                    "story_name": d.story_name,
-                    "load_case": d.load_case,
-                    "axis": d.axis.upper(),
-                    "pressure_kN_m2": d.pressure_kN_m2,
-                }
-                for d in result.diaphragm_loads
-            ],
-            {
-                "diaphragm_id": "DIAP",
-                "story_name": "階",
-                "load_case": "LC",
-                "axis": "方向",
-                "pressure_kN_m2": "kN/m2",
-            },
-        ))
-    if result.warnings:
-        lines.append("")
-        lines.append("### 荷重算定警告")
-        lines.append("")
-        for w in result.warnings:
-            lines.append("- " + w)
+    report_body = render_seismic_markdown(result, project).splitlines()
+    for line in report_body[2:]:
+        lines.append(line)
     return lines
 
 

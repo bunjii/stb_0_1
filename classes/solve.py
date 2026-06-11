@@ -768,6 +768,16 @@ class Solve:
                 self._add_xy_load(lm, n0, col, fx, fy)
                 self._add_xy_load(lm, n1, col, fx, fy)
             elif dl.load_type in ["MASS", "WEIGHT"]:
+                if abs(dl.ax) < common.PRES_ZERO and abs(dl.ay) < common.PRES_ZERO:
+                    if dl.load_type == "WEIGHT":
+                        w_area = dl.weight
+                    else:
+                        w_area = dl.mass * common.GRAVITY
+                    if w_area > common.PRES_ZERO:
+                        for node, fz in self._diaphragm_area_nodal_vertical_loads(dl, by_diap, w_area):
+                            row = node.cid * self.ndof
+                            lm[row + 2, col] += fz
+                    continue
                 px = dl.mass * dl.ax + dl.weight / common.GRAVITY * dl.ax
                 py = dl.mass * dl.ay + dl.weight / common.GRAVITY * dl.ay
                 if abs(px) < common.PRES_ZERO and abs(py) < common.PRES_ZERO:
@@ -827,6 +837,52 @@ class Solve:
             f = poly_area / float(len(nodes))
             for n in nodes:
                 loads.append((n, dl.px * f, dl.py * f))
+        return loads
+
+    def _diaphragm_area_nodal_vertical_loads(self, dl, by_diap, w_area):
+        from diaphragm import dreg_polygon_xy, diaphragm_floor_nodes
+
+        diap = by_diap.get(dl.diap_id)
+        if diap is None:
+            return []
+
+        _, area = dreg_polygon_xy(self.mdl, dl.diap_id)
+        nodes = diaphragm_floor_nodes(self.mdl, dl.diap_id)
+        if area > common.PRES_ZERO and len(nodes) >= 1:
+            fz = -w_area * (area / float(len(nodes)))
+            return [(n, fz) for n in nodes]
+
+        dmems = [m for m in getattr(self.mdl, "dmems", []) if m.diap.id == dl.diap_id]
+        if dmems:
+            loads = []
+            for m in dmems:
+                fz = -w_area * (m.area / 3.0)
+                for n in [m.n0, m.n1, m.n2]:
+                    loads.append((n, fz))
+            return loads
+
+        loads = []
+        for reg in getattr(self.mdl, "dregs", []):
+            if reg.diap_id != dl.diap_id:
+                continue
+            nodes = []
+            for nid in reg.node_ids:
+                n = self.mdl.FindNodeFromId(nid)
+                if n != -1:
+                    nodes.append(n)
+            if len(nodes) < 3:
+                continue
+            poly_area = 0.0
+            for i in range(len(nodes)):
+                n0 = nodes[i]
+                n1 = nodes[(i + 1) % len(nodes)]
+                poly_area += n0.x * n1.y - n0.y * n1.x
+            poly_area = abs(poly_area) * 0.5
+            if poly_area <= common.PRES_ZERO:
+                continue
+            fz = -w_area * (poly_area / float(len(nodes)))
+            for n in nodes:
+                loads.append((n, fz))
         return loads
 
     def _connected_boundary_assoc(self, _e):

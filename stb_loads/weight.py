@@ -449,7 +449,7 @@ def _add_dlod_weights(mdl, project, lc, stories, weights, warnings):
 
         if dl.load_type == "WEIGHT":
 
-            force_kN = dl.weight * area
+            force_kN = dl.weight * area * 1.0e-3
 
         else:
 

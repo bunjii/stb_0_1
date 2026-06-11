@@ -2,5 +2,8 @@
   "markdown.math.enabled": true,
   "markdown.extension.math.enabled": false,
   "markdown.math.delimiters": "dollars",
-  "python.terminal.activateEnvironment": true
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/classes"
+  ]
 }

@@ -1,0 +1,18 @@
+{
+  "include": [
+    "classes",
+    "stb_cli",
+    "stb_engine",
+    "stb_gui",
+    "stb_loads",
+    "stb_project",
+    "stb_checks",
+    "stb_reports",
+    "stb_practice",
+    "tests"
+  ],
+  "extraPaths": [
+    "classes"
+  ],
+  "reportMissingImports": "warning"
+}

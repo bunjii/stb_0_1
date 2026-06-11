@@ -416,7 +416,12 @@ LNME, 5, 7, COMB1
 
 Legacy text names (`DL`, `EQX`, etc.) in the TYPE column are still accepted and mapped to the codes above.
 
-For Ai seismic weight aggregation (`stb loads seismic`), **Wi uses TYPE 1 (DL) + TYPE 3 (LL(E))** on the referenced load cases, assigned to **mass levels** (not raw story buckets) per `project.json` `load_conditions.seismic.base_level` / `base_elevation` and `base_mass_policy`. Mass at the base level is not written to DLOD by default (`LUMP_TO_ABOVE_DIAPHRAGM` is typical for wood frames). **DLOD AREA pressures use story seismic force Fi** (`Fi = Qi - Q(i+1)`; top story `Fi = Qi`), not layer shear Qi directly. Seismic force output uses **TYPE 6 (E)** load cases; axis hints come from LABEL (`EQX` → +X, `EQY` → +Y).
+For Ai seismic weight aggregation (`stb loads seismic`), **Wi uses TYPE 1 (DL) + TYPE 3 (LL(E))** on the referenced load cases. Mass levels are defined per `project.json` **`load_conditions.seismic_masses`** when present; each entry has a **`mass_role`**:
+
+- **`BASE_MASS`** (e.g. 1F floor supported on foundation, not on upper-structure diaphragms): included in ΣWi and αi denominator; **no DLOD** output.
+- **`DIAPHRAGM_MASS`** (upper floors / roof): included in ΣWi and αi; **Fi** is written to **`application_diaphragm`** as TYPE 6 DLOD AREA.
+
+If `seismic_masses` is omitted, legacy **`base_mass_policy`** redistribution applies. **DLOD AREA pressures use story seismic force Fi** (`Fi = Qi - Q(i+1)`; top story `Fi = Qi`), not layer shear Qi directly. Seismic force output uses **TYPE 6 (E)** load cases; axis hints come from LABEL (`EQX` → +X, `EQY` → +Y).
 
 ### `LCMB` — load combination
 
@@ -486,7 +491,7 @@ Result files are text, with records such as:
 |-----|---------|
 | `SPRP` | Section properties (computed) |
 | `NDSP` | Nodal displacements (m, rad) |
-| `REAC` | Reactions at constrained nodes (kN, kNm) |
+| `REAC` | Reactions at constrained nodes: Tx, Ty, Tz (kN), Rx, Ry, Rz (kNm) |
 | `EFRC` | Element end forces (kN, kNm) |
 
 See `examples/cantilever.out` for a full example.

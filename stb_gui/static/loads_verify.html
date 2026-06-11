@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>荷重・外力確認</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/loads_verify.css">
+</head>
+<body class="loads-verify-body">
+  <header class="loads-verify-toolbar">
+    <div class="loads-verify-toolbar-left">
+      <h1 id="lvTitle" class="loads-verify-title">荷重・外力確認</h1>
+      <span id="lvPath" class="loads-verify-path"></span>
+    </div>
+    <div class="loads-verify-toolbar-right">
+      <button type="button" id="btnLvRefresh" class="btn-secondary">再読込</button>
+      <button type="button" id="btnLvApply" class="btn-primary" disabled>DLOD を .dat へ反映</button>
+      <button type="button" id="btnLvProject" class="btn-secondary">Project 設定…</button>
+    </div>
+  </header>
+
+  <nav id="lvTabs" class="loads-verify-tabs" aria-label="荷重種別"></nav>
+
+  <main id="lvMain" class="loads-verify-main">
+    <p id="lvStatus" class="loads-verify-status">読み込み中…</p>
+  </main>
+
+  <script src="/static/loads_verify.js"></script>
+</body>
+</html>

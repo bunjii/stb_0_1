@@ -20,6 +20,7 @@ from stb_gui.dat_edit import (
     set_element_section,
     set_ejnt_for_elements,
     set_material_for_elements,
+    set_cons_for_nodes,
     set_wwll_model,
     set_wwll_multiplier,
     validate_dat_text,
@@ -287,6 +288,32 @@ NODE, 4, 0.5, 0.0, 2.0
             "model": 1,
         })
         self.assertRegex(out, r"WWLL,\s+2,\s+W2,\s+1,\s+3")
+        validate_dat_text(out)
+
+
+class TestConsEdit(unittest.TestCase):
+
+    def test_set_cons_add_update_remove(self):
+        text = "\n".join([
+            "NODE, 1, 0, 0, 0",
+            "NODE, 2, 0, 1, 0",
+        ]) + "\n"
+        out, warnings = set_cons_for_nodes(text, [1], [1, 1, 1, 0, 0, 0])
+        self.assertIn("CONS,      1,    1,    1,    1,    0,    0,    0", out)
+        validate_dat_text(out)
+        out2, _ = set_cons_for_nodes(out, [1], [1, 1, 1, 1, 1, 1])
+        self.assertIn("CONS,      1,    1,    1,    1,    1,    1,    1", out2)
+        out3, warnings3 = set_cons_for_nodes(out2, [1], [0, 0, 0, 0, 0, 0])
+        self.assertNotIn("CONS,      1,", out3)
+        self.assertIn("Removed CONS", warnings3[0])
+
+    def test_apply_edit_action_set_cons(self):
+        out, _ = apply_edit_action(SAMPLE, {
+            "action": "set_cons",
+            "node_ids": [3],
+            "fixed": [1, 1, 1, 1, 1, 1],
+        })
+        self.assertIn("CONS,      3,    1,    1,    1,    1,    1,    1", out)
         validate_dat_text(out)
 
 

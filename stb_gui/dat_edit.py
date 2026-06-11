@@ -893,6 +893,127 @@ def set_diap_timber_multiplier(
     return _ensure_trailing_newline("\n".join(out)), warnings
 
 
+CONS_DOF_LABELS = ("TX", "TY", "TZ", "RX", "RY", "RZ")
+
+
+def _format_cons_line(node_id: int, fixed: list[bool]) -> str:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from dat_format import CONS_FMTS, record_line
+
+    values = [int(node_id)] + [int(bool(v)) for v in fixed]
+    return record_line("CONS", CONS_FMTS, values)
+
+
+def _cons_insert_index(lines: list[str]) -> int:
+    last_cons = -1
+    last_node = -1
+    for idx, line in enumerate(lines):
+        rec = _split_record(line)
+        if not rec:
+            continue
+        if rec[0] == "NODE":
+            last_node = idx
+        elif rec[0] == "CONS":
+            last_cons = idx
+    if last_cons >= 0:
+        return last_cons + 1
+    if last_node >= 0:
+        return last_node + 1
+    return len(lines)
+
+
+def _parse_cons_fixed(values: list[Any]) -> list[bool]:
+    if not isinstance(values, list) or len(values) != 6:
+        raise ValueError("fixed must be a list of 6 booleans (TX..RZ)")
+    out: list[bool] = []
+    for i, raw in enumerate(values):
+        if isinstance(raw, bool):
+            out.append(raw)
+            continue
+        if isinstance(raw, (int, float)) and raw in (0, 1):
+            out.append(bool(int(raw)))
+            continue
+        raise ValueError("Invalid CONS {0} value: {1!r}".format(CONS_DOF_LABELS[i], raw))
+    return out
+
+
+def set_cons_for_nodes(
+    text: str,
+    node_ids: list[int],
+    fixed: list[Any],
+) -> tuple[str, list[str]]:
+    targets = {int(n) for n in node_ids}
+    if not targets:
+        raise ValueError("node_ids is empty")
+
+    flags = _parse_cons_fixed(fixed)
+    lines = text.splitlines()
+    known_nodes = _node_ids_in_text(lines)
+    for nid in targets:
+        if nid not in known_nodes:
+            raise ValueError("Unknown node id: {0}".format(nid))
+
+    existing: dict[int, int] = {}
+    for idx, line in enumerate(lines):
+        rec = _split_record(line)
+        if rec and rec[0] == "CONS":
+            nid = _parse_int(rec[1][1], "node id")
+            existing[nid] = idx
+
+    out = list(lines)
+    removed = 0
+    updated = 0
+    inserted: list[str] = []
+
+    if not any(flags):
+        kept: list[str] = []
+        for line in out:
+            rec = _split_record(line)
+            if rec and rec[0] == "CONS":
+                nid = _parse_int(rec[1][1], "node id")
+                if nid in targets:
+                    removed += 1
+                    continue
+            kept.append(line)
+        out = kept
+    else:
+        new_line = None
+        for nid in sorted(targets):
+            line = _format_cons_line(nid, flags)
+            if nid in existing:
+                out[existing[nid]] = line
+                updated += 1
+            else:
+                inserted.append(line)
+
+        if inserted:
+            insert_at = _cons_insert_index(out)
+            out[insert_at:insert_at] = inserted
+
+    if removed == 0 and updated == 0 and not inserted:
+        raise ValueError("No CONS changes to apply")
+
+    active = [CONS_DOF_LABELS[i] for i, v in enumerate(flags) if v]
+    if not any(flags):
+        summary = "Removed CONS for {0} node(s).".format(removed)
+    else:
+        dof_text = ", ".join(active) if active else "none"
+        parts: list[str] = []
+        if updated:
+            parts.append("updated {0}".format(updated))
+        if inserted:
+            parts.append("added {0}".format(len(inserted)))
+        summary = "Set CONS ({0}) for {1} node(s): {2}.".format(
+            dof_text, len(targets), ", ".join(parts)
+        )
+    return _ensure_trailing_newline("\n".join(out)), [summary]
+
+
 def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]]:
     op = action.get("action")
     element_ids = action.get("element_ids") or []
@@ -955,6 +1076,8 @@ def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]
         if lines_text is None:
             raise ValueError("lines_text is required")
         return apply_ejnt_lines_text(text, element_ids, str(lines_text))
+    if op == "set_cons":
+        return set_cons_for_nodes(text, node_ids, action.get("fixed") or [])
     raise ValueError("Unknown action: {0!r}".format(op))
 
 

@@ -397,12 +397,12 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
                 reactions.append({
                     "node": c.nid,
                     "lc": lc,
-                    "rx": float(rs[0]) * 1e-3,
-                    "ry": float(rs[1]) * 1e-3,
-                    "rz": float(rs[2]) * 1e-3,
-                    "mx": float(rs[3]) * 1e-3,
-                    "my": float(rs[4]) * 1e-3,
-                    "mz": float(rs[5]) * 1e-3,
+                    "tx": float(rs[0]) * 1e-3,
+                    "ty": float(rs[1]) * 1e-3,
+                    "tz": float(rs[2]) * 1e-3,
+                    "rx": float(rs[3]) * 1e-3,
+                    "ry": float(rs[4]) * 1e-3,
+                    "rz": float(rs[5]) * 1e-3,
                 })
 
     point_loads = []

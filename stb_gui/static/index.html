@@ -25,6 +25,7 @@
     <button id="btnSolve" type="button" title="Solve (F5)">Solve</button>
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
     <button id="btnProject" type="button" class="btn-secondary" title="project.json sidecar settings">Project…</button>
+    <button id="btnLoads" type="button" class="btn-secondary" title="Load and external-force verification">Loads…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
@@ -37,6 +38,23 @@
     <div id="elemContextMenu" class="context-menu" hidden>
       <div id="contextMenuTitle" class="context-menu-title"></div>
       <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
+      <div id="contextMenuNodeSupport" class="context-menu-group">
+        <div class="context-menu-label">Support (CONS)</div>
+        <div class="pick-cons-grid context-menu-cons-grid">
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsTx"> TX</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsTy"> TY</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsTz"> TZ</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsRx"> RX</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsRy"> RY</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsRz"> RZ</label>
+        </div>
+        <div class="context-menu-field-row pick-cons-presets">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="cons-preset-fixed">Fixed</button>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="cons-preset-pinned">Pinned</button>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="cons-preset-free">Free</button>
+        </div>
+        <button type="button" class="context-menu-item" data-action="set-cons">Apply support</button>
+      </div>
       <button type="button" id="contextMenuDeleteNodes" class="context-menu-item context-menu-danger" data-action="delete-nodes">Delete nodes…</button>
       <button type="button" id="contextMenuDeleteDmem" class="context-menu-item context-menu-danger" data-action="delete-dmem">Delete DMEM…</button>
       <button type="button" id="contextMenuDeleteWrw" class="context-menu-item context-menu-danger" data-action="delete-wrw">Delete WRW…</button>
@@ -44,8 +62,8 @@
         <div class="context-menu-label">WRW type / multiplier</div>
         <div class="context-menu-field-row">
           <select id="contextMenuWrwModel" class="context-menu-input" title="MODEL">
-            <option value="1">せん断ばね</option>
-            <option value="0">ブレース</option>
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
           </select>
           <button type="button" class="context-menu-item context-menu-inline" data-action="set-wrw-model">Apply</button>
         </div>
@@ -75,8 +93,8 @@
         <div class="context-menu-field-row">
           <input type="number" id="contextMenuWrwCreateMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" value="2" placeholder="M">
           <select id="contextMenuWrwCreateModel" class="context-menu-input" title="MODEL">
-            <option value="1">せん断ばね</option>
-            <option value="0">ブレース</option>
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
           </select>
         </div>
         <div class="context-menu-field-row">
@@ -261,8 +279,8 @@
         <label class="panel-row">
           <span>Type</span>
           <select id="pickWrwCreateModel">
-            <option value="1">せん断ばね</option>
-            <option value="0">ブレース</option>
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
           </select>
         </label>
       </section>
@@ -271,11 +289,28 @@
         <label class="panel-row">
           <span>Type</span>
           <select id="pickWrwEditModel">
-            <option value="1">せん断ばね</option>
-            <option value="0">ブレース</option>
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
           </select>
         </label>
         <button type="button" id="btnPickWrwApplyModel" class="btn-block btn-secondary">Apply type change</button>
+      </section>
+      <section id="pickNodeSupportOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">Node support (CONS)</div>
+        <div class="pick-cons-grid">
+          <label class="panel-check"><input type="checkbox" id="pickConsTx"> TX</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsTy"> TY</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsTz"> TZ</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsRx"> RX</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsRy"> RY</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsRz"> RZ</label>
+        </div>
+        <div class="pick-cons-presets">
+          <button type="button" id="btnPickConsFixed" class="btn-secondary btn-inline">Fixed</button>
+          <button type="button" id="btnPickConsPinned" class="btn-secondary btn-inline">Pinned</button>
+          <button type="button" id="btnPickConsFree" class="btn-secondary btn-inline">Free</button>
+        </div>
+        <button type="button" id="btnPickConsApply" class="btn-block btn-secondary">Apply support</button>
       </section>
       <div id="selectionSummary" class="selection-summary">Nothing picked</div>
       <ul id="selectionList" class="selection-list"></ul>

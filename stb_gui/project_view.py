@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from stb_project import (
     DEFAULT_SEISMIC_RT,
+    DEFAULT_SEISMIC_TC,
     ProjectDefinition,
     ProjectSchemaError,
     effective_seismic_ci,
@@ -105,7 +106,7 @@ def build_project_view(
     dat_relpath: str,
 ) -> Dict[str, Any]:
     seismic = project.load_conditions.seismic
-    ci_eff = effective_seismic_ci(seismic) if seismic.ci > 0 else 0.0
+    ci_eff = effective_seismic_ci(seismic) if (seismic.ci > 0 and seismic.rt is not None) else None
 
     sections: List[Dict[str, Any]] = []
 
@@ -196,12 +197,29 @@ def build_project_view(
         },
         {
             "label": "Rt (振動特性係数)",
-            "value": _num(seismic.rt),
-            "hint": "省略時は {0}。project.json の rt で上書き可能".format(DEFAULT_SEISMIC_RT),
+            "value": _num(seismic.rt) if seismic.rt is not None else "自動",
+            "hint": "未入力時は T/Tc から自動算定（既定Rt={0}は使わない）".format(DEFAULT_SEISMIC_RT),
+        },
+        {
+            "label": "設計用1次固有周期 T",
+            "value": _num(seismic.design_period_s) if seismic.design_period_s is not None else "自動",
+            "hint": "未入力時は T=(0.02+0.01α)h",
+        },
+        {
+            "label": "建物高さ h",
+            "value": (_num(seismic.height_m) + " m") if seismic.height_m is not None else "自動",
+        },
+        {
+            "label": "鋼構造高さ比 α",
+            "value": _num(seismic.steel_ratio_alpha),
+        },
+        {
+            "label": "地盤係数 Tc",
+            "value": _num(seismic.tc) if seismic.tc is not None else _num(DEFAULT_SEISMIC_TC),
         },
         {
             "label": "Ci (有効 = Ci×Rt)",
-            "value": _num(ci_eff) if ci_eff > 0 else "—",
+            "value": _num(ci_eff) if (ci_eff is not None and ci_eff > 0) else ("自動算定" if seismic.ci > 0 else "—"),
             "hint": "V = Ci(有効) × ΣWi に使用",
         },
         {

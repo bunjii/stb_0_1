@@ -9,14 +9,22 @@ from stb_project.schema import (
     ALLOWED_MEMBER_KINDS,
     ALLOWED_REPORT_FORMATS,
     ALLOWED_REPORT_MODES,
+    ALLOWED_ROUGHNESS_CATEGORIES,
+    ALLOWED_WIND_DIAPHRAGM_INPUT_MODES,
+    ALLOWED_WIND_DIRECTIONS,
+    ALLOWED_WIND_PRESSURE_MODES,
+    ALLOWED_WIND_SURFACE_ROLES,
     DEFAULT_SEISMIC_RT,
+    DEFAULT_SEISMIC_STEEL_RATIO_ALPHA,
+    DEFAULT_SEISMIC_TC,
 )
 from stb_project import ProjectDefinition, effective_seismic_ci
 
 
 def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
     seismic = project.load_conditions.seismic
-    ci_eff = effective_seismic_ci(seismic) if seismic.ci > 0 else 0.0
+    ci_eff = effective_seismic_ci(seismic) if (seismic.ci > 0 and seismic.rt is not None) else None
+    wind = project.load_conditions.wind
     wood = project.design_checks.wood
     b = project.building
     d = b.designer
@@ -122,8 +130,36 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
                     "path": "load_conditions.seismic.rt",
                     "label": "Rt (振動特性係数)",
                     "type": "number",
-                    "value": seismic.rt,
-                    "hint": "省略時は {0}".format(DEFAULT_SEISMIC_RT),
+                    "value": seismic.rt if seismic.rt is not None else "",
+                    "hint": "未入力なら T/Tc から自動算定",
+                },
+                {
+                    "path": "load_conditions.seismic.design_period_s",
+                    "label": "設計用1次固有周期 T (sec)",
+                    "type": "number",
+                    "value": seismic.design_period_s if seismic.design_period_s is not None else "",
+                    "hint": "未入力なら T=(0.02+0.01α)h",
+                },
+                {
+                    "path": "load_conditions.seismic.height_m",
+                    "label": "建物高さ h (m)",
+                    "type": "number",
+                    "value": seismic.height_m if seismic.height_m is not None else "",
+                    "hint": "未入力なら階情報から算定",
+                },
+                {
+                    "path": "load_conditions.seismic.steel_ratio_alpha",
+                    "label": "鋼構造高さ比 α",
+                    "type": "number",
+                    "value": seismic.steel_ratio_alpha,
+                    "hint": "0〜1。省略時 {0}".format(DEFAULT_SEISMIC_STEEL_RATIO_ALPHA),
+                },
+                {
+                    "path": "load_conditions.seismic.tc",
+                    "label": "地盤係数 Tc",
+                    "type": "number",
+                    "value": seismic.tc,
+                    "hint": "省略時 {0}（第2種地盤）".format(DEFAULT_SEISMIC_TC),
                 },
                 {
                     "path": "load_conditions.seismic.base_level",
@@ -168,8 +204,8 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
             "readonly": [
                 {
                     "label": "Ci (有効 = Ci×Rt)",
-                    "value": ci_eff if ci_eff > 0 else None,
-                    "hint": "V = Ci(有効) × ΣWi",
+                    "value": ci_eff if (ci_eff is not None and ci_eff > 0) else None,
+                    "hint": "Rt未入力時は自動算定（表示は loads seismic 実行時）",
                 },
             ],
             "table": {
@@ -227,6 +263,78 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
                     "value": wood.allowable_stresses.tension,
                 },
             ],
+        },
+        {
+            "id": "wind",
+            "title": "風荷重 (全体解析)",
+            "table": {
+                "path": "load_conditions.wind.cases",
+                "label": "風荷重ケース",
+                "columns": [
+                    {"path": "id", "label": "Case ID", "type": "number"},
+                    {"path": "name", "label": "名称", "type": "text"},
+                    {"path": "load_case", "label": "LC", "type": "number"},
+                    {"path": "direction", "label": "風向", "type": "select", "options": list(ALLOWED_WIND_DIRECTIONS)},
+                    {"path": "V0", "label": "V0 m/s", "type": "number"},
+                    {"path": "roughness_category", "label": "粗度", "type": "select", "options": list(ALLOWED_ROUGHNESS_CATEGORIES)},
+                    {"path": "Gf", "label": "Gf", "type": "number"},
+                    {"path": "pressure_mode", "label": "pressure_mode", "type": "select", "options": list(ALLOWED_WIND_PRESSURE_MODES)},
+                    {"path": "use_Kz", "label": "use_Kz", "type": "bool"},
+                    {"path": "Cf_default", "label": "Cf_default", "type": "number"},
+                    {"path": "diaphragm_input_mode", "label": "入力方式", "type": "select", "options": list(ALLOWED_WIND_DIAPHRAGM_INPUT_MODES)},
+                ],
+                "rows": [
+                    {
+                        "id": c.case_id,
+                        "name": c.name,
+                        "load_case": c.load_case,
+                        "direction": c.direction,
+                        "V0": c.v0,
+                        "roughness_category": c.roughness_category,
+                        "Gf": c.gf if c.gf is not None else "",
+                        "pressure_mode": c.pressure_mode,
+                        "use_Kz": c.use_kz,
+                        "Cf_default": c.cf_default,
+                        "diaphragm_input_mode": c.diaphragm_input_mode,
+                    }
+                    for c in wind.cases
+                ],
+            },
+        },
+        {
+            "id": "wind_surfaces",
+            "title": "風受圧面",
+            "table": {
+                "path": "load_conditions.wind.surfaces",
+                "label": "受圧面一覧",
+                "columns": [
+                    {"path": "id", "label": "Surface ID", "type": "number"},
+                    {"path": "name", "label": "名称", "type": "text"},
+                    {"path": "wind_case_id", "label": "Case ID", "type": "number"},
+                    {"path": "surface_role", "label": "面種別", "type": "select", "options": list(ALLOWED_WIND_SURFACE_ROLES)},
+                    {"path": "face_direction", "label": "面方向", "type": "select", "options": list(ALLOWED_WIND_DIRECTIONS)},
+                    {"path": "z_bottom", "label": "Z下 m", "type": "number"},
+                    {"path": "z_top", "label": "Z上 m", "type": "number"},
+                    {"path": "width", "label": "幅 m", "type": "number"},
+                    {"path": "Cf", "label": "Cf", "type": "number"},
+                    {"path": "force_eccentricity_m", "label": "偏心e m", "type": "number"},
+                ],
+                "rows": [
+                    {
+                        "id": s.surface_id,
+                        "name": s.name,
+                        "wind_case_id": s.wind_case_id,
+                        "surface_role": s.surface_role,
+                        "face_direction": s.face_direction,
+                        "z_bottom": s.z_bottom,
+                        "z_top": s.z_top,
+                        "width": s.width,
+                        "Cf": s.cf if s.cf is not None else "",
+                        "force_eccentricity_m": s.force_eccentricity_m if s.force_eccentricity_m is not None else "",
+                    }
+                    for s in wind.surfaces
+                ],
+            },
         },
         {
             "id": "report",

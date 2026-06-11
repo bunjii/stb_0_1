@@ -82,7 +82,8 @@ class TestGuiModelJson(unittest.TestCase):
         self.assertAlmostEqual(sup["reacts"]["0"][2], 5.0, places=3)
         self.assertAlmostEqual(sup["reacts"]["0"][4], -10.0, places=3)
         self.assertTrue(len(data.get("reactions", [])) >= 1)
-        self.assertAlmostEqual(data["reactions"][0]["rz"], 5.0, places=3)
+        self.assertAlmostEqual(data["reactions"][0]["tz"], 5.0, places=3)
+        self.assertAlmostEqual(data["reactions"][0]["ry"], -10.0, places=3)
 
     def test_reject_path_outside_project(self):
         raised = False
@@ -292,6 +293,30 @@ class TestGuiApi(unittest.TestCase):
             params={"path": path},
             json={"project": project},
         )
+
+    def test_api_loads_seismic_view(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        r = self.client.get("/api/loads/seismic", params={"path": path})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["kind"], "seismic")
+        self.assertTrue(body["found"])
+        self.assertIn("summary", body)
+        self.assertIn("mass_level_rows", body)
+        self.assertGreater(len(body["mass_level_rows"]), 0)
+        tab_ids = [t["id"] for t in body["tabs"]]
+        self.assertIn("seismic", tab_ids)
+        self.assertIn("wind", tab_ids)
+        labels = [row["label"] for row in body["summary"]]
+        self.assertIn("C0 (標準せん断力係数)", labels)
+        self.assertIn("Q1（基底せん断力）", labels)
+        self.assertNotIn("V = Ci×ΣWi", labels)
+        self.assertNotIn("ΣQi", labels)
+        row = body["mass_level_rows"][0]
+        self.assertIn("ci", row)
+        self.assertIn("dlod_label", row)
 
     def test_api_project_save_seismic_rt_default(self):
         if self.client == None:

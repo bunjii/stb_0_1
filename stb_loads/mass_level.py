@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 import common
 
 from stb_loads.story import sorted_stories, story_mass_height
-from stb_project import SeismicLoadSettings, Story
+from stb_project import SeismicLoadSettings, SeismicMassEntry, Story
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,11 @@ class MassLevelSummary:
     mass_height_m: float
     is_base_level: bool = False
     output_dlod: bool = True
+    mass_role: Optional[str] = None
+    mass_entry_name: Optional[str] = None
+    application_diaphragm: Optional[int] = None
+    include_in_total_seismic_weight: bool = True
+    include_in_alpha_denominator: bool = True
 
 
 def resolve_base_story_name(
@@ -193,3 +198,84 @@ def build_mass_level_summaries(
         raise ValueError("No seismic mass levels remain after base_mass_policy '{0}'".format(policy))
 
     return tuple(out)
+
+
+def _story_by_name(stories: Sequence[Story]) -> Dict[str, Story]:
+    return {s.name: s for s in stories}
+
+
+def build_mass_levels_from_seismic_masses(
+    entries: Sequence[SeismicMassEntry],
+    raw_weights: Dict[str, float],
+    stories: Sequence[Story],
+    warnings: List[str],
+) -> Tuple[MassLevelSummary, ...]:
+    if not entries:
+        raise ValueError("seismic_masses is empty")
+
+    ordered = sorted_stories(stories)
+    story_map = _story_by_name(ordered)
+    resolved: List[MassLevelSummary] = []
+    base_mass_weight = 0.0
+
+    for entry in entries:
+        if entry.story and entry.story not in story_map:
+            raise ValueError(
+                "seismic_masses entry '{0}': story '{1}' is not in project.stories".format(
+                    entry.name, entry.story
+                )
+            )
+
+        if entry.weight is not None:
+            weight = max(0.0, float(entry.weight))
+        elif entry.story:
+            weight = max(0.0, float(raw_weights.get(entry.story, 0.0)))
+        else:
+            raise ValueError(
+                "seismic_masses entry '{0}': story or weight is required".format(entry.name)
+            )
+
+        if not entry.include_in_total_seismic_weight and not entry.include_in_alpha_denominator:
+            if weight > common.PRES_ZERO:
+                warnings.append(
+                    "Seismic mass '{0}': weight excluded from seismic totals.".format(entry.name)
+                )
+            continue
+
+        if weight <= common.PRES_ZERO:
+            continue
+
+        story_name = entry.story or entry.name
+        if entry.story:
+            mass_height = story_mass_height(story_map[entry.story])
+            is_base = entry.mass_role == "BASE_MASS"
+        else:
+            mass_height = 0.0
+            is_base = entry.mass_role == "BASE_MASS"
+
+        if entry.mass_role == "BASE_MASS":
+            base_mass_weight += weight
+
+        resolved.append(MassLevelSummary(
+            story_name=story_name,
+            weight_kN=weight,
+            mass_height_m=mass_height,
+            is_base_level=is_base,
+            output_dlod=entry.generate_diaphragm_load,
+            mass_role=entry.mass_role,
+            mass_entry_name=entry.name,
+            application_diaphragm=entry.application_diaphragm,
+            include_in_total_seismic_weight=entry.include_in_total_seismic_weight,
+            include_in_alpha_denominator=entry.include_in_alpha_denominator,
+        ))
+
+    if base_mass_weight > common.PRES_ZERO:
+        warnings.append(
+            "1階床重量は BASE_MASS として総地震重量には含めましたが、1階DLODには出力していません。"
+        )
+
+    if not resolved:
+        raise ValueError("No seismic mass levels remain after applying seismic_masses")
+
+    resolved.sort(key=lambda ml: ml.mass_height_m)
+    return tuple(resolved)

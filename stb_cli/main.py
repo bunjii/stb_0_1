@@ -153,7 +153,7 @@ def cmd_loads_seismic(args):
         mdl.filepath = dat_path
         result = compute_seismic_distribution(mdl, project)
         dloads = generate_dlod_records(result)
-        markdown = render_seismic_markdown(result)
+        markdown = render_seismic_markdown(result, project, mdl=mdl)
 
         if args.dry_run or not args.write_dat:
             sys.stdout.write(markdown)
@@ -164,6 +164,59 @@ def cmd_loads_seismic(args):
             if args.verbose:
                 print("Updated: " + dat_path)
                 print("  seismic DLOD records: " + str(len(dloads)))
+    except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except StbParseError as ex:
+        _stderr("Parse error: " + str(ex))
+        return EXIT_INPUT
+    except ValueError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+
+    return EXIT_OK
+
+
+def cmd_loads_wind(args):
+    _ensure_project_root_on_path()
+    from stb_engine import parse_input
+    from stb_engine.errors import StbParseError
+    from stb_project import load_project_file, load_project_for_dat
+    from stb_loads import (
+        apply_wind_to_dat,
+        compute_wind_distribution,
+        generate_wind_dlod_records,
+        render_wind_markdown,
+    )
+
+    try:
+        input_path = os.path.abspath(args.project)
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            project_dir = os.path.dirname(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(project_dir, dat_path)
+        else:
+            dat_path = input_path
+            project = load_project_for_dat(dat_path, required=True)
+
+        lines = _read_lines(dat_path)
+        mdl = parse_input(lines)
+        mdl.filepath = dat_path
+        result = compute_wind_distribution(mdl, project)
+        dloads = generate_wind_dlod_records(result)
+        markdown = render_wind_markdown(result, project, mdl=mdl)
+
+        if args.dry_run or not args.write_dat:
+            sys.stdout.write(markdown)
+            if not markdown.endswith("\n"):
+                sys.stdout.write("\n")
+        if args.write_dat:
+            apply_wind_to_dat(dat_path, dloads)
+            if args.verbose:
+                print("Updated: " + dat_path)
+                print("  wind DLOD records: " + str(len(dloads)))
     except IOError as ex:
         _stderr(str(ex))
         return EXIT_INPUT
@@ -346,6 +399,28 @@ def _build_parser():
         help="Write generated DLOD block into the linked .dat file",
     )
     p_seismic.set_defaults(func=cmd_loads_seismic)
+
+    p_wind = p_loads_sub.add_parser(
+        "wind",
+        parents=[common],
+        help="Generate wind DLOD records from wall surfaces",
+    )
+    p_wind.add_argument(
+        "--project",
+        required=True,
+        help="Project JSON sidecar path",
+    )
+    p_wind.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print wind load report without modifying .dat",
+    )
+    p_wind.add_argument(
+        "--write-dat",
+        action="store_true",
+        help="Write generated DLOD block into the linked .dat file",
+    )
+    p_wind.set_defaults(func=cmd_loads_wind)
 
     p_gui = sub.add_parser(
         "gui",

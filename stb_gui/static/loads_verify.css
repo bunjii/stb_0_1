@@ -1,0 +1,268 @@
+.loads-verify-body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #1a1a22;
+  color: #e8e6ed;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+.loads-verify-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #252530;
+  border-bottom: 1px solid #3a3a48;
+}
+
+.loads-verify-toolbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.loads-verify-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.loads-verify-path {
+  font-size: 11px;
+  color: #a8a4b8;
+  word-break: break-all;
+}
+
+.loads-verify-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.loads-verify-toolbar button {
+  border: none;
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.loads-verify-toolbar .btn-primary {
+  background: #e1dee4;
+  color: #111;
+}
+
+.loads-verify-toolbar .btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.loads-verify-toolbar .btn-secondary {
+  background: #3a3a48;
+  color: #e8e6ed;
+}
+
+.loads-verify-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0 12px;
+  background: #1e1e26;
+  border-bottom: 1px solid #3a3a48;
+}
+
+.lv-tab {
+  padding: 10px 16px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #a8a4b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lv-tab.active {
+  color: #fff;
+  border-bottom-color: #c8b8ff;
+}
+
+.lv-tab:disabled,
+.lv-tab.lv-tab-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.loads-verify-main {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px 32px;
+}
+
+.loads-verify-status {
+  color: #a8a4b8;
+  margin: 0;
+}
+
+.lv-section {
+  margin-bottom: 24px;
+}
+
+.lv-section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #d4d0dc;
+  border-left: 3px solid #7a6aaa;
+  padding-left: 8px;
+}
+
+.lv-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 1fr);
+  gap: 1px;
+  background: #3a3a48;
+  border: 1px solid #3a3a48;
+  border-radius: 4px;
+  overflow: hidden;
+  max-width: 640px;
+}
+
+.lv-summary-grid dt,
+.lv-summary-grid dd {
+  margin: 0;
+  padding: 6px 10px;
+  background: #252530;
+}
+
+.lv-summary-grid dt {
+  color: #a8a4b8;
+  font-weight: 500;
+}
+
+.lv-summary-grid dd {
+  font-family: "Liberation Mono", "Courier New", monospace;
+  text-align: right;
+}
+
+.lv-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #3a3a48;
+  border-radius: 4px;
+}
+
+.lv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.lv-table th,
+.lv-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #2e2e38;
+  text-align: left;
+}
+
+.lv-table th {
+  background: #2a2a34;
+  color: #c8c4d0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lv-table td.num {
+  text-align: right;
+  font-family: "Liberation Mono", "Courier New", monospace;
+}
+
+.lv-table tbody tr:hover {
+  background: #22222c;
+}
+
+.lv-warnings {
+  margin: 0;
+  padding: 10px 14px;
+  background: #3a2a20;
+  border: 1px solid #8a6040;
+  border-radius: 4px;
+  color: #f0d8c0;
+  list-style: disc;
+  padding-left: 28px;
+}
+
+.lv-placeholder {
+  padding: 48px 24px;
+  text-align: center;
+  color: #888;
+  border: 1px dashed #4a4a58;
+  border-radius: 6px;
+}
+
+.lv-badge-yes {
+  color: #8fd4a0;
+}
+
+.lv-badge-no {
+  color: #888;
+}
+
+.lv-summary-note {
+  color: #a8a4b8;
+  font-size: 11px;
+}
+
+.lv-section-note {
+  margin: 0 0 10px;
+  color: #a8a4b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lv-rules {
+  margin: 0;
+  padding-left: 22px;
+  color: #ccc;
+  line-height: 1.55;
+}
+
+.lv-subtitle {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lv-equilibrium {
+  margin: 0 0 8px;
+  padding-left: 22px;
+  line-height: 1.55;
+}
+
+.lv-checks {
+  margin: 0;
+  padding-left: 22px;
+  line-height: 1.55;
+}
+
+.lv-check-ok {
+  color: #8fd4a0;
+}
+
+.lv-check-ng {
+  color: #f0a0a0;
+}
+
+@media print {
+  .loads-verify-toolbar-right,
+  .loads-verify-tabs {
+    display: none;
+  }
+}

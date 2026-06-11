@@ -22,6 +22,8 @@ ALLOWED_REPORT_MODES = ("practice", "education", "debug")
 ALLOWED_REPORT_FORMATS = ("markdown", "html", "pdf")
 ALLOWED_SEISMIC_AXES = ("x", "y")
 DEFAULT_SEISMIC_RT = 1.0
+DEFAULT_SEISMIC_TC = 0.6
+DEFAULT_SEISMIC_STEEL_RATIO_ALPHA = 0.0
 ALLOWED_BASE_MASS_POLICIES = (
     "IGNORE_AT_BASE",
     "LUMP_TO_ABOVE_DIAPHRAGM",
@@ -30,6 +32,25 @@ ALLOWED_BASE_MASS_POLICIES = (
     "APPLY_TO_WALL_NODES",
 )
 DEFAULT_BASE_MASS_POLICY = "LUMP_TO_ABOVE_DIAPHRAGM"
+ALLOWED_MASS_ROLES = ("BASE_MASS", "DIAPHRAGM_MASS")
+ALLOWED_WIND_DIRECTIONS = ("X_PLUS", "X_MINUS", "Y_PLUS", "Y_MINUS")
+ALLOWED_ROUGHNESS_CATEGORIES = ("I", "II", "III", "IV")
+ALLOWED_WIND_PRESSURE_MODES = ("BUILDING_HEIGHT_UNIFORM", "STORY_HEIGHT_KZ")
+ALLOWED_WIND_DIAPHRAGM_INPUT_MODES = (
+    "DIAPHRAGM_UNIFORM",
+    "DIAPHRAGM_FORCE_WITH_TORSION",
+    "EDGE_OR_MEMBER_LOAD",
+)
+ALLOWED_WIND_SURFACE_ROLES = ("WINDWARD", "LEEWARD", "SIDE", "ROOF")
+DEFAULT_WIND_PRESSURE_MODE = "BUILDING_HEIGHT_UNIFORM"
+DEFAULT_WIND_DIAPHRAGM_INPUT_MODE = "DIAPHRAGM_UNIFORM"
+DEFAULT_WIND_SURFACE_ROLE = "WINDWARD"
+
+ROUGHNESS_ZB = {"I": 5.0, "II": 5.0, "III": 5.0, "IV": 10.0}
+ROUGHNESS_ZG = {"I": 250.0, "II": 350.0, "III": 450.0, "IV": 550.0}
+ROUGHNESS_ALPHA = {"I": 0.10, "II": 0.15, "III": 0.20, "IV": 0.27}
+GUST_GF_AT_10M = {"I": 2.0, "II": 2.2, "III": 2.5, "IV": 3.1}
+GUST_GF_AT_40M = {"I": 1.8, "II": 2.0, "III": 2.1, "IV": 2.3}
 
 
 PROJECT_JSON_SCHEMA = {
@@ -129,8 +150,15 @@ PROJECT_JSON_SCHEMA = {
                         "ci": {"type": "number"},
                         "rt": {
                             "type": "number",
-                            "description": "Vibration characteristic factor Rt (default 1.0 when omitted).",
+                            "description": "Vibration characteristic factor Rt override (auto when omitted).",
                         },
+                        "design_period_s": {"type": "number"},
+                        "height_m": {"type": "number"},
+                        "steel_ratio_alpha": {"type": "number"},
+                        "tc": {"type": "number"},
+                        "base_level": {"type": "string"},
+                        "base_elevation": {"type": "number"},
+                        "base_mass_policy": {"type": "string"},
                         "dead_load_lc": {"type": "integer"},
                         "live_load_lc": {"type": ["integer", "null"]},
                         "live_load_factor": {"type": "number"},
@@ -296,7 +324,13 @@ class SeismicDirectionSettings:
 @dataclass(frozen=True)
 class SeismicLoadSettings:
     ci: float = 0.0
-    rt: float = DEFAULT_SEISMIC_RT
+    c0: Optional[float] = None
+    z: Optional[float] = None
+    rt: Optional[float] = None
+    design_period_s: Optional[float] = None
+    height_m: Optional[float] = None
+    steel_ratio_alpha: float = DEFAULT_SEISMIC_STEEL_RATIO_ALPHA
+    tc: float = DEFAULT_SEISMIC_TC
     base_level: Optional[str] = None
     base_elevation: Optional[float] = None
     base_mass_policy: str = DEFAULT_BASE_MASS_POLICY
@@ -306,15 +340,28 @@ class SeismicLoadSettings:
     directions: Tuple[SeismicDirectionSettings, ...] = ()
 
 
-def effective_seismic_ci(seismic: SeismicLoadSettings) -> float:
-    """Base shear coefficient used in V = Ci_eff × ΣWi (Ci input × Rt)."""
+def resolve_seismic_c0_z(seismic: SeismicLoadSettings):
+    """Return (c0, z, z_is_default). Legacy ``ci`` holds C0×Z when ``c0`` is omitted."""
 
+    if seismic.c0 is not None:
+        c0 = float(seismic.c0)
+        z = float(seismic.z) if seismic.z is not None else 1.0
+        return c0, z, seismic.z is None
     if seismic.ci <= 0.0:
-        return 0.0
+        raise ValueError("load_conditions.seismic.c0 or ci must be positive")
+    z = float(seismic.z) if seismic.z is not None else 1.0
+    c0 = float(seismic.ci) / z if z > 0.0 else float(seismic.ci)
+    return c0, z, seismic.z is None
+
+
+def effective_seismic_ci(seismic: SeismicLoadSettings) -> float:
+    """Legacy combined coefficient C0×Z×Rt (per-story Ci uses Ai separately)."""
+
+    c0, z, _ = resolve_seismic_c0_z(seismic)
     rt = seismic.rt if seismic.rt is not None else DEFAULT_SEISMIC_RT
     if rt <= 0.0:
         raise ValueError("load_conditions.seismic.rt must be positive")
-    return seismic.ci * rt
+    return c0 * z * rt
 
 
 @dataclass(frozen=True)
@@ -324,9 +371,197 @@ class DiaphragmAssignment:
 
 
 @dataclass(frozen=True)
+class SeismicMassEntry:
+    name: str
+    mass_role: str
+    story: Optional[str] = None
+    weight: Optional[float] = None
+    include_in_total_seismic_weight: bool = True
+    include_in_alpha_denominator: bool = True
+    generate_diaphragm_load: bool = False
+    application_level: Optional[str] = None
+    application_diaphragm: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class RoughnessParams:
+    category: str
+    zb: float
+    zg: float
+    alpha: float
+
+
+@dataclass(frozen=True)
+class WindLoadCaseSettings:
+    case_id: int
+    name: str
+    direction: str
+    v0: float
+    roughness_category: str
+    load_case: int
+    building_height_H: Optional[float] = None
+    gf: Optional[float] = None
+    cf_default: float = 1.0
+    use_kz: bool = False
+    pressure_mode: str = DEFAULT_WIND_PRESSURE_MODE
+    diaphragm_input_mode: str = DEFAULT_WIND_DIAPHRAGM_INPUT_MODE
+
+
+@dataclass(frozen=True)
+class WindSurfaceSettings:
+    surface_id: int
+    name: str
+    wind_case_id: int
+    face_direction: str
+    z_bottom: float
+    z_top: float
+    width: float
+    cf: Optional[float] = None
+    surface_role: str = DEFAULT_WIND_SURFACE_ROLE
+    force_eccentricity_m: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class WindMemberLoadPlaceholder:
+    load_case: int
+    member_id: int
+    direction: str
+    pressure: float = 0.0
+    tributary_width: float = 0.0
+    line_load: float = 0.0
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class WindLoadSettings:
+    cases: Tuple[WindLoadCaseSettings, ...] = ()
+    surfaces: Tuple[WindSurfaceSettings, ...] = ()
+    member_loads: Tuple[WindMemberLoadPlaceholder, ...] = ()
+
+
+def normalize_roughness_category(value: str) -> str:
+    text = str(value or "").strip().upper()
+    aliases = {
+        "1": "I", "2": "II", "3": "III", "4": "IV",
+        "Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III", "Ⅳ": "IV",
+    }
+    text = aliases.get(text, text)
+    if text not in ALLOWED_ROUGHNESS_CATEGORIES:
+        raise ValueError("roughness_category must be I, II, III, or IV")
+    return text
+
+
+def roughness_params(category: str) -> RoughnessParams:
+    cat = normalize_roughness_category(category)
+    return RoughnessParams(
+        category=cat,
+        zb=ROUGHNESS_ZB[cat],
+        zg=ROUGHNESS_ZG[cat],
+        alpha=ROUGHNESS_ALPHA[cat],
+    )
+
+
+def compute_gust_factor_auto(building_height_m: float, roughness_category: str) -> float:
+    cat = normalize_roughness_category(roughness_category)
+    h = max(0.0, float(building_height_m))
+    g10 = GUST_GF_AT_10M[cat]
+    g40 = GUST_GF_AT_40M[cat]
+    if h <= 10.0:
+        return g10
+    if h >= 40.0:
+        return g40
+    t = (h - 10.0) / 30.0
+    return g10 + t * (g40 - g10)
+
+
+def resolve_wind_gf(case: WindLoadCaseSettings, building_height_m: float) -> Tuple[float, bool]:
+    if case.gf is not None:
+        if case.gf <= 0.0:
+            raise ValueError("Wind Gf must be positive")
+        return float(case.gf), False
+    return compute_gust_factor_auto(building_height_m, case.roughness_category), True
+
+
+def resolve_building_height_m(case: WindLoadCaseSettings, stories) -> float:
+    if case.building_height_H is not None:
+        return max(0.0, float(case.building_height_H))
+    if not stories:
+        return 0.0
+    z_min = min(s.elevation for s in stories)
+    z_top = max(s.elevation + s.height for s in stories)
+    return max(0.0, z_top - z_min)
+
+
+def normalize_wind_surface_role(value: str) -> str:
+    text = str(value or "").strip().upper()
+    aliases = {
+        "WINDWARD": "WINDWARD",
+        "WIND": "WINDWARD",
+        "LEEWARD": "LEEWARD",
+        "LEWARD": "LEEWARD",
+        "LEESIDE": "LEEWARD",
+        "SIDE": "SIDE",
+        "ROOF": "ROOF",
+    }
+    if text not in aliases:
+        raise ValueError("surface_role must be WINDWARD, LEEWARD, SIDE, or ROOF")
+    return aliases[text]
+
+
+def normalize_diaphragm_input_mode(value: str) -> str:
+    text = str(value or "").strip().upper()
+    aliases = {
+        "DIAPHRAGM_UNIFORM": "DIAPHRAGM_UNIFORM",
+        "DIAPHRAGM_DLOD": "DIAPHRAGM_UNIFORM",
+        "DIAPHRAGM_DIRECT": "DIAPHRAGM_UNIFORM",
+        "DIAPHRAGM_FORCE_WITH_TORSION": "DIAPHRAGM_FORCE_WITH_TORSION",
+        "EDGE_OR_MEMBER_LOAD": "EDGE_OR_MEMBER_LOAD",
+        "MEMBER_LOAD": "EDGE_OR_MEMBER_LOAD",
+        "MEMBER_TRANSFER": "EDGE_OR_MEMBER_LOAD",
+        "BOTH_WITH_CHECK": "DIAPHRAGM_UNIFORM",
+    }
+    if text not in aliases:
+        raise ValueError(
+            "diaphragm_input_mode must be DIAPHRAGM_UNIFORM, "
+            "DIAPHRAGM_FORCE_WITH_TORSION, or EDGE_OR_MEMBER_LOAD"
+        )
+    return aliases[text]
+
+
+def normalize_wind_direction(value: str) -> str:
+    text = str(value or "").strip().upper().replace(" ", "")
+    aliases = {
+        "X+": "X_PLUS", "X_PLUS": "X_PLUS", "XPLUS": "X_PLUS",
+        "WX+": "X_PLUS", "WX_PLUS": "X_PLUS", "WXPLUS": "X_PLUS",
+        "X-": "X_MINUS", "X_MINUS": "X_MINUS", "XMINUS": "X_MINUS",
+        "WX-": "X_MINUS", "WX_MINUS": "X_MINUS", "WXMINUS": "X_MINUS",
+        "Y+": "Y_PLUS", "Y_PLUS": "Y_PLUS", "YPLUS": "Y_PLUS",
+        "WY+": "Y_PLUS", "WY_PLUS": "Y_PLUS", "WYPLUS": "Y_PLUS",
+        "Y-": "Y_MINUS", "Y_MINUS": "Y_MINUS", "YMINUS": "Y_MINUS",
+        "WY-": "Y_MINUS", "WY_MINUS": "Y_MINUS", "WYMINUS": "Y_MINUS",
+    }
+    if text not in aliases:
+        raise ValueError("wind direction must be X_PLUS, X_MINUS, Y_PLUS, or Y_MINUS")
+    return aliases[text]
+
+
+def direction_to_axis_sign(direction: str) -> Tuple[str, int]:
+    d = normalize_wind_direction(direction)
+    if d == "X_PLUS":
+        return "x", 1
+    if d == "X_MINUS":
+        return "x", -1
+    if d == "Y_PLUS":
+        return "y", 1
+    return "y", -1
+
+
+@dataclass(frozen=True)
 class LoadConditionSettings:
     seismic: SeismicLoadSettings = field(default_factory=SeismicLoadSettings)
     diaphragms: Tuple[DiaphragmAssignment, ...] = ()
+    seismic_masses: Tuple[SeismicMassEntry, ...] = ()
+    wind: WindLoadSettings = field(default_factory=WindLoadSettings)
 
 
 @dataclass(frozen=True)
@@ -397,6 +632,11 @@ class ProjectDefinition:
                     {"id": d.diaphragm_id, "story": d.story}
                     for d in self.load_conditions.diaphragms
                 ],
+                "seismic_masses": [
+                    _seismic_mass_entry_to_dict(entry)
+                    for entry in self.load_conditions.seismic_masses
+                ] if self.load_conditions.seismic_masses else [],
+                "wind": _wind_settings_to_dict(self.load_conditions.wind),
             },
             "report": {
                 "title": self.report.title,
@@ -425,8 +665,20 @@ def _seismic_settings_to_dict(seismic: SeismicLoadSettings):
             for d in seismic.directions
         ],
     }
-    if abs(seismic.rt - DEFAULT_SEISMIC_RT) > 1.0e-12:
+    if seismic.c0 is not None:
+        out["c0"] = seismic.c0
+    if seismic.z is not None:
+        out["z"] = seismic.z
+    if seismic.rt is not None:
         out["rt"] = seismic.rt
+    if seismic.design_period_s is not None:
+        out["design_period_s"] = seismic.design_period_s
+    if seismic.height_m is not None:
+        out["height_m"] = seismic.height_m
+    if abs(seismic.steel_ratio_alpha - DEFAULT_SEISMIC_STEEL_RATIO_ALPHA) > 1.0e-12:
+        out["steel_ratio_alpha"] = seismic.steel_ratio_alpha
+    if abs(seismic.tc - DEFAULT_SEISMIC_TC) > 1.0e-12:
+        out["tc"] = seismic.tc
     if seismic.base_level:
         out["base_level"] = seismic.base_level
     if seismic.base_elevation is not None:
@@ -636,12 +888,295 @@ def _parse_design_checks(raw):
     return DesignCheckSettings(wood=_parse_wood_check_settings(raw.get("wood", {})))
 
 
+def _seismic_mass_entry_to_dict(entry: SeismicMassEntry):
+    out = {
+        "name": entry.name,
+        "mass_role": entry.mass_role,
+        "include_in_total_seismic_weight": entry.include_in_total_seismic_weight,
+        "include_in_alpha_denominator": entry.include_in_alpha_denominator,
+        "generate_diaphragm_load": entry.generate_diaphragm_load,
+    }
+    if entry.story:
+        out["story"] = entry.story
+    if entry.weight is not None:
+        out["weight"] = entry.weight
+    if entry.application_level:
+        out["application_level"] = entry.application_level
+    if entry.application_diaphragm is not None:
+        out["application_diaphragm"] = entry.application_diaphragm
+    return out
+
+
+def _parse_seismic_mass_entries(raw):
+    _require_type(raw, list, "project.load_conditions.seismic_masses")
+    entries = []
+    for idx, item in enumerate(raw):
+        path = "project.load_conditions.seismic_masses[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(
+            item,
+            [
+                "name",
+                "story",
+                "weight",
+                "mass_role",
+                "include_in_total_seismic_weight",
+                "include_in_alpha_denominator",
+                "generate_diaphragm_load",
+                "application_level",
+                "application_diaphragm",
+            ],
+            path,
+        )
+        name = _required_string(item, "name", path)
+        mass_role = _required_string(item, "mass_role", path)
+        if mass_role not in ALLOWED_MASS_ROLES:
+            raise ProjectSchemaError(path + ".mass_role is not supported: " + str(mass_role))
+
+        story = _optional_string(item, "story", path)
+        weight_raw = item.get("weight")
+        weight = None
+        if weight_raw is not None:
+            weight = _optional_number(item, "weight", path, default=0.0)
+            if weight < 0.0:
+                raise ProjectSchemaError(path + ".weight must be non-negative")
+
+        if mass_role == "BASE_MASS":
+            include_total = _optional_bool(
+                item, "include_in_total_seismic_weight", path, default=True
+            )
+            include_alpha = _optional_bool(
+                item, "include_in_alpha_denominator", path, default=True
+            )
+            generate_dlod = _optional_bool(item, "generate_diaphragm_load", path, default=False)
+            application_level = _optional_string(item, "application_level", path) or "base"
+            application_diaphragm = item.get("application_diaphragm")
+            if application_diaphragm is not None:
+                raise ProjectSchemaError(
+                    path + ": BASE_MASS must not specify application_diaphragm"
+                )
+        else:
+            include_total = _optional_bool(
+                item, "include_in_total_seismic_weight", path, default=True
+            )
+            include_alpha = _optional_bool(
+                item, "include_in_alpha_denominator", path, default=True
+            )
+            generate_dlod = _optional_bool(item, "generate_diaphragm_load", path, default=True)
+            application_level = _optional_string(item, "application_level", path)
+            application_diaphragm_raw = item.get("application_diaphragm")
+            if application_diaphragm_raw is None:
+                raise ProjectSchemaError("DIAPHRAGM_MASS には application_diaphragm が必要です。")
+            if type(application_diaphragm_raw) is not int:
+                raise ProjectSchemaError(path + ".application_diaphragm must be an integer")
+            application_diaphragm = application_diaphragm_raw
+
+        if story is None and weight is None:
+            raise ProjectSchemaError(path + ": story or weight is required")
+
+        entries.append(SeismicMassEntry(
+            name=name,
+            mass_role=mass_role,
+            story=story,
+            weight=weight,
+            include_in_total_seismic_weight=include_total,
+            include_in_alpha_denominator=include_alpha,
+            generate_diaphragm_load=generate_dlod,
+            application_level=application_level,
+            application_diaphragm=application_diaphragm,
+        ))
+    return entries
+
+
+def _parse_wind_load_settings(raw):
+    if not raw:
+        return WindLoadSettings()
+    _require_type(raw, dict, "project.load_conditions.wind")
+    _reject_unknown(raw, ["cases", "surfaces", "member_loads"], "project.load_conditions.wind")
+
+    cases_raw = raw.get("cases", [])
+    _require_type(cases_raw, list, "project.load_conditions.wind.cases")
+    cases = []
+    for idx, item in enumerate(cases_raw):
+        path = "project.load_conditions.wind.cases[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(
+            item,
+            [
+                "id", "name", "direction", "V0", "v0", "roughness_category",
+                "building_height_H", "Gf", "gf", "Cf_default", "cf_default",
+                "use_Kz", "use_kz", "pressure_mode",
+                "diaphragm_input_mode", "target_mode", "load_case",
+            ],
+            path,
+        )
+        v0 = item.get("V0", item.get("v0"))
+        if v0 is None:
+            raise ProjectSchemaError(path + ": V0 is required")
+        gf_raw = item.get("Gf", item.get("gf"))
+        gf = None if gf_raw is None else float(gf_raw)
+        cf_raw = item.get("Cf_default", item.get("cf_default", 1.0))
+        use_kz = bool(item.get("use_Kz", item.get("use_kz", False)))
+        pressure_mode = str(item.get("pressure_mode", DEFAULT_WIND_PRESSURE_MODE)).upper()
+        if pressure_mode not in ALLOWED_WIND_PRESSURE_MODES:
+            raise ProjectSchemaError(path + ".pressure_mode is invalid")
+        mode_raw = item.get("diaphragm_input_mode", item.get("target_mode", DEFAULT_WIND_DIAPHRAGM_INPUT_MODE))
+        try:
+            diaphragm_input_mode = normalize_diaphragm_input_mode(str(mode_raw).upper())
+        except ValueError as ex:
+            raise ProjectSchemaError(path + ".diaphragm_input_mode is invalid: " + str(ex)) from ex
+        load_case = item.get("load_case")
+        if load_case is None:
+            raise ProjectSchemaError(path + ": load_case is required")
+        bh_raw = item.get("building_height_H")
+        building_height_H = None if bh_raw is None else float(bh_raw)
+        cases.append(WindLoadCaseSettings(
+            case_id=int(_required_number(item, "id", path)),
+            name=_required_string(item, "name", path),
+            direction=normalize_wind_direction(_required_string(item, "direction", path)),
+            v0=float(v0),
+            roughness_category=normalize_roughness_category(
+                _required_string(item, "roughness_category", path)
+            ),
+            load_case=int(load_case),
+            building_height_H=building_height_H,
+            gf=gf,
+            cf_default=float(cf_raw),
+            use_kz=use_kz,
+            pressure_mode=pressure_mode,
+            diaphragm_input_mode=diaphragm_input_mode,
+        ))
+
+    surfaces_raw = raw.get("surfaces", [])
+    _require_type(surfaces_raw, list, "project.load_conditions.wind.surfaces")
+    surfaces = []
+    for idx, item in enumerate(surfaces_raw):
+        path = "project.load_conditions.wind.surfaces[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(
+            item,
+            [
+                "id", "name", "wind_case_id", "face_direction",
+                "z_bottom", "z_top", "width", "Cf", "cf",
+                "surface_role", "force_eccentricity_m",
+                "load_transfer_mode", "target_diaphragms", "target_members",
+            ],
+            path,
+        )
+        cf_raw = item.get("Cf", item.get("cf"))
+        role_raw = item.get("surface_role")
+        if role_raw is None and item.get("load_transfer_mode") == "MEMBER_TRANSFER":
+            role_raw = "SIDE"
+        try:
+            surface_role = normalize_wind_surface_role(
+                str(role_raw or DEFAULT_WIND_SURFACE_ROLE).upper()
+            )
+        except ValueError as ex:
+            raise ProjectSchemaError(path + ".surface_role is invalid: " + str(ex)) from ex
+        ecc_raw = item.get("force_eccentricity_m")
+        force_eccentricity_m = None if ecc_raw is None else float(ecc_raw)
+        surfaces.append(WindSurfaceSettings(
+            surface_id=int(_required_number(item, "id", path)),
+            name=_required_string(item, "name", path),
+            wind_case_id=int(_required_number(item, "wind_case_id", path)),
+            face_direction=normalize_wind_direction(_required_string(item, "face_direction", path)),
+            z_bottom=float(_required_number(item, "z_bottom", path)),
+            z_top=float(_required_number(item, "z_top", path)),
+            width=float(_required_number(item, "width", path)),
+            cf=None if cf_raw is None else float(cf_raw),
+            surface_role=surface_role,
+            force_eccentricity_m=force_eccentricity_m,
+        ))
+
+    member_raw = raw.get("member_loads", [])
+    _require_type(member_raw, list, "project.load_conditions.wind.member_loads")
+    member_loads = []
+    for idx, item in enumerate(member_raw):
+        path = "project.load_conditions.wind.member_loads[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(
+            item,
+            ["load_case", "member_id", "direction", "pressure", "tributary_width", "line_load", "note"],
+            path,
+        )
+        member_loads.append(WindMemberLoadPlaceholder(
+            load_case=int(_required_number(item, "load_case", path)),
+            member_id=int(_required_number(item, "member_id", path)),
+            direction=normalize_wind_direction(_required_string(item, "direction", path)),
+            pressure=float(_optional_number(item, "pressure", path, default=0.0)),
+            tributary_width=float(_optional_number(item, "tributary_width", path, default=0.0)),
+            line_load=float(_optional_number(item, "line_load", path, default=0.0)),
+            note=_optional_string(item, "note", path) or "",
+        ))
+
+    return WindLoadSettings(
+        cases=tuple(cases),
+        surfaces=tuple(surfaces),
+        member_loads=tuple(member_loads),
+    )
+
+
+def _wind_settings_to_dict(wind: WindLoadSettings):
+    if not wind.cases and not wind.surfaces and not wind.member_loads:
+        return {"cases": [], "surfaces": [], "member_loads": []}
+    return {
+        "cases": [
+            {
+                "id": c.case_id,
+                "name": c.name,
+                "direction": c.direction,
+                "V0": c.v0,
+                "roughness_category": c.roughness_category,
+                "load_case": c.load_case,
+                **({"building_height_H": c.building_height_H} if c.building_height_H is not None else {}),
+                **({"Gf": c.gf} if c.gf is not None else {}),
+                "Cf_default": c.cf_default,
+                **({"use_Kz": c.use_kz} if c.use_kz else {}),
+                "pressure_mode": c.pressure_mode,
+                "diaphragm_input_mode": c.diaphragm_input_mode,
+            }
+            for c in wind.cases
+        ],
+        "surfaces": [
+            {
+                "id": s.surface_id,
+                "name": s.name,
+                "wind_case_id": s.wind_case_id,
+                "face_direction": s.face_direction,
+                "z_bottom": s.z_bottom,
+                "z_top": s.z_top,
+                "width": s.width,
+                **({"Cf": s.cf} if s.cf is not None else {}),
+                **({"surface_role": s.surface_role}
+                   if s.surface_role != DEFAULT_WIND_SURFACE_ROLE else {}),
+                **({"force_eccentricity_m": s.force_eccentricity_m}
+                   if s.force_eccentricity_m is not None else {}),
+            }
+            for s in wind.surfaces
+        ],
+        "member_loads": [
+            {
+                "load_case": m.load_case,
+                "member_id": m.member_id,
+                "direction": m.direction,
+                "pressure": m.pressure,
+                "tributary_width": m.tributary_width,
+                "line_load": m.line_load,
+                "note": m.note,
+            }
+            for m in wind.member_loads
+        ],
+    }
+
+
 def _parse_load_conditions(raw):
     _require_type(raw, dict, "project.load_conditions")
-    _reject_unknown(raw, ["seismic", "diaphragms"], "project.load_conditions")
+    _reject_unknown(raw, ["seismic", "diaphragms", "seismic_masses", "wind"], "project.load_conditions")
     return LoadConditionSettings(
         seismic=_parse_seismic_load_settings(raw.get("seismic", {})),
         diaphragms=tuple(_parse_diaphragm_assignments(raw.get("diaphragms", []))),
+        seismic_masses=tuple(_parse_seismic_mass_entries(raw.get("seismic_masses", []))),
+        wind=_parse_wind_load_settings(raw.get("wind", {})),
     )
 
 
@@ -651,7 +1186,13 @@ def _parse_seismic_load_settings(raw):
         raw,
         [
             "ci",
+            "c0",
+            "z",
             "rt",
+            "design_period_s",
+            "height_m",
+            "steel_ratio_alpha",
+            "tc",
             "base_level",
             "base_elevation",
             "base_mass_policy",
@@ -696,9 +1237,39 @@ def _parse_seismic_load_settings(raw):
             raise ProjectSchemaError("project.load_conditions.seismic.dead_load_lc must be an integer or null")
         dead_lc = dead_lc_raw
 
-    rt = _optional_number(raw, "rt", "project.load_conditions.seismic", default=DEFAULT_SEISMIC_RT)
-    if rt <= 0.0:
-        raise ProjectSchemaError("project.load_conditions.seismic.rt must be positive")
+    rt_raw = raw.get("rt")
+    rt = None
+    if rt_raw is not None:
+        rt = _optional_number(raw, "rt", "project.load_conditions.seismic", default=DEFAULT_SEISMIC_RT)
+        if rt <= 0.0:
+            raise ProjectSchemaError("project.load_conditions.seismic.rt must be positive")
+
+    design_period_raw = raw.get("design_period_s")
+    design_period_s = None
+    if design_period_raw is not None:
+        design_period_s = _optional_number(raw, "design_period_s", "project.load_conditions.seismic", default=0.0)
+        if design_period_s <= 0.0:
+            raise ProjectSchemaError("project.load_conditions.seismic.design_period_s must be positive")
+
+    height_raw = raw.get("height_m")
+    height_m = None
+    if height_raw is not None:
+        height_m = _optional_number(raw, "height_m", "project.load_conditions.seismic", default=0.0)
+        if height_m < 0.0:
+            raise ProjectSchemaError("project.load_conditions.seismic.height_m must be non-negative")
+
+    steel_ratio_alpha = _optional_number(
+        raw,
+        "steel_ratio_alpha",
+        "project.load_conditions.seismic",
+        default=DEFAULT_SEISMIC_STEEL_RATIO_ALPHA,
+    )
+    if steel_ratio_alpha < 0.0 or steel_ratio_alpha > 1.0:
+        raise ProjectSchemaError("project.load_conditions.seismic.steel_ratio_alpha must be within [0,1]")
+
+    tc = _optional_number(raw, "tc", "project.load_conditions.seismic", default=DEFAULT_SEISMIC_TC)
+    if tc <= 0.0:
+        raise ProjectSchemaError("project.load_conditions.seismic.tc must be positive")
 
     base_level = _optional_string(raw, "base_level", "project.load_conditions.seismic")
     base_elevation_raw = raw.get("base_elevation")
@@ -720,9 +1291,33 @@ def _parse_seismic_load_settings(raw):
             + str(base_mass_policy)
         )
 
+    c0_raw = raw.get("c0")
+    c0 = None
+    if c0_raw is not None:
+        c0 = _optional_number(raw, "c0", "project.load_conditions.seismic", default=0.0)
+        if c0 <= 0.0:
+            raise ProjectSchemaError("project.load_conditions.seismic.c0 must be positive")
+
+    z_raw = raw.get("z")
+    z = None
+    if z_raw is not None:
+        z = _optional_number(raw, "z", "project.load_conditions.seismic", default=1.0)
+        if z <= 0.0:
+            raise ProjectSchemaError("project.load_conditions.seismic.z must be positive")
+
+    ci = _optional_number(raw, "ci", "project.load_conditions.seismic", default=0.0)
+    if c0 is None and ci <= 0.0:
+        raise ProjectSchemaError("project.load_conditions.seismic.c0 or ci must be positive")
+
     return SeismicLoadSettings(
-        ci=_optional_number(raw, "ci", "project.load_conditions.seismic", default=0.0),
+        ci=ci,
+        c0=c0,
+        z=z,
         rt=rt,
+        design_period_s=design_period_s,
+        height_m=height_m,
+        steel_ratio_alpha=steel_ratio_alpha,
+        tc=tc,
         base_level=base_level,
         base_elevation=base_elevation,
         base_mass_policy=base_mass_policy,

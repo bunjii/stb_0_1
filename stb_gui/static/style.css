@@ -660,6 +660,39 @@ select.context-menu-input {
   font-size: 12px;
 }
 
+.pick-cons-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.15rem 0.35rem;
+  margin-bottom: 0.45rem;
+}
+
+.pick-cons-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+}
+
+.btn-inline {
+  flex: 1 1 auto;
+  min-width: 4.5rem;
+  padding: 0.25rem 0.45rem;
+  font-size: 11px;
+}
+
+.context-menu-cons-grid {
+  margin: 0.25rem 0 0.35rem;
+}
+
+.context-menu-check {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 11px;
+  color: #ccc;
+}
+
 .panel-row {
   display: grid;
   grid-template-columns: 5.5rem 1fr auto;

@@ -97,6 +97,48 @@ class TestProjectSchema(unittest.TestCase):
             "LUMP_TO_ABOVE_DIAPHRAGM",
         )
 
+    def test_seismic_masses_base_and_diaphragm_roles(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {"ci": 0.2, "base_level": "1"},
+            "seismic_masses": [
+                {
+                    "name": "1F_floor",
+                    "story": "1",
+                    "mass_role": "BASE_MASS",
+                    "application_level": "base",
+                },
+                {
+                    "name": "2F_floor",
+                    "story": "2",
+                    "mass_role": "DIAPHRAGM_MASS",
+                    "application_diaphragm": 10,
+                },
+            ],
+        }
+        project = validate_project_dict(data)
+        masses = project.load_conditions.seismic_masses
+        self.assertEqual(len(masses), 2)
+        self.assertEqual(masses[0].mass_role, "BASE_MASS")
+        self.assertFalse(masses[0].generate_diaphragm_load)
+        self.assertEqual(masses[1].application_diaphragm, 10)
+
+    def test_seismic_masses_diaphragm_requires_application_diaphragm(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {"ci": 0.2},
+            "seismic_masses": [
+                {
+                    "name": "2F_floor",
+                    "story": "2",
+                    "mass_role": "DIAPHRAGM_MASS",
+                },
+            ],
+        }
+        with self.assertRaises(ProjectSchemaError) as ctx:
+            validate_project_dict(data)
+        self.assertIn("application_diaphragm", str(ctx.exception))
+
     def test_seismic_rt_round_trip(self):
         data = _minimal_project()
         data["load_conditions"] = {"seismic": {"ci": 0.2, "rt": 0.85}}
@@ -104,6 +146,24 @@ class TestProjectSchema(unittest.TestCase):
         self.assertAlmostEqual(project.load_conditions.seismic.rt, 0.85)
         reparsed = validate_project_dict(project.to_dict())
         self.assertAlmostEqual(reparsed.load_conditions.seismic.rt, 0.85)
+
+    def test_seismic_non_modal_inputs_round_trip(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "ci": 0.2,
+                "design_period_s": 0.42,
+                "height_m": 8.6,
+                "steel_ratio_alpha": 0.25,
+                "tc": 0.6,
+            }
+        }
+        project = validate_project_dict(data)
+        s = project.load_conditions.seismic
+        self.assertAlmostEqual(s.design_period_s, 0.42)
+        self.assertAlmostEqual(s.height_m, 8.6)
+        self.assertAlmostEqual(s.steel_ratio_alpha, 0.25)
+        self.assertAlmostEqual(s.tc, 0.6)
 
     def test_to_dict_round_trip(self):
         project = validate_project_dict(_minimal_project())

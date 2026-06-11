@@ -824,7 +824,7 @@ def RegisterResultData(_mdl: Mdl):
 
     ## reaction forces
     lns += "# --- REACTION FORCE ---\n"
-    lns += "#        LC,  NODE,        RX,        RY,        RZ,       RMX,       RMY,       RMZ\n"
+    lns += "#        LC,  NODE,        TX,        TY,        TZ,        RX,        RY,        RZ\n"
     lns += "#                         (kN)       (kN)       (kN)      (kNm)      (kNm)      (kNm)\n"
     
     for i in range(len(_mdl.lcs)): 

@@ -121,6 +121,7 @@ const el = {
   btnSolve: document.getElementById("btnSolve"),
   btnInput: document.getElementById("btnInput"),
   btnProject: document.getElementById("btnProject"),
+  btnLoads: document.getElementById("btnLoads"),
   btnOutput: document.getElementById("btnOutput"),
   lcSelect: document.getElementById("lcSelect"),
   defFactor: document.getElementById("defFactor"),
@@ -180,6 +181,24 @@ const el = {
   pickWrwCreateModel: document.getElementById("pickWrwCreateModel"),
   pickWrwEditOptions: document.getElementById("pickWrwEditOptions"),
   pickWrwEditModel: document.getElementById("pickWrwEditModel"),
+  pickNodeSupportOptions: document.getElementById("pickNodeSupportOptions"),
+  pickConsTx: document.getElementById("pickConsTx"),
+  pickConsTy: document.getElementById("pickConsTy"),
+  pickConsTz: document.getElementById("pickConsTz"),
+  pickConsRx: document.getElementById("pickConsRx"),
+  pickConsRy: document.getElementById("pickConsRy"),
+  pickConsRz: document.getElementById("pickConsRz"),
+  btnPickConsFixed: document.getElementById("btnPickConsFixed"),
+  btnPickConsPinned: document.getElementById("btnPickConsPinned"),
+  btnPickConsFree: document.getElementById("btnPickConsFree"),
+  btnPickConsApply: document.getElementById("btnPickConsApply"),
+  contextMenuNodeSupport: document.getElementById("contextMenuNodeSupport"),
+  contextMenuConsTx: document.getElementById("contextMenuConsTx"),
+  contextMenuConsTy: document.getElementById("contextMenuConsTy"),
+  contextMenuConsTz: document.getElementById("contextMenuConsTz"),
+  contextMenuConsRx: document.getElementById("contextMenuConsRx"),
+  contextMenuConsRy: document.getElementById("contextMenuConsRy"),
+  contextMenuConsRz: document.getElementById("contextMenuConsRz"),
   btnPickWrwApplyModel: document.getElementById("btnPickWrwApplyModel"),
   elemContextMenu: document.getElementById("elemContextMenu"),
   contextMenuTitle: document.getElementById("contextMenuTitle"),
@@ -386,6 +405,18 @@ function parseReactionsFromResultsText(text) {
   return out;
 }
 
+function reactionRecordToArray(r) {
+  if (r == null) return null;
+  if (Array.isArray(r)) return r;
+  if ("mx" in r || "my" in r || "mz" in r) {
+    return [r.rx || 0, r.ry || 0, r.rz || 0, r.mx || 0, r.my || 0, r.mz || 0];
+  }
+  if ("tx" in r || "ty" in r || "tz" in r) {
+    return [r.tx || 0, r.ty || 0, r.tz || 0, r.rx || 0, r.ry || 0, r.rz || 0];
+  }
+  return [r.rx || 0, r.ry || 0, r.rz || 0, 0, 0, 0];
+}
+
 function enrichModelReactions(model) {
   if (!model) return model;
   if (!model.supports) model.supports = [];
@@ -399,7 +430,7 @@ function enrichModelReactions(model) {
     if (!s.reacts) s.reacts = {};
     const lcKey = String(r.lc);
     if (!s.reacts[lcKey]) {
-      s.reacts[lcKey] = [r.rx, r.ry, r.rz, r.mx, r.my, r.mz];
+      s.reacts[lcKey] = reactionRecordToArray(r);
     }
   }
 
@@ -1694,13 +1725,13 @@ function wwllModelCodeFromWall(w) {
 
 function wwllModelLabelFromWall(w) {
   const code = wwllModelCodeFromWall(w);
-  if (code === 0) return "ブレース";
-  if (code === 1) return "せん断ばね";
+  if (code === 0) return "Brace";
+  if (code === 1) return "Shear panel";
   return "?";
 }
 
 function wwllModelLabelFromCode(model) {
-  return parseInt(model, 10) === 0 ? "ブレース" : "せん断ばね";
+  return parseInt(model, 10) === 0 ? "Brace" : "Shear panel";
 }
 
 function commonWrwModel() {
@@ -1740,6 +1771,87 @@ function loadPickWrwCreateModel() {
   }
 }
 
+const CONS_DOF_KEYS = ["tx", "ty", "tz", "rx", "ry", "rz"];
+const CONS_PRESET_FIXED = [true, true, true, true, true, true];
+const CONS_PRESET_PINNED = [true, true, true, false, false, false];
+const CONS_PRESET_FREE = [false, false, false, false, false, false];
+
+function consCheckboxElements(prefix) {
+  const cap = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  return CONS_DOF_KEYS.map(function (key) {
+    const id = key.charAt(0).toUpperCase() + key.slice(1);
+    return el[prefix + "Cons" + id] || el["contextMenuCons" + id];
+  });
+}
+
+function readConsFixedFromCheckboxes(boxes) {
+  return boxes.map(function (input) { return !!(input && input.checked); });
+}
+
+function writeConsFixedToCheckboxes(boxes, fixed, indeterminate) {
+  for (let i = 0; i < boxes.length; i++) {
+    const input = boxes[i];
+    if (!input) continue;
+    if (indeterminate || fixed == null) {
+      input.checked = false;
+      input.indeterminate = true;
+      continue;
+    }
+    input.indeterminate = false;
+    input.checked = !!fixed[i];
+  }
+}
+
+function syncConsCheckboxGroups(fixed, indeterminate) {
+  writeConsFixedToCheckboxes(consCheckboxElements("pick"), fixed, indeterminate);
+  writeConsFixedToCheckboxes(consCheckboxElements("contextMenu"), fixed, indeterminate);
+}
+
+function commonNodeSupportFixed() {
+  if (!currentModel || selectedNodeIds.size === 0) return null;
+  const byNode = {};
+  for (const s of currentModel.supports || []) byNode[s.node] = s.fixed;
+  let ref = null;
+  for (const id of selectedNodeIds) {
+    const raw = byNode[id];
+    const fixed = raw && raw.length === 6
+      ? raw.map(function (v) { return !!v; })
+      : CONS_PRESET_FREE.slice();
+    if (ref == null) {
+      ref = fixed;
+      continue;
+    }
+    for (let i = 0; i < 6; i++) {
+      if (fixed[i] !== ref[i]) return null;
+    }
+  }
+  return ref;
+}
+
+function consFixedSummary(fixed) {
+  const labels = ["TX", "TY", "TZ", "RX", "RY", "RZ"];
+  const active = [];
+  for (let i = 0; i < labels.length; i++) {
+    if (fixed[i]) active.push(labels[i]);
+  }
+  return active.length ? active.join(", ") : "free (no CONS)";
+}
+
+function applyConsPreset(preset) {
+  syncConsCheckboxGroups(preset, false);
+}
+
+function applyConsChange(fixed) {
+  if (selectedNodeIds.size === 0) return;
+  const count = selectedNodeIds.size;
+  const summary = consFixedSummary(fixed);
+  const ok = window.confirm(
+    "Set support (" + summary + ") for " + count + " node" + (count === 1 ? "" : "s") + "?"
+  );
+  if (!ok) return;
+  applyModelEdit({ action: "set_cons", fixed: fixed });
+}
+
 function updatePickWrwOptions() {
   if (el.pickWrwCreateOptions) {
     const showCreate = selectedNodeIds.size === 4
@@ -1755,6 +1867,16 @@ function updatePickWrwOptions() {
     if (showEdit && el.pickWrwEditModel) {
       const m = commonWrwModel();
       el.pickWrwEditModel.value = m == null ? "1" : String(m);
+    }
+  }
+  if (el.pickNodeSupportOptions) {
+    const showSupport = selectedNodeIds.size > 0
+      && selectedElementIds.size === 0 && selectedDmemIds.size === 0
+      && selectedWrwIds.size === 0;
+    el.pickNodeSupportOptions.hidden = !showSupport;
+    if (showSupport) {
+      const fixed = commonNodeSupportFixed();
+      syncConsCheckboxGroups(fixed, fixed == null);
     }
   }
 }
@@ -1891,6 +2013,14 @@ function showContextMenu(clientX, clientY) {
   }
   if (el.contextMenuDeleteNodes) {
     el.contextMenuDeleteNodes.hidden = nodeCount === 0;
+  }
+  if (el.contextMenuNodeSupport) {
+    const showSupport = nodeCount > 0 && elemCount === 0 && dmemCount === 0 && wrwCount === 0;
+    el.contextMenuNodeSupport.hidden = !showSupport;
+    if (showSupport) {
+      const fixed = commonNodeSupportFixed();
+      syncConsCheckboxGroups(fixed, fixed == null);
+    }
   }
   if (el.contextMenuDeleteDmem) {
     el.contextMenuDeleteDmem.hidden = dmemCount === 0;
@@ -2177,6 +2307,15 @@ async function applyModelEdit(extra) {
       diap_ids: diapIds,
       multiplier: extra.multiplier,
     };
+  } else if (extra.action === "set_cons") {
+    if (selectedNodeIds.size === 0) return;
+    const fixed = extra.fixed;
+    if (!fixed || fixed.length !== 6) return;
+    payload = {
+      action: "set_cons",
+      node_ids: selectedNodeIdList(),
+      fixed: fixed.map(function (v) { return !!v; }),
+    };
   } else {
     if (selectedElementIds.size === 0) return;
     payload = Object.assign({ element_ids: selectedElementIdList() }, extra);
@@ -2374,6 +2513,22 @@ function initContextMenu() {
       openEjntEditor();
       return;
     }
+    if (action === "cons-preset-fixed") {
+      applyConsPreset(CONS_PRESET_FIXED);
+      return;
+    }
+    if (action === "cons-preset-pinned") {
+      applyConsPreset(CONS_PRESET_PINNED);
+      return;
+    }
+    if (action === "cons-preset-free") {
+      applyConsPreset(CONS_PRESET_FREE);
+      return;
+    }
+    if (action === "set-cons") {
+      applyConsChange(readConsFixedFromCheckboxes(consCheckboxElements("contextMenu")));
+      return;
+    }
   });
 
   if (el.btnEjntEditApply) {
@@ -2405,6 +2560,34 @@ function initContextMenu() {
       applyWrwModelChange(raw);
     });
   }
+  if (el.btnPickConsFixed) {
+    el.btnPickConsFixed.addEventListener("click", function () {
+      applyConsPreset(CONS_PRESET_FIXED);
+    });
+  }
+  if (el.btnPickConsPinned) {
+    el.btnPickConsPinned.addEventListener("click", function () {
+      applyConsPreset(CONS_PRESET_PINNED);
+    });
+  }
+  if (el.btnPickConsFree) {
+    el.btnPickConsFree.addEventListener("click", function () {
+      applyConsPreset(CONS_PRESET_FREE);
+    });
+  }
+  if (el.btnPickConsApply) {
+    el.btnPickConsApply.addEventListener("click", function () {
+      applyConsChange(readConsFixedFromCheckboxes(consCheckboxElements("pick")));
+    });
+  }
+  consCheckboxElements("pick").forEach(function (input) {
+    if (!input) return;
+    input.addEventListener("change", function () {
+      input.indeterminate = false;
+      const fixed = readConsFixedFromCheckboxes(consCheckboxElements("pick"));
+      syncConsCheckboxGroups(fixed, false);
+    });
+  });
 
   document.addEventListener("mousedown", function (ev) {
     if (!el.elemContextMenu || el.elemContextMenu.hidden) return;
@@ -2505,6 +2688,27 @@ function updateViewerInfoOverlay(model) {
     "solved: " + boolOnOff(solved),
     "analysis date: " + (model.date_analysis || "-"),
     "LC: " + lc,
+  ];
+
+  if (solved) {
+    const reactTotals = computeReactionTotals(model, lc);
+    if (reactTotals) {
+      lines.push(
+        "ΣTx/Ty/Tz: "
+          + formatReactionValue(reactTotals.tx) + " / "
+          + formatReactionValue(reactTotals.ty) + " / "
+          + formatReactionValue(reactTotals.tz) + " kN",
+        "ΣRx/Ry/Rz: "
+          + formatReactionValue(reactTotals.rx) + " / "
+          + formatReactionValue(reactTotals.ry) + " / "
+          + formatReactionValue(reactTotals.rz) + " kNm"
+      );
+    } else {
+      lines.push("reactions: (none for this LC)");
+    }
+  }
+
+  lines.push(
     "nodes: " + (model.nodes ? model.nodes.length : 0),
     "elements: " + (model.elements ? model.elements.length : 0),
     "DMEM: " + (model.membrane_elements ? model.membrane_elements.length : 0),
@@ -2512,7 +2716,7 @@ function updateViewerInfoOverlay(model) {
     "supports: " + supports,
     "point loads: " + pointLoads,
     "element loads: " + elemLoads,
-  ];
+  );
 
   if (displayLines.length > 0) {
     lines.push(
@@ -4437,7 +4641,7 @@ function supportReactsForLc(model, s, lcKey) {
   }
   for (const r of model.reactions || []) {
     if (r.node === s.node && String(r.lc) === lcKey) {
-      return [r.rx, r.ry, r.rz, r.mx, r.my, r.mz];
+      return reactionRecordToArray(r);
     }
   }
   return null;
@@ -4449,6 +4653,24 @@ function modelHasReactionData(model, lcKey) {
     if (supportReactsForLc(model, s, lcKey)) return true;
   }
   return false;
+}
+
+function computeReactionTotals(model, lcKey) {
+  enrichModelReactions(model);
+  const totals = [0, 0, 0, 0, 0, 0];
+  let count = 0;
+  for (const s of model.supports || []) {
+    const r = supportReactsForLc(model, s, lcKey);
+    if (!r) continue;
+    count += 1;
+    for (let i = 0; i < 6; i++) totals[i] += r[i];
+  }
+  if (count === 0) return null;
+  return {
+    tx: totals[0], ty: totals[1], tz: totals[2],
+    rx: totals[3], ry: totals[4], rz: totals[5],
+    count: count,
+  };
 }
 
 function orientMeshAxisX(mesh, dir) {
@@ -4564,21 +4786,22 @@ function drawSupportReactions(model, opts) {
     const n = nm[s.node];
     if (!n) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
-    const fx = r[0], fy = r[1], fz = r[2];
-    const mx = r[3], my = r[4], mz = r[5];
+    const tx = r[0], ty = r[1], tz = r[2];
+    const rx = r[3], ry = r[4], rz = r[5];
 
     const forceAxes = [
       new THREE.Vector3(1, 0, 0),
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(0, 0, 1),
     ];
-    const forces = [fx, fy, fz];
+    const forces = [tx, ty, tz];
+    const forceLabels = ["Tx", "Ty", "Tz"];
     for (let i = 0; i < 3; i++) {
       const fval = forces[i];
       if (Math.abs(fval) < 1e-9) continue;
       const dir = forceAxes[i].clone().multiplyScalar(fval >= 0 ? 1 : -1);
       addOrientedReactionLabel(
-        formatReactionValue(fval),
+        forceLabels[i] + " " + formatReactionValue(fval),
         p,
         dir,
         span,
@@ -4594,13 +4817,14 @@ function drawSupportReactions(model, opts) {
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(0, 0, 1),
     ];
-    const moments = [mx, my, mz];
+    const moments = [rx, ry, rz];
+    const momentLabels = ["Rx", "Ry", "Rz"];
     for (let i = 0; i < 3; i++) {
       const mval = moments[i];
       if (Math.abs(mval) < 1e-9) continue;
       const axisDir = momentAxes[i].clone().multiplyScalar(mval >= 0 ? 1 : -1);
       addOrientedReactionLabel(
-        formatReactionValue(mval),
+        momentLabels[i] + " " + formatReactionValue(mval),
         p,
         axisDir,
         span,
@@ -5170,7 +5394,7 @@ function guiApiUrl(path, targetWindow) {
   const rel = path.startsWith("/") ? path : "/" + path;
   const origin = guiApiOrigin(targetWindow);
   if (!origin || origin === "null") {
-    throw new Error("GUI API の接続先を特定できません。メイン画面を再読み込みしてください。");
+    throw new Error("Cannot resolve GUI API origin. Reload the main window.");
   }
   return origin + rel;
 }
@@ -5227,7 +5451,7 @@ async function fetchApiJson(path, targetWindow, options) {
   try {
     res = await fetch(url, options);
   } catch (ex) {
-    throw new Error("API 接続に失敗しました (" + url + "): " + ex.message);
+    throw new Error("API request failed (" + url + "): " + ex.message);
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -5246,7 +5470,7 @@ async function fetchApiText(path, targetWindow) {
   try {
     res = await fetch(url);
   } catch (ex) {
-    throw new Error("API 接続に失敗しました (" + url + "): " + ex.message);
+    throw new Error("API request failed (" + url + "): " + ex.message);
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -5350,7 +5574,12 @@ function parseProjectFieldValue(type, raw, path) {
   }
   if (type === "number") {
     if (!text) {
-      if (path === "load_conditions.seismic.rt") {
+      if (
+        path === "load_conditions.seismic.rt"
+        || path === "load_conditions.seismic.design_period_s"
+        || path === "load_conditions.seismic.height_m"
+        || path === "load_conditions.seismic.base_elevation"
+      ) {
         return undefined;
       }
       return 0;
@@ -5441,6 +5670,18 @@ function normalizeSeismicSettings(project) {
   }
   if (seismic.base_elevation === "" || seismic.base_elevation == null) {
     delete seismic.base_elevation;
+  }
+  if (seismic.design_period_s === "" || seismic.design_period_s == null) {
+    delete seismic.design_period_s;
+  }
+  if (seismic.height_m === "" || seismic.height_m == null) {
+    delete seismic.height_m;
+  }
+  if (seismic.steel_ratio_alpha === "" || seismic.steel_ratio_alpha == null) {
+    delete seismic.steel_ratio_alpha;
+  }
+  if (seismic.tc === "" || seismic.tc == null) {
+    delete seismic.tc;
   }
 }
 
@@ -5640,6 +5881,12 @@ function populateFormFromProject(formRoot, editForm, project) {
     if (path === "load_conditions.seismic.rt" && (cur == null || cur === "")) {
       cur = DEFAULT_SEISMIC_RT;
     }
+    if (path === "load_conditions.seismic.tc" && (cur == null || cur === "")) {
+      cur = 0.6;
+    }
+    if (path === "load_conditions.seismic.steel_ratio_alpha" && (cur == null || cur === "")) {
+      cur = 0.0;
+    }
     input.value = formatProjectFieldValue(type, cur);
   }
 
@@ -5722,6 +5969,7 @@ function initProjectEditorWindow(w, view, title) {
   doc.write("<div class=\"toolbar\">");
   doc.write("<button type=\"button\" id=\"btnSave\">保存</button>");
   doc.write("<button type=\"button\" id=\"btnReload\" class=\"secondary\">再読込</button>");
+  doc.write("<button type=\"button\" id=\"btnWind4Dir\" class=\"secondary\">風4方向を生成 (WX±/WY±)</button>");
   doc.write("<span class=\"status\" id=\"status\">ready</span>");
   doc.write("<span class=\"path\">");
   doc.write(escapeHtml(view.project_path || ""));
@@ -5773,6 +6021,67 @@ function initProjectEditorWindow(w, view, title) {
         tbody.insertAdjacentHTML("beforeend", renderProjectEditTableRowHtml(section.table.columns, {}, sectionIndex, rowIndex));
       });
     });
+  }
+
+  function computeStoryTop(project) {
+    const stories = Array.isArray(project && project.stories) ? project.stories : [];
+    if (!stories.length) return 9.045;
+    let zTop = 0;
+    for (const s of stories) {
+      const elev = Number(s && s.elevation);
+      const h = Number(s && s.height);
+      if (!Number.isFinite(elev) || !Number.isFinite(h)) continue;
+      zTop = Math.max(zTop, elev + h);
+    }
+    return zTop > 0 ? zTop : 9.045;
+  }
+
+  function pickWidthFromSurfaces(surfaces, axis, fallback) {
+    if (!Array.isArray(surfaces)) return fallback;
+    const dirs = axis === "x" ? ["X_PLUS", "X_MINUS"] : ["Y_PLUS", "Y_MINUS"];
+    const hit = surfaces.find((s) => dirs.includes(String(s && s.face_direction || "").toUpperCase()) && Number.isFinite(Number(s.width)));
+    if (!hit) return fallback;
+    const w = Number(hit.width);
+    return w > 0 ? w : fallback;
+  }
+
+  function buildWind4Dir(project) {
+    const loadConditions = project.load_conditions || (project.load_conditions = {});
+    const wind = loadConditions.wind || (loadConditions.wind = {});
+    const oldCases = Array.isArray(wind.cases) ? wind.cases : [];
+    const oldSurfaces = Array.isArray(wind.surfaces) ? wind.surfaces : [];
+    const memberLoads = Array.isArray(wind.member_loads) ? wind.member_loads : [];
+
+    const baseCase = oldCases[0] || {};
+    const v0 = Number.isFinite(Number(baseCase.V0)) ? Number(baseCase.V0) : 34.0;
+    const roughness = String(baseCase.roughness_category || "III");
+    const gf = Number.isFinite(Number(baseCase.Gf)) ? Number(baseCase.Gf) : 2.5;
+    const pressureMode = String(baseCase.pressure_mode || "STORY_HEIGHT_KZ");
+    const useKz = baseCase.use_Kz == null ? true : !!baseCase.use_Kz;
+    const inputMode = String(baseCase.diaphragm_input_mode || "DIAPHRAGM_UNIFORM");
+    const zTop = computeStoryTop(project);
+    const xWidth = pickWidthFromSurfaces(oldSurfaces, "x", 5.46);
+    const yWidth = pickWidthFromSurfaces(oldSurfaces, "y", 8.0);
+
+    wind.cases = [
+      { id: 1, name: "WX+", direction: "X_PLUS", load_case: 4, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+      { id: 2, name: "WX-", direction: "X_MINUS", load_case: 5, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+      { id: 3, name: "WY+", direction: "Y_PLUS", load_case: 6, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+      { id: 4, name: "WY-", direction: "Y_MINUS", load_case: 7, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+    ];
+
+    wind.surfaces = [
+      { id: 1, name: "X_plus_windward_wall", wind_case_id: 1, face_direction: "X_PLUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: 0.8 },
+      { id: 2, name: "X_plus_leeward_wall", wind_case_id: 1, face_direction: "X_MINUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: -0.4 },
+      { id: 3, name: "X_minus_windward_wall", wind_case_id: 2, face_direction: "X_MINUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: 0.8 },
+      { id: 4, name: "X_minus_leeward_wall", wind_case_id: 2, face_direction: "X_PLUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: -0.4 },
+      { id: 5, name: "Y_plus_windward_wall", wind_case_id: 3, face_direction: "Y_PLUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: 0.8 },
+      { id: 6, name: "Y_plus_leeward_wall", wind_case_id: 3, face_direction: "Y_MINUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: -0.4 },
+      { id: 7, name: "Y_minus_windward_wall", wind_case_id: 4, face_direction: "Y_MINUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: 0.8 },
+      { id: 8, name: "Y_minus_leeward_wall", wind_case_id: 4, face_direction: "Y_PLUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: -0.4 },
+    ];
+    wind.member_loads = memberLoads;
+    return project;
   }
 
   if (!tabForm.dataset.boundDelete) {
@@ -5893,6 +6202,25 @@ function initProjectEditorWindow(w, view, title) {
       alert("再読込に失敗しました: " + ex.message);
     }
   });
+
+  doc.getElementById("btnWind4Dir").addEventListener("click", () => {
+    if (!view.found || !baseProject || !editForm) {
+      alert("project.json が存在しないため実行できません。");
+      return;
+    }
+    try {
+      const current = getProjectForSave();
+      const updated = normalizeProjectPayload(buildWind4Dir(current));
+      baseProject = deepCloneJson(updated);
+      renderFormTab();
+      jsonEditor.value = JSON.stringify(baseProject, null, 2);
+      populateFormFromProject(tabForm, editForm, baseProject);
+      setWinStatus("wind 4-direction generated");
+    } catch (ex) {
+      setWinStatus("generate failed");
+      alert("4方向生成に失敗しました: " + ex.message);
+    }
+  });
 }
 
 async function openProjectWindow() {
@@ -5908,6 +6236,34 @@ async function openProjectWindow() {
     setStatus("Error: " + ex.message);
   }
 }
+
+function openLoadsVerifyWindow() {
+  const path = getCurrentModelPath();
+  if (!path) {
+    setStatus("Open a model before using Loads…");
+    return;
+  }
+  let url;
+  try {
+    url = guiApiUrl(
+      "/static/loads_verify.html?path=" + encodeURIComponent(path),
+      window
+    );
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+    return;
+  }
+  const w = window.open(url, "stb_loads_verify", "width=1040,height=860,scrollbars=yes,resizable=yes");
+  primeStbPopupOrigin(w);
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  setStatus(path + " — load verification opened");
+}
+
+window.openProjectWindow = openProjectWindow;
+window.reloadCurrentModel = () => loadSelectedModel(false);
 
 function showTextDocumentWindow(text, title) {
   const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
@@ -6391,6 +6747,7 @@ if (el.btnClearSelection) {
 
 el.btnInput.addEventListener("click", () => openInputWindow());
 el.btnProject.addEventListener("click", () => openProjectWindow());
+el.btnLoads.addEventListener("click", () => openLoadsVerifyWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
