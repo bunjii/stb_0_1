@@ -175,3 +175,262 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
 
     parts.extend(["", "## 7. 注意", "", "> " + WIND_NOTICE, ""])
     return "\n".join(parts)
+
+
+_FACE_TO_WALL_SIDE = {
+    "X_PLUS": "x_max",
+    "X_MINUS": "x_min",
+    "Y_PLUS": "y_max",
+    "Y_MINUS": "y_min",
+}
+
+_WIND_FLOW = {
+    "X_PLUS": {"ux": -1.0, "uy": 0.0},
+    "X_MINUS": {"ux": 1.0, "uy": 0.0},
+    "Y_PLUS": {"ux": 0.0, "uy": -1.0},
+    "Y_MINUS": {"ux": 0.0, "uy": 1.0},
+}
+
+_DIRECTION_LABEL = {
+    "X_PLUS": "WX+",
+    "X_MINUS": "WX-",
+    "Y_PLUS": "WY+",
+    "Y_MINUS": "WY-",
+}
+
+
+def _direction_label(direction: str) -> str:
+    return _DIRECTION_LABEL.get(direction, direction)
+
+
+def build_wind_summary_rows(result: WindDistributionResult):
+    rows = []
+    if not result.cases:
+        rows.append({"label": "風荷重ケース", "value": "—", "unit": "", "note": "未設定"})
+        return rows
+    for c in result.cases:
+        rows.append({
+            "label": c.name,
+            "value": _direction_label(c.direction),
+            "unit": "",
+            "note": "LC{0} · V0={1} m/s · q={2} N/m²".format(
+                c.load_case, _fmt(c.v0, 1), _fmt(c.q_N_m2, 1),
+            ),
+        })
+    total_f = sum(sf.f_story_kN for sf in result.story_forces)
+    rows.append({
+        "label": "ΣF_story（全ケース・全階）",
+        "value": _fmt(total_f, 3),
+        "unit": "kN",
+        "note": "",
+    })
+    rows.append({
+        "label": "DLOD 出力",
+        "value": str(len(result.diaphragm_loads)),
+        "unit": "件",
+        "note": result.cases[0].diaphragm_input_mode if result.cases else "",
+    })
+    return rows
+
+
+def build_wind_surface_rows(result: WindDistributionResult):
+    rows = []
+    case_names = {c.case_id: c.name for c in result.cases}
+    force_by_surface: dict = {}
+    for sc in result.surface_contributions:
+        key = sc.surface_id
+        force_by_surface[key] = force_by_surface.get(key, 0.0) + sc.force_kN
+    for s in result.surfaces:
+        rows.append({
+            "surface_id": s.surface_id,
+            "name": s.name,
+            "wind_case": case_names.get(s.wind_case_id, str(s.wind_case_id)),
+            "surface_role": s.surface_role,
+            "face_direction": s.face_direction,
+            "direction_label": _direction_label(s.face_direction),
+            "z_bottom": s.z_bottom,
+            "z_top": s.z_top,
+            "width": s.width,
+            "gross_area_m2": s.gross_area_m2,
+            "cf": s.cf,
+            "total_force_kN": force_by_surface.get(s.surface_id, 0.0),
+            "wall_side": _FACE_TO_WALL_SIDE.get(s.face_direction, ""),
+        })
+    return rows
+
+
+def build_wind_story_force_rows(result: WindDistributionResult):
+    case_names = {c.case_id: c.name for c in result.cases}
+    rows = []
+    for sf in result.story_forces:
+        rows.append({
+            "wind_case_id": sf.wind_case_id,
+            "wind_case": case_names.get(sf.wind_case_id, str(sf.wind_case_id)),
+            "story": sf.story,
+            "z_bottom": sf.z_bottom,
+            "z_top": sf.z_top,
+            "windward_force_kN": sf.windward_force_kN,
+            "leeward_force_kN": sf.leeward_force_kN,
+            "f_story_kN": sf.f_story_kN,
+            "target_diaphragm_id": sf.target_diaphragm_id,
+            "output_to_dlod": sf.output_to_dlod,
+        })
+    return rows
+
+
+def build_wind_diaphragm_rows(result: WindDistributionResult):
+    rows = []
+    for dl in result.diaphragm_loads:
+        rows.append({
+            "load_case": dl.load_case,
+            "diaphragm_id": dl.diaphragm_id,
+            "story": dl.story,
+            "direction": _direction_label(dl.direction),
+            "axis": dl.axis,
+            "sign": dl.sign,
+            "load_level_m": dl.load_level_m,
+            "input_mode": dl.input_mode,
+            "f_story_kN": dl.f_story_kN,
+            "diaphragm_area_m2": dl.diaphragm_area_m2,
+            "area_load_kN_m2": dl.area_load_kN_m2,
+        })
+    return rows
+
+
+def _node_xy_bbox(mdl):
+    if mdl is None or not getattr(mdl, "nds", None):
+        return None
+    xs = [float(n.x) for n in mdl.nds]
+    ys = [float(n.y) for n in mdl.nds]
+    if not xs or not ys:
+        return None
+    return {
+        "x_min": min(xs),
+        "x_max": max(xs),
+        "y_min": min(ys),
+        "y_max": max(ys),
+    }
+
+
+def build_wind_visual_cases(mdl, result: WindDistributionResult):
+    bbox = _node_xy_bbox(mdl)
+    if bbox is None:
+        return {"bbox": None, "cases": []}
+
+    force_by_surface: dict = {}
+    for sc in result.surface_contributions:
+        force_by_surface[sc.surface_id] = force_by_surface.get(sc.surface_id, 0.0) + sc.force_kN
+
+    visual_cases = []
+    for case in result.cases:
+        flow = _WIND_FLOW.get(case.direction, {"ux": 0.0, "uy": 0.0})
+        surfaces = []
+        for s in result.surfaces:
+            if s.wind_case_id != case.case_id:
+                continue
+            surfaces.append({
+                "surface_id": s.surface_id,
+                "name": s.name,
+                "surface_role": s.surface_role,
+                "face_direction": s.face_direction,
+                "wall_side": _FACE_TO_WALL_SIDE.get(s.face_direction, ""),
+                "z_bottom": s.z_bottom,
+                "z_top": s.z_top,
+                "width": s.width,
+                "cf": s.cf,
+                "total_force_kN": force_by_surface.get(s.surface_id, 0.0),
+            })
+        story_forces = []
+        max_f = 0.0
+        for sf in result.story_forces:
+            if sf.wind_case_id != case.case_id:
+                continue
+            max_f = max(max_f, abs(sf.f_story_kN))
+            story_forces.append({
+                "story": sf.story,
+                "z_bottom": sf.z_bottom,
+                "z_top": sf.z_top,
+                "z_ref": sf.z_ref,
+                "f_story_kN": sf.f_story_kN,
+                "windward_force_kN": sf.windward_force_kN,
+                "leeward_force_kN": sf.leeward_force_kN,
+                "target_diaphragm_id": sf.target_diaphragm_id,
+                "output_to_dlod": sf.output_to_dlod,
+            })
+        diaphragm_loads = []
+        for dl in result.diaphragm_loads:
+            if dl.wind_case_id != case.case_id:
+                continue
+            diaphragm_loads.append({
+                "diaphragm_id": dl.diaphragm_id,
+                "story": dl.story,
+                "load_case": dl.load_case,
+                "f_story_kN": dl.f_story_kN,
+                "area_load_kN_m2": dl.area_load_kN_m2,
+                "load_level_m": dl.load_level_m,
+                "axis": dl.axis,
+                "sign": dl.sign,
+            })
+        visual_cases.append({
+            "wind_case_id": case.case_id,
+            "name": case.name,
+            "load_case": case.load_case,
+            "direction": case.direction,
+            "direction_label": _direction_label(case.direction),
+            "axis": case.axis,
+            "sign": case.sign,
+            "flow": flow,
+            "max_f_story_kN": max_f,
+            "surfaces": surfaces,
+            "story_forces": story_forces,
+            "diaphragm_loads": diaphragm_loads,
+        })
+
+    return {"bbox": bbox, "cases": visual_cases}
+
+
+def build_wind_report_checks(result: WindDistributionResult, report: dict):
+    checks = []
+    checks.append({
+        "label": "風荷重ケースが 1 件以上定義されている",
+        "ok": bool(result.cases),
+        "detail": "{0} 件".format(len(result.cases)),
+    })
+    checks.append({
+        "label": "受圧面が 1 件以上定義されている",
+        "ok": bool(result.surfaces),
+        "detail": "{0} 件".format(len(result.surfaces)),
+    })
+    dlod_count = len(report.get("diaphragm_rows") or [])
+    checks.append({
+        "label": "DLOD 等価入力が生成されている",
+        "ok": dlod_count > 0,
+        "detail": "{0} 件".format(dlod_count),
+    })
+    if report.get("equilibrium_rows"):
+        all_ok = all(r.get("equilibrium_ok") for r in report["equilibrium_rows"])
+        checks.append({
+            "label": "解析モデルでの荷重・反力釣合",
+            "ok": all_ok,
+            "detail": "OK" if all_ok else "NG あり",
+        })
+    return checks
+
+
+def build_wind_report_view(result: WindDistributionResult, project=None, mdl=None):
+    report = {
+        "summary": build_wind_summary_rows(result),
+        "surface_rows": build_wind_surface_rows(result),
+        "story_force_rows": build_wind_story_force_rows(result),
+        "diaphragm_rows": build_wind_diaphragm_rows(result),
+        "uniform_input_note": UNIFORM_INPUT_NOTE,
+        "report_notice": WIND_NOTICE,
+        "dlod_section_title": "DLOD 等価入力（DIAPHRAGM_UNIFORM）",
+        "visual": build_wind_visual_cases(mdl, result),
+    }
+    if mdl is not None:
+        report["equilibrium_rows"] = compute_wind_equilibrium(mdl, result)
+    else:
+        report["equilibrium_rows"] = []
+    report["checks"] = build_wind_report_checks(result, report)
+    return report

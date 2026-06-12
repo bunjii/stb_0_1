@@ -309,6 +309,8 @@ class TestGuiApi(unittest.TestCase):
         tab_ids = [t["id"] for t in body["tabs"]]
         self.assertIn("seismic", tab_ids)
         self.assertIn("wind", tab_ids)
+        wind_tab = next(t for t in body["tabs"] if t["id"] == "wind")
+        self.assertTrue(wind_tab["enabled"])
         labels = [row["label"] for row in body["summary"]]
         self.assertIn("C0 (標準せん断力係数)", labels)
         self.assertIn("Q1（基底せん断力）", labels)
@@ -317,6 +319,27 @@ class TestGuiApi(unittest.TestCase):
         row = body["mass_level_rows"][0]
         self.assertIn("ci", row)
         self.assertIn("dlod_label", row)
+
+    def test_api_loads_wind_view(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        r = self.client.get("/api/loads/wind", params={"path": path})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["kind"], "wind")
+        self.assertTrue(body["found"])
+        self.assertIn("visual", body)
+        self.assertIn("cases", body["visual"])
+        self.assertGreater(len(body["visual"]["cases"]), 0)
+        self.assertIn("bbox", body["visual"])
+        self.assertIn("surface_rows", body)
+        self.assertGreater(len(body["surface_rows"]), 0)
+        self.assertIn("story_force_rows", body)
+        self.assertGreater(len(body["story_force_rows"]), 0)
+        self.assertIn("diaphragm_rows", body)
+        self.assertGreater(len(body["diaphragm_rows"]), 0)
+        self.assertTrue(body["can_apply_dlod"])
 
     def test_api_project_save_seismic_rt_default(self):
         if self.client == None:

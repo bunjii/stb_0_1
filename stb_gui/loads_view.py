@@ -5,8 +5,14 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from stb_loads import compute_seismic_distribution, generate_dlod_records
+from stb_loads import (
+    compute_seismic_distribution,
+    compute_wind_distribution,
+    generate_dlod_records,
+    generate_wind_dlod_records,
+)
 from stb_loads.format import build_seismic_report_view
+from stb_loads.wind_format import build_wind_report_view
 from stb_gui.model_json import normalize_model_relpath, project_root, resolve_model_path
 from stb_project import load_project_for_dat, project_path_for_dat
 
@@ -16,8 +22,23 @@ LOAD_VERIFY_TABS = (
     {"id": "dead", "label": "固定荷重", "enabled": False},
     {"id": "live", "label": "積載荷重", "enabled": False},
     {"id": "snow", "label": "雪荷重", "enabled": False},
-    {"id": "wind", "label": "風荷重", "enabled": False},
+    {"id": "wind", "label": "風荷重", "enabled": True},
 )
+
+
+def _load_model_and_project(dat_relpath: str, mdl=None, project=None):
+    dat_relpath = normalize_model_relpath(dat_relpath)
+    full = resolve_model_path(dat_relpath)
+    if project is None:
+        project = load_project_for_dat(full, required=True)
+    if mdl is None:
+        from stb_engine import parse_input
+
+        with open(full, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        mdl = parse_input(lines)
+        mdl.filepath = full
+    return dat_relpath, full, mdl, project
 
 
 def build_seismic_loads_view(mdl, project, dat_relpath: str) -> Dict[str, Any]:
@@ -55,36 +76,51 @@ def build_seismic_loads_view(mdl, project, dat_relpath: str) -> Dict[str, Any]:
     }
 
 
-def load_seismic_view_for_model(dat_relpath: str, mdl=None, project=None) -> Dict[str, Any]:
+def build_wind_loads_view(mdl, project, dat_relpath: str) -> Dict[str, Any]:
     dat_relpath = normalize_model_relpath(dat_relpath)
     full = resolve_model_path(dat_relpath)
+    project_rel = os.path.relpath(project_path_for_dat(full), project_root()).replace("\\", "/")
 
-    if project is None:
-        project = load_project_for_dat(full, required=True)
+    result = compute_wind_distribution(mdl, project)
+    dloads = generate_wind_dlod_records(result)
+    report = build_wind_report_view(result, project, mdl=mdl)
 
-    if mdl is None:
-        from stb_engine import parse_input
+    return {
+        "kind": "wind",
+        "found": bool(result.cases),
+        "dat_path": dat_relpath,
+        "project_path": project_rel,
+        "title": "荷重・外力確認 — 風荷重",
+        "tabs": list(LOAD_VERIFY_TABS),
+        "active_tab": "wind",
+        "summary": report["summary"],
+        "surface_rows": report["surface_rows"],
+        "story_force_rows": report["story_force_rows"],
+        "diaphragm_rows": report["diaphragm_rows"],
+        "uniform_input_note": report["uniform_input_note"],
+        "report_notice": report["report_notice"],
+        "dlod_section_title": report["dlod_section_title"],
+        "visual": report["visual"],
+        "equilibrium_rows": report.get("equilibrium_rows") or [],
+        "checks": report.get("checks") or [],
+        "warnings": list(result.warnings),
+        "dlod_record_count": len(dloads),
+        "can_apply_dlod": len(dloads) > 0,
+    }
 
-        with open(full, encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-        mdl = parse_input(lines)
-        mdl.filepath = full
 
+def load_seismic_view_for_model(dat_relpath: str, mdl=None, project=None) -> Dict[str, Any]:
+    dat_relpath, _full, mdl, project = _load_model_and_project(dat_relpath, mdl, project)
     return build_seismic_loads_view(mdl, project, dat_relpath)
 
 
-def apply_seismic_dlod_for_model(dat_relpath: str, mdl=None, project=None) -> Dict[str, Any]:
-    dat_relpath = normalize_model_relpath(dat_relpath)
-    full = resolve_model_path(dat_relpath)
-    if project is None:
-        project = load_project_for_dat(full, required=True)
-    if mdl is None:
-        from stb_engine import parse_input
+def load_wind_view_for_model(dat_relpath: str, mdl=None, project=None) -> Dict[str, Any]:
+    dat_relpath, _full, mdl, project = _load_model_and_project(dat_relpath, mdl, project)
+    return build_wind_loads_view(mdl, project, dat_relpath)
 
-        with open(full, encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-        mdl = parse_input(lines)
-        mdl.filepath = full
+
+def apply_seismic_dlod_for_model(dat_relpath: str, mdl=None, project=None) -> Dict[str, Any]:
+    dat_relpath, full, mdl, project = _load_model_and_project(dat_relpath, mdl, project)
 
     result = compute_seismic_distribution(mdl, project)
     dloads = generate_dlod_records(result)
@@ -92,6 +128,20 @@ def apply_seismic_dlod_for_model(dat_relpath: str, mdl=None, project=None) -> Di
 
     apply_seismic_to_dat(full, dloads)
     view = build_seismic_loads_view(mdl, project, dat_relpath)
+    view["applied"] = True
+    view["dlod_record_count"] = len(dloads)
+    return view
+
+
+def apply_wind_dlod_for_model(dat_relpath: str, mdl=None, project=None) -> Dict[str, Any]:
+    dat_relpath, full, mdl, project = _load_model_and_project(dat_relpath, mdl, project)
+
+    result = compute_wind_distribution(mdl, project)
+    dloads = generate_wind_dlod_records(result)
+    from stb_loads import apply_wind_to_dat
+
+    apply_wind_to_dat(full, dloads)
+    view = build_wind_loads_view(mdl, project, dat_relpath)
     view["applied"] = True
     view["dlod_record_count"] = len(dloads)
     return view

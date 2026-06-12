@@ -8,7 +8,12 @@ from stb_gui.browser import open_gui_browser
 from stb_gui.dat_edit import apply_edit_action, validate_dat_text, ejnt_lines_for_elements
 from stb_gui.dat_format_headers import write_dat_text
 from stb_gui.input_format import EJNT_EDITOR_HEADER
-from stb_gui.loads_view import apply_seismic_dlod_for_model, load_seismic_view_for_model
+from stb_gui.loads_view import (
+    apply_seismic_dlod_for_model,
+    apply_wind_dlod_for_model,
+    load_seismic_view_for_model,
+    load_wind_view_for_model,
+)
 from stb_gui.project_view import load_project_view_for_model, save_project_json_for_model
 from stb_gui.model_json import (
     project_root,
@@ -244,6 +249,17 @@ def create_app(default_model=None, watch_client=False):
             raise HTTPException(status_code=400, detail=str(ex))
         return JSONResponse(data)
 
+    @app.get("/api/loads/wind")
+    def api_loads_wind(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+    ):
+        try:
+            resolve_model_path(path)
+            data = load_wind_view_for_model(path)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return JSONResponse(data)
+
     @app.post("/api/loads/seismic/apply")
     def api_loads_seismic_apply(
         path: str = Query(..., description="Relative path to .dat under project root"),
@@ -251,6 +267,19 @@ def create_app(default_model=None, watch_client=False):
         try:
             resolve_model_path(path)
             data = apply_seismic_dlod_for_model(path)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
+        return JSONResponse({"ok": True, "view": data})
+
+    @app.post("/api/loads/wind/apply")
+    def api_loads_wind_apply(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+    ):
+        try:
+            resolve_model_path(path)
+            data = apply_wind_dlod_for_model(path)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
