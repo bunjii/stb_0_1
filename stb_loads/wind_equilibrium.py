@@ -66,14 +66,7 @@ def _sum_reaction_translation_kN(mdl, lc: int, dof: int) -> float:
     return total
 
 
-def _direction_label(direction: str) -> str:
-    mapping = {
-        "X_PLUS": "X+",
-        "X_MINUS": "X-",
-        "Y_PLUS": "Y+",
-        "Y_MINUS": "Y-",
-    }
-    return mapping.get(direction, direction)
+from stb_project.schema import format_applied_load_direction_label, format_wind_case_short_name
 
 
 def compute_wind_equilibrium(mdl, result: WindDistributionResult) -> List[Dict[str, Any]]:
@@ -113,7 +106,8 @@ def compute_wind_equilibrium(mdl, result: WindDistributionResult) -> List[Dict[s
             "wind_case_id": case_id,
             "wind_case_name": case_name,
             "load_case": lc,
-            "direction": _direction_label(direction),
+            "direction": format_wind_case_short_name(direction),
+            "applied_load_direction_label": format_applied_load_direction_label(direction),
             "axis": axis,
             "sign": sign,
             "sum_f_wind_generated_kN": f_wind,

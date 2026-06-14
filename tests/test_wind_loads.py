@@ -36,9 +36,12 @@ from stb_project import (
     WindLoadSettings,
     WindSurfaceSettings,
     compute_gust_factor_auto,
+    normalize_wind_face,
+    resolve_wind_direction_convention,
     roughness_params,
     validate_project_dict,
 )
+from stb_loads.wind_format import render_wind_markdown
 
 
 class TestWindCoefficients(unittest.TestCase):
@@ -118,7 +121,7 @@ def _minimal_wind_project(diaphragm_input_mode="DIAPHRAGM_UNIFORM"):
                     surface_id=1,
                     name="west_wall",
                     wind_case_id=1,
-                    face_direction="X_PLUS",
+                    face_direction="X_MIN",
                     z_bottom=0.0,
                     z_top=9.045,
                     width=5.46,
@@ -189,12 +192,12 @@ class TestWindDistribution(unittest.TestCase):
             surfaces=(
                 WindSurfaceSettings(
                     surface_id=1, name="windward", wind_case_id=1,
-                    face_direction="X_PLUS", z_bottom=3.035, z_top=6.045,
+                    face_direction="X_MIN", z_bottom=3.035, z_top=6.045,
                     width=5.0, cf=1.0, surface_role="WINDWARD",
                 ),
                 WindSurfaceSettings(
                     surface_id=2, name="leeward", wind_case_id=1,
-                    face_direction="X_MINUS", z_bottom=3.035, z_top=6.045,
+                    face_direction="X_MAX", z_bottom=3.035, z_top=6.045,
                     width=5.0, cf=-0.5, surface_role="LEEWARD",
                 ),
             ),
@@ -275,7 +278,7 @@ class TestWindDistribution(unittest.TestCase):
             surfaces=(
                 WindSurfaceSettings(
                     surface_id=1, name="wall", wind_case_id=1,
-                    face_direction="X_PLUS", z_bottom=0.0, z_top=9.045, width=5.0,
+                    face_direction="X_MIN", z_bottom=0.0, z_top=9.045, width=5.0,
                 ),
             ),
         )
@@ -354,11 +357,11 @@ class TestWindDistribution(unittest.TestCase):
             surfaces=(
                 WindSurfaceSettings(
                     surface_id=1, name="shared_wall", wind_case_id=1,
-                    face_direction="X_PLUS", z_bottom=0.0, z_top=9.045, width=5.0,
+                    face_direction="X_MIN", z_bottom=0.0, z_top=9.045, width=5.0,
                 ),
                 WindSurfaceSettings(
                     surface_id=1, name="shared_wall", wind_case_id=2,
-                    face_direction="X_PLUS", z_bottom=0.0, z_top=9.045, width=5.0,
+                    face_direction="X_MIN", z_bottom=0.0, z_top=9.045, width=5.0,
                 ),
             ),
         )
@@ -415,7 +418,7 @@ class TestWindSchema(unittest.TestCase):
                         "id": 1,
                         "name": "wall",
                         "wind_case_id": 1,
-                        "face_direction": "X_PLUS",
+                        "face_direction": "X_MIN",
                         "z_bottom": 0.0,
                         "z_top": 6.045,
                         "width": 8.0,
@@ -430,6 +433,155 @@ class TestWindSchema(unittest.TestCase):
         project = validate_project_dict(raw)
         self.assertEqual(len(project.load_conditions.wind.cases), 1)
         self.assertEqual(project.load_conditions.wind.cases[0].diaphragm_input_mode, "DIAPHRAGM_UNIFORM")
+
+
+def _horizontal_load_component_kN(result, wind_case_id, axis="x"):
+    total = 0.0
+    for dl in result.diaphragm_loads:
+        if dl.wind_case_id != wind_case_id:
+            continue
+        if dl.axis != axis:
+            continue
+        total += dl.sign * dl.f_story_kN
+    return total
+
+
+def _wx_pair_project():
+    return LoadConditionSettings(
+        wind=WindLoadSettings(
+            cases=(
+                WindLoadCaseSettings(
+                    case_id=1, name="WX+", direction="X_PLUS", v0=34.0,
+                    roughness_category="III", load_case=4, gf=2.5,
+                    cf_default=1.0, building_height_H=9.045,
+                    diaphragm_input_mode="DIAPHRAGM_UNIFORM",
+                ),
+                WindLoadCaseSettings(
+                    case_id=2, name="WX-", direction="X_MINUS", v0=34.0,
+                    roughness_category="III", load_case=5, gf=2.5,
+                    cf_default=1.0, building_height_H=9.045,
+                    diaphragm_input_mode="DIAPHRAGM_UNIFORM",
+                ),
+            ),
+            surfaces=(
+                WindSurfaceSettings(
+                    surface_id=1, name="wx_plus_windward", wind_case_id=1,
+                    face_direction="X_MIN", z_bottom=0.0, z_top=9.045,
+                    width=5.46, cf=1.0, surface_role="WINDWARD",
+                ),
+                WindSurfaceSettings(
+                    surface_id=2, name="wx_plus_leeward", wind_case_id=1,
+                    face_direction="X_MAX", z_bottom=0.0, z_top=9.045,
+                    width=5.46, cf=-0.5, surface_role="LEEWARD",
+                ),
+                WindSurfaceSettings(
+                    surface_id=3, name="wx_minus_windward", wind_case_id=2,
+                    face_direction="X_MAX", z_bottom=0.0, z_top=9.045,
+                    width=5.46, cf=1.0, surface_role="WINDWARD",
+                ),
+                WindSurfaceSettings(
+                    surface_id=4, name="wx_minus_leeward", wind_case_id=2,
+                    face_direction="X_MIN", z_bottom=0.0, z_top=9.045,
+                    width=5.46, cf=-0.5, surface_role="LEEWARD",
+                ),
+            ),
+        ),
+        diaphragms=(
+            __import__("stb_project").DiaphragmAssignment(10, "2"),
+            __import__("stb_project").DiaphragmAssignment(20, "3"),
+        ),
+    )
+
+
+class TestWindDirectionConvention(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dat_path = os.path.join(_STB_ROOT, "data", "UK_240416_floors_1to3_diaphragm.dat")
+        with open(cls.dat_path, encoding="utf-8") as fh:
+            cls.mdl = parse_input(fh.read().splitlines())
+        from stb_project import load_project_file
+        cls.base_project = load_project_file(
+            os.path.join(_STB_ROOT, "data", "UK_240416_floors_1to3_diaphragm.project.json")
+        )
+
+    def _project_with_wx_pair(self):
+        lc = _wx_pair_project()
+        return ProjectDefinition(
+            schema=self.base_project.schema,
+            dat_path=self.base_project.dat_path,
+            building=self.base_project.building,
+            grids=self.base_project.grids,
+            stories=self.base_project.stories,
+            member_classes=self.base_project.member_classes,
+            design_checks=self.base_project.design_checks,
+            load_conditions=LoadConditionSettings(
+                seismic=self.base_project.load_conditions.seismic,
+                diaphragms=lc.diaphragms,
+                seismic_masses=self.base_project.load_conditions.seismic_masses,
+                wind=lc.wind,
+            ),
+            report=self.base_project.report,
+        )
+
+    def test_wx_plus_horizontal_load_x_positive(self):
+        project = self._project_with_wx_pair()
+        result = compute_wind_distribution(self.mdl, project)
+        fx = _horizontal_load_component_kN(result, 1, axis="x")
+        self.assertGreater(fx, 0.0)
+
+    def test_wx_minus_horizontal_load_x_negative(self):
+        project = self._project_with_wx_pair()
+        result = compute_wind_distribution(self.mdl, project)
+        fx = _horizontal_load_component_kN(result, 2, axis="x")
+        self.assertLess(fx, 0.0)
+
+    def test_wx_plus_windward_face_is_x_min(self):
+        conv = resolve_wind_direction_convention("X_PLUS")
+        self.assertEqual(conv.windward_face, "X_MIN")
+        project = self._project_with_wx_pair()
+        windward_faces = {
+            normalize_wind_face(s.face_direction)
+            for s in project.load_conditions.wind.surfaces
+            if s.wind_case_id == 1 and s.surface_role == "WINDWARD"
+        }
+        self.assertEqual(windward_faces, {"X_MIN"})
+
+    def test_wx_minus_windward_face_is_x_max(self):
+        conv = resolve_wind_direction_convention("X_MINUS")
+        self.assertEqual(conv.windward_face, "X_MAX")
+        project = self._project_with_wx_pair()
+        windward_faces = {
+            normalize_wind_face(s.face_direction)
+            for s in project.load_conditions.wind.surfaces
+            if s.wind_case_id == 2 and s.surface_role == "WINDWARD"
+        }
+        self.assertEqual(windward_faces, {"X_MAX"})
+
+    def test_wx_plus_and_minus_invert_faces_and_signs(self):
+        plus = resolve_wind_direction_convention("X_PLUS")
+        minus = resolve_wind_direction_convention("X_MINUS")
+        self.assertEqual(plus.windward_face, minus.leeward_face)
+        self.assertEqual(plus.leeward_face, minus.windward_face)
+        self.assertEqual(plus.sign, -minus.sign)
+
+        project = self._project_with_wx_pair()
+        result = compute_wind_distribution(self.mdl, project)
+        fx_plus = _horizontal_load_component_kN(result, 1, axis="x")
+        fx_minus = _horizontal_load_component_kN(result, 2, axis="x")
+        self.assertGreater(fx_plus, 0.0)
+        self.assertLess(fx_minus, 0.0)
+        self.assertAlmostEqual(fx_plus, -fx_minus, places=3)
+
+    def test_report_shows_convention_labels(self):
+        project = self._project_with_wx_pair()
+        result = compute_wind_distribution(self.mdl, project)
+        md = render_wind_markdown(result, project=project, mdl=self.mdl)
+        self.assertIn("荷重ケース：WX+", md)
+        self.assertIn("荷重作用方向：+X", md)
+        self.assertIn("風の流れ：-X側 → +X側", md)
+        self.assertIn("風上面：X最小側", md)
+        self.assertIn("風下面：X最大側", md)
 
 
 if __name__ == "__main__":

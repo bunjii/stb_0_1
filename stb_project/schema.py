@@ -34,6 +34,7 @@ ALLOWED_BASE_MASS_POLICIES = (
 DEFAULT_BASE_MASS_POLICY = "LUMP_TO_ABOVE_DIAPHRAGM"
 ALLOWED_MASS_ROLES = ("BASE_MASS", "DIAPHRAGM_MASS")
 ALLOWED_WIND_DIRECTIONS = ("X_PLUS", "X_MINUS", "Y_PLUS", "Y_MINUS")
+ALLOWED_WIND_FACES = ("X_MIN", "X_MAX", "Y_MIN", "Y_MAX")
 ALLOWED_ROUGHNESS_CATEGORIES = ("I", "II", "III", "IV")
 ALLOWED_WIND_PRESSURE_MODES = ("BUILDING_HEIGHT_UNIFORM", "STORY_HEIGHT_KZ")
 ALLOWED_WIND_DIAPHRAGM_INPUT_MODES = (
@@ -531,6 +532,7 @@ def normalize_diaphragm_input_mode(value: str) -> str:
 
 
 def normalize_wind_direction(value: str) -> str:
+    """Normalize applied horizontal load direction (building resultant sign)."""
     text = str(value or "").strip().upper().replace(" ", "")
     aliases = {
         "X+": "X_PLUS", "X_PLUS": "X_PLUS", "XPLUS": "X_PLUS",
@@ -547,15 +549,141 @@ def normalize_wind_direction(value: str) -> str:
     return aliases[text]
 
 
+def normalize_wind_face(value: str) -> str:
+    """Normalize building face location (X_MIN/X_MAX/Y_MIN/Y_MAX)."""
+    text = str(value or "").strip().upper().replace(" ", "")
+    aliases = {
+        "XMIN": "X_MIN", "X_MIN": "X_MIN", "X-MIN": "X_MIN",
+        "XMAX": "X_MAX", "X_MAX": "X_MAX", "X-MAX": "X_MAX",
+        "YMIN": "Y_MIN", "Y_MIN": "Y_MIN", "Y-MIN": "Y_MIN",
+        "YMAX": "Y_MAX", "Y_MAX": "Y_MAX", "Y-MAX": "Y_MAX",
+        # Legacy: +/- side of building (not applied load direction).
+        "X+": "X_MAX", "X_PLUS": "X_MAX", "XPLUS": "X_MAX",
+        "X-": "X_MIN", "X_MINUS": "X_MIN", "XMINUS": "X_MIN",
+        "Y+": "Y_MAX", "Y_PLUS": "Y_MAX", "YPLUS": "Y_MAX",
+        "Y-": "Y_MIN", "Y_MINUS": "Y_MIN", "YMINUS": "Y_MIN",
+    }
+    if text not in aliases:
+        raise ValueError("wind face must be X_MIN, X_MAX, Y_MIN, or Y_MAX")
+    return aliases[text]
+
+
+@dataclass(frozen=True)
+class WindDirectionConvention:
+    """Sign convention for a wind load case (applied load direction, not wind origin)."""
+    applied_load_direction: str
+    axis: str
+    sign: int
+    wind_flow_from: str
+    wind_flow_to: str
+    windward_face: str
+    leeward_face: str
+
+
+_WIND_DIRECTION_CONVENTIONS = {
+    "X_PLUS": WindDirectionConvention(
+        applied_load_direction="X_PLUS",
+        axis="x",
+        sign=1,
+        wind_flow_from="X_MINUS",
+        wind_flow_to="X_PLUS",
+        windward_face="X_MIN",
+        leeward_face="X_MAX",
+    ),
+    "X_MINUS": WindDirectionConvention(
+        applied_load_direction="X_MINUS",
+        axis="x",
+        sign=-1,
+        wind_flow_from="X_PLUS",
+        wind_flow_to="X_MINUS",
+        windward_face="X_MAX",
+        leeward_face="X_MIN",
+    ),
+    "Y_PLUS": WindDirectionConvention(
+        applied_load_direction="Y_PLUS",
+        axis="y",
+        sign=1,
+        wind_flow_from="Y_MINUS",
+        wind_flow_to="Y_PLUS",
+        windward_face="Y_MIN",
+        leeward_face="Y_MAX",
+    ),
+    "Y_MINUS": WindDirectionConvention(
+        applied_load_direction="Y_MINUS",
+        axis="y",
+        sign=-1,
+        wind_flow_from="Y_PLUS",
+        wind_flow_to="Y_MINUS",
+        windward_face="Y_MAX",
+        leeward_face="Y_MIN",
+    ),
+}
+
+
+def resolve_wind_direction_convention(direction: str) -> WindDirectionConvention:
+    key = normalize_wind_direction(direction)
+    return _WIND_DIRECTION_CONVENTIONS[key]
+
+
+def wind_face_to_wall_side(face: str) -> str:
+    mapping = {
+        "X_MIN": "x_min",
+        "X_MAX": "x_max",
+        "Y_MIN": "y_min",
+        "Y_MAX": "y_max",
+    }
+    return mapping[normalize_wind_face(face)]
+
+
+def format_applied_load_direction_label(direction: str) -> str:
+    conv = resolve_wind_direction_convention(direction)
+    if conv.axis == "x":
+        return "+X" if conv.sign > 0 else "-X"
+    return "+Y" if conv.sign > 0 else "-Y"
+
+
+def format_wind_flow_endpoint_label(endpoint: str) -> str:
+    labels = {
+        "X_PLUS": "+X側",
+        "X_MINUS": "-X側",
+        "Y_PLUS": "+Y側",
+        "Y_MINUS": "-Y側",
+    }
+    return labels[normalize_wind_direction(endpoint)]
+
+
+def format_wind_flow_label(direction: str) -> str:
+    conv = resolve_wind_direction_convention(direction)
+    return (
+        format_wind_flow_endpoint_label(conv.wind_flow_from)
+        + " → "
+        + format_wind_flow_endpoint_label(conv.wind_flow_to)
+    )
+
+
+def format_wind_face_label_jp(face: str) -> str:
+    labels = {
+        "X_MIN": "X最小側",
+        "X_MAX": "X最大側",
+        "Y_MIN": "Y最小側",
+        "Y_MAX": "Y最大側",
+    }
+    return labels[normalize_wind_face(face)]
+
+
+def format_wind_case_short_name(direction: str) -> str:
+    labels = {
+        "X_PLUS": "WX+",
+        "X_MINUS": "WX-",
+        "Y_PLUS": "WY+",
+        "Y_MINUS": "WY-",
+    }
+    return labels[normalize_wind_direction(direction)]
+
+
 def direction_to_axis_sign(direction: str) -> Tuple[str, int]:
-    d = normalize_wind_direction(direction)
-    if d == "X_PLUS":
-        return "x", 1
-    if d == "X_MINUS":
-        return "x", -1
-    if d == "Y_PLUS":
-        return "y", 1
-    return "y", -1
+    conv = resolve_wind_direction_convention(direction)
+    return conv.axis, conv.sign
 
 
 @dataclass(frozen=True)
@@ -1081,7 +1209,7 @@ def _parse_wind_load_settings(raw):
             surface_id=int(_required_number(item, "id", path)),
             name=_required_string(item, "name", path),
             wind_case_id=int(_required_number(item, "wind_case_id", path)),
-            face_direction=normalize_wind_direction(_required_string(item, "face_direction", path)),
+            face_direction=normalize_wind_face(_required_string(item, "face_direction", path)),
             z_bottom=float(_required_number(item, "z_bottom", path)),
             z_top=float(_required_number(item, "z_top", path)),
             width=float(_required_number(item, "width", path)),

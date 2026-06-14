@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from stb_loads.wind import WIND_NOTICE, WindDistributionResult
 from stb_loads.wind_equilibrium import compute_wind_equilibrium
+from stb_project.schema import (
+    format_applied_load_direction_label,
+    format_wind_case_short_name,
+    format_wind_face_label_jp,
+    format_wind_flow_label,
+    resolve_wind_direction_convention,
+    wind_face_to_wall_side,
+)
 
 UNIFORM_INPUT_NOTE = (
     "DIAPHRAGM_DIRECT / DIAPHRAGM_UNIFORM では、外壁面風圧を各ダイアフラムの支配高さ "
@@ -41,7 +49,20 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
     for c in result.cases:
         parts.append("")
         parts.append("### " + c.name)
+        conv = resolve_wind_direction_convention(c.direction)
+        parts.append("")
+        parts.append("- 荷重ケース：" + format_wind_case_short_name(c.direction))
+        parts.append("- 荷重作用方向：" + format_applied_load_direction_label(c.direction))
+        parts.append("- 風の流れ：" + format_wind_flow_label(c.direction))
+        parts.append("- 風上面：" + format_wind_face_label_jp(conv.windward_face))
+        parts.append("- 風下面：" + format_wind_face_label_jp(conv.leeward_face))
+        parts.append("")
         cond_rows = [
+            ["applied_load_direction", conv.applied_load_direction, ""],
+            ["wind_flow_from", conv.wind_flow_from, ""],
+            ["wind_flow_to", conv.wind_flow_to, ""],
+            ["windward_face", conv.windward_face, ""],
+            ["leeward_face", conv.leeward_face, ""],
             ["V0", _fmt(c.v0, 1), "m/s"],
             ["地表面粗度区分", c.roughness_category, ""],
             ["Zb", _fmt(c.zb, 1), "m"],
@@ -69,6 +90,7 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
                 s.name,
                 s.surface_role,
                 s.face_direction,
+                format_wind_face_label_jp(s.face_direction),
                 _fmt(s.z_bottom, 3),
                 _fmt(s.z_top, 3),
                 _fmt(s.width, 3),
@@ -76,7 +98,7 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
                 _fmt(s.cf, 3),
             ])
         parts.append(_md_table(
-            ["ID", "名称", "区分", "方向", "Z下", "Z上", "幅", "面積", "Cf"],
+            ["ID", "名称", "区分", "面", "面（説明）", "Z下", "Z上", "幅", "面積", "Cf"],
             surf_rows,
         ))
     else:
@@ -226,30 +248,15 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
     return "\n".join(parts)
 
 
-_FACE_TO_WALL_SIDE = {
-    "X_PLUS": "x_max",
-    "X_MINUS": "x_min",
-    "Y_PLUS": "y_max",
-    "Y_MINUS": "y_min",
-}
-
-_WIND_FLOW = {
-    "X_PLUS": {"ux": -1.0, "uy": 0.0},
-    "X_MINUS": {"ux": 1.0, "uy": 0.0},
-    "Y_PLUS": {"ux": 0.0, "uy": -1.0},
-    "Y_MINUS": {"ux": 0.0, "uy": 1.0},
-}
-
-_DIRECTION_LABEL = {
-    "X_PLUS": "WX+",
-    "X_MINUS": "WX-",
-    "Y_PLUS": "WY+",
-    "Y_MINUS": "WY-",
-}
+def _wind_flow_vector(direction: str) -> dict:
+    conv = resolve_wind_direction_convention(direction)
+    ux = float(conv.sign) if conv.axis == "x" else 0.0
+    uy = float(conv.sign) if conv.axis == "y" else 0.0
+    return {"ux": ux, "uy": uy}
 
 
 def _direction_label(direction: str) -> str:
-    return _DIRECTION_LABEL.get(direction, direction)
+    return format_wind_case_short_name(direction)
 
 
 def build_wind_summary_rows(result: WindDistributionResult):
@@ -296,14 +303,15 @@ def build_wind_surface_rows(result: WindDistributionResult):
             "wind_case": case_names.get(s.wind_case_id, str(s.wind_case_id)),
             "surface_role": s.surface_role,
             "face_direction": s.face_direction,
-            "direction_label": _direction_label(s.face_direction),
+            "face_label": format_wind_face_label_jp(s.face_direction),
+            "direction_label": format_wind_face_label_jp(s.face_direction),
             "z_bottom": s.z_bottom,
             "z_top": s.z_top,
             "width": s.width,
             "gross_area_m2": s.gross_area_m2,
             "cf": s.cf,
             "total_force_kN": force_by_surface.get(s.surface_id, 0.0),
-            "wall_side": _FACE_TO_WALL_SIDE.get(s.face_direction, ""),
+            "wall_side": wind_face_to_wall_side(s.face_direction),
         })
     return rows
 
@@ -433,7 +441,8 @@ def build_wind_visual_cases(mdl, result: WindDistributionResult):
 
     visual_cases = []
     for case in result.cases:
-        flow = _WIND_FLOW.get(case.direction, {"ux": 0.0, "uy": 0.0})
+        flow = _wind_flow_vector(case.direction)
+        conv = resolve_wind_direction_convention(case.direction)
         surfaces = []
         for s in result.surfaces:
             if s.wind_case_id != case.case_id:
@@ -443,7 +452,7 @@ def build_wind_visual_cases(mdl, result: WindDistributionResult):
                 "name": s.name,
                 "surface_role": s.surface_role,
                 "face_direction": s.face_direction,
-                "wall_side": _FACE_TO_WALL_SIDE.get(s.face_direction, ""),
+                "wall_side": wind_face_to_wall_side(s.face_direction),
                 "z_bottom": s.z_bottom,
                 "z_top": s.z_top,
                 "width": s.width,
@@ -501,6 +510,15 @@ def build_wind_visual_cases(mdl, result: WindDistributionResult):
             "load_case": case.load_case,
             "direction": case.direction,
             "direction_label": _direction_label(case.direction),
+            "applied_load_direction": conv.applied_load_direction,
+            "applied_load_direction_label": format_applied_load_direction_label(case.direction),
+            "wind_flow_from": conv.wind_flow_from,
+            "wind_flow_to": conv.wind_flow_to,
+            "wind_flow_label": format_wind_flow_label(case.direction),
+            "windward_face": conv.windward_face,
+            "leeward_face": conv.leeward_face,
+            "windward_face_label": format_wind_face_label_jp(conv.windward_face),
+            "leeward_face_label": format_wind_face_label_jp(conv.leeward_face),
             "axis": case.axis,
             "sign": case.sign,
             "flow": flow,

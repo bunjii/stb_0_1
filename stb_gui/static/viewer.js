@@ -6476,7 +6476,7 @@ function initProjectEditorWindow(w, view, title) {
 
   function pickWidthFromSurfaces(surfaces, axis, fallback) {
     if (!Array.isArray(surfaces)) return fallback;
-    const dirs = axis === "x" ? ["X_PLUS", "X_MINUS"] : ["Y_PLUS", "Y_MINUS"];
+    const dirs = axis === "x" ? ["X_MIN", "X_MAX", "X_PLUS", "X_MINUS"] : ["Y_MIN", "Y_MAX", "Y_PLUS", "Y_MINUS"];
     const hit = surfaces.find((s) => dirs.includes(String(s && s.face_direction || "").toUpperCase()) && Number.isFinite(Number(s.width)));
     if (!hit) return fallback;
     const w = Number(hit.width);
@@ -6556,14 +6556,14 @@ function initProjectEditorWindow(w, view, title) {
     ];
 
     const surfaceSpecs = [
-      { id: 1, name: "X_plus_windward_wall", wind_case_id: 1, face_direction: "X_PLUS", surface_role: "WINDWARD", width: xWidth },
-      { id: 2, name: "X_plus_leeward_wall", wind_case_id: 1, face_direction: "X_MINUS", surface_role: "LEEWARD", width: xWidth },
-      { id: 3, name: "X_minus_windward_wall", wind_case_id: 2, face_direction: "X_MINUS", surface_role: "WINDWARD", width: xWidth },
-      { id: 4, name: "X_minus_leeward_wall", wind_case_id: 2, face_direction: "X_PLUS", surface_role: "LEEWARD", width: xWidth },
-      { id: 5, name: "Y_plus_windward_wall", wind_case_id: 3, face_direction: "Y_PLUS", surface_role: "WINDWARD", width: yWidth },
-      { id: 6, name: "Y_plus_leeward_wall", wind_case_id: 3, face_direction: "Y_MINUS", surface_role: "LEEWARD", width: yWidth },
-      { id: 7, name: "Y_minus_windward_wall", wind_case_id: 4, face_direction: "Y_MINUS", surface_role: "WINDWARD", width: yWidth },
-      { id: 8, name: "Y_minus_leeward_wall", wind_case_id: 4, face_direction: "Y_PLUS", surface_role: "LEEWARD", width: yWidth },
+      { id: 1, name: "X_plus_windward_wall", wind_case_id: 1, face_direction: "X_MIN", surface_role: "WINDWARD", width: xWidth },
+      { id: 2, name: "X_plus_leeward_wall", wind_case_id: 1, face_direction: "X_MAX", surface_role: "LEEWARD", width: xWidth },
+      { id: 3, name: "X_minus_windward_wall", wind_case_id: 2, face_direction: "X_MAX", surface_role: "WINDWARD", width: xWidth },
+      { id: 4, name: "X_minus_leeward_wall", wind_case_id: 2, face_direction: "X_MIN", surface_role: "LEEWARD", width: xWidth },
+      { id: 5, name: "Y_plus_windward_wall", wind_case_id: 3, face_direction: "Y_MIN", surface_role: "WINDWARD", width: yWidth },
+      { id: 6, name: "Y_plus_leeward_wall", wind_case_id: 3, face_direction: "Y_MAX", surface_role: "LEEWARD", width: yWidth },
+      { id: 7, name: "Y_minus_windward_wall", wind_case_id: 4, face_direction: "Y_MAX", surface_role: "WINDWARD", width: yWidth },
+      { id: 8, name: "Y_minus_leeward_wall", wind_case_id: 4, face_direction: "Y_MIN", surface_role: "LEEWARD", width: yWidth },
     ];
     wind.surfaces = surfaceSpecs.map((spec) =>
       buildWindSurfaceEntry(spec, oldSurfaces, zFallback, spec.width)
