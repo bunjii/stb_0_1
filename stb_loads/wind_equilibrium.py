@@ -5,7 +5,12 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional, Tuple
 
-from stb_loads.wind import WindDistributionResult, total_dlod_output_kN, total_wind_generated_kN
+from stb_loads.wind import (
+    WindDistributionResult,
+    total_base_wind_kN,
+    total_dlod_output_kN,
+    total_wind_generated_kN,
+)
 
 
 def _ensure_solver_path():
@@ -95,6 +100,7 @@ def compute_wind_equilibrium(mdl, result: WindDistributionResult) -> List[Dict[s
         sum_rx = _sum_reaction_translation_kN(mdl_solved, lc, dof)
         f_wind = total_wind_generated_kN(result, case_id)
         f_dlod = total_dlod_output_kN(result, case_id)
+        f_base = total_base_wind_kN(result, case_id)
         residual = abs(fx_applied + sum_rx)
 
         case_name = next((c.name for c in result.cases if c.case_id == case_id), str(case_id))
@@ -112,9 +118,11 @@ def compute_wind_equilibrium(mdl, result: WindDistributionResult) -> List[Dict[s
             "sign": sign,
             "sum_f_wind_generated_kN": f_wind,
             "sum_f_dlod_output_kN": f_dlod,
+            "sum_f_to_base_kN": f_base,
             "fx_applied_kN": fx_applied,
             "sum_reaction_kN": sum_rx,
             "equilibrium_residual_kN": residual,
             "equilibrium_ok": residual <= max(1.0e-2, abs(f_dlod) * 1.0e-3),
+            "distribution_ok": abs(f_wind - (f_dlod + f_base)) <= max(0.05, abs(f_wind) * 1.0e-3),
         })
     return rows

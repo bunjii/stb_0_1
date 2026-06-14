@@ -25,6 +25,11 @@ const COLORS = {
   woodWallEdge: 0x8b6914,
   nodeLabel: 0x000000,
   force: 0x4D829E,
+  windWindward: 0xe08040,
+  windLeeward: 0x4080c0,
+  windFlow: 0xc8b8ff,
+  windStoryForce: 0x8fd4a0,
+  windFootprint: 0x5a5a68,
 };
 
 const PRES_ZERO = 1e-10;
@@ -46,6 +51,8 @@ const ALPHA = {
   woodWallFill: 0.35,
   woodWallEdge: 0.9,
   opaque: 1.0,
+  windWall: 0.38,
+  windFootprint: 0.2,
 };
 
 const OPTIONS_STORAGE_KEY = "stb_gui_options";
@@ -141,6 +148,10 @@ const el = {
   chkLoads: document.getElementById("chkLoads"),
   loadTypeFilter: document.getElementById("loadTypeFilter"),
   chkLoadValues: document.getElementById("chkLoadValues"),
+  chkWindLoads: document.getElementById("chkWindLoads"),
+  windCaseSelect: document.getElementById("windCaseSelect"),
+  windLegendOverlay: document.getElementById("windLegendOverlay"),
+  windLegendCase: document.getElementById("windLegendCase"),
   chkReactions: document.getElementById("chkReactions"),
   chkReactionValues: document.getElementById("chkReactionValues"),
   chkLabels: document.getElementById("chkLabels"),
@@ -256,6 +267,7 @@ const el = {
 
 let scene, camera, renderer, controls;
 let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
+let windGroup, windLabelGroup;
 let currentModel = null;
 let selectionModeActive = false;
 let distanceModeActive = false;
@@ -292,6 +304,8 @@ const inputEditors = new Map();
 let showWorldAxes = true;
 const _supportDiscTexCache = new Map();
 let _nodePointTexture = null;
+let windVisualData = null;
+let selectedWindCaseId = null;
 
 function saveLastModelPath(path) {
   setCurrentModelPath(path);
@@ -2656,6 +2670,14 @@ function updateViewerInfoOverlay(model) {
     displayLines.push("input loads (" + loadTypeFilterValue() + ")");
     if (el.chkLoadValues.checked) displayLines.push("load values");
   }
+  if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
+    const wc = windCaseById(windVisualData, selectedWindCaseId);
+    if (wc) {
+      displayLines.push(
+        "wind: " + wc.name + " (" + (wc.direction_label || wc.direction) + ", LC" + wc.load_case + ")"
+      );
+    }
+  }
   if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
   if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
   if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
@@ -2779,6 +2801,10 @@ function initThree() {
   scene.add(forceGroup);
   forceLabelGroup = new THREE.Group();
   scene.add(forceLabelGroup);
+  windGroup = new THREE.Group();
+  scene.add(windGroup);
+  windLabelGroup = new THREE.Group();
+  scene.add(windLabelGroup);
   axesGroup = new THREE.Group();
   scene.add(axesGroup);
 
@@ -3626,6 +3652,15 @@ function buildModelScene(model) {
   }
 
   buildForceDiagrams(model);
+
+  clearGroup(windGroup);
+  clearGroup(windLabelGroup);
+  if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
+    const wc = windCaseById(windVisualData, selectedWindCaseId);
+    if (wc) drawWindOverlay(model, windVisualData, wc, span);
+  }
+  updateWindLegendOverlay();
+
   updateWorldAxes(model);
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
@@ -4339,6 +4374,368 @@ function maxPointLoadMag(model, lc) {
     max = Math.max(max, Math.hypot(l.px, l.py, l.pz));
   }
   return max;
+}
+
+function windCaseById(visual, caseId) {
+  const cases = (visual && visual.cases) || [];
+  if (!cases.length) return null;
+  if (caseId == null) return cases[0];
+  return cases.find(function (c) { return c.wind_case_id === caseId; }) || cases[0];
+}
+
+function pickWindCaseIdForLc(visual) {
+  if (!visual || !visual.cases || !visual.cases.length) return null;
+  const lc = String(el.lcSelect.value || "");
+  const match = visual.cases.find(function (c) { return String(c.load_case) === lc; });
+  return match ? match.wind_case_id : visual.cases[0].wind_case_id;
+}
+
+function windFlowDirection3(flow) {
+  const ux = flow && flow.ux != null ? Number(flow.ux) : 0;
+  const uy = flow && flow.uy != null ? Number(flow.uy) : 0;
+  const dir = new THREE.Vector3(ux, uy, 0);
+  if (dir.lengthSq() < 1e-12) return new THREE.Vector3(1, 0, 0);
+  return dir.normalize();
+}
+
+function windWallCorners(bbox, surface) {
+  const zb = Number(surface.z_bottom);
+  const zt = Number(surface.z_top);
+  const w = Math.max(Number(surface.width) || 0, 1e-6);
+  const side = surface.wall_side || "";
+  if (side === "x_max") {
+    const x = bbox.x_max;
+    return [
+      new THREE.Vector3(x, bbox.y_min, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zt),
+      new THREE.Vector3(x, bbox.y_min, zt),
+    ];
+  }
+  if (side === "x_min") {
+    const x = bbox.x_min;
+    return [
+      new THREE.Vector3(x, bbox.y_min, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zt),
+      new THREE.Vector3(x, bbox.y_min, zt),
+    ];
+  }
+  if (side === "y_max") {
+    const y = bbox.y_max;
+    return [
+      new THREE.Vector3(bbox.x_min, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zt),
+      new THREE.Vector3(bbox.x_min, y, zt),
+    ];
+  }
+  if (side === "y_min") {
+    const y = bbox.y_min;
+    return [
+      new THREE.Vector3(bbox.x_min, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zt),
+      new THREE.Vector3(bbox.x_min, y, zt),
+    ];
+  }
+  return null;
+}
+
+function addWindQuadMesh(corners, color, opacity, group) {
+  if (!corners || corners.length !== 4) return;
+  const pos = [];
+  const tri = [0, 1, 2, 0, 2, 3];
+  for (let i = 0; i < tri.length; i++) {
+    const p = corners[tri[i]];
+    pos.push(p.x, p.y, p.z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: opacity,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 6;
+  group.add(mesh);
+}
+
+function addWindWallOutline(corners, color, group) {
+  if (!corners || corners.length !== 4) return;
+  const pts = [];
+  for (let i = 0; i < 4; i++) {
+    addLinePair(corners[i], corners[(i + 1) % 4], pts);
+  }
+  addWideLineSegmentsFromPts(
+    pts,
+    color,
+    group,
+    7,
+    Math.max(loadLineWidthPx() * 1.2, 1.5),
+    ALPHA.opaque
+  );
+}
+
+function formatWindForceKn(value) {
+  const n = Number(value);
+  if (!isFinite(n)) return "—";
+  if (Math.abs(n - Math.round(n)) < 1e-6) return String(Math.round(n));
+  return n.toFixed(2);
+}
+
+function drawWindOverlay(model, visual, windCase, span) {
+  const bbox = visual.bbox;
+  if (!bbox || !windCase) return;
+
+  const cx = 0.5 * (bbox.x_min + bbox.x_max);
+  const cy = 0.5 * (bbox.y_min + bbox.y_max);
+  const zGround = model.bounds ? model.bounds[4] : Number(windCase.story_forces[0]?.z_bottom || 0);
+  const flowDir = windFlowDirection3(windCase.flow);
+
+  const footPts = [];
+  const zf = zGround;
+  addLinePair(
+    new THREE.Vector3(bbox.x_min, bbox.y_min, zf),
+    new THREE.Vector3(bbox.x_max, bbox.y_min, zf),
+    footPts
+  );
+  addLinePair(
+    new THREE.Vector3(bbox.x_max, bbox.y_min, zf),
+    new THREE.Vector3(bbox.x_max, bbox.y_max, zf),
+    footPts
+  );
+  addLinePair(
+    new THREE.Vector3(bbox.x_max, bbox.y_max, zf),
+    new THREE.Vector3(bbox.x_min, bbox.y_max, zf),
+    footPts
+  );
+  addLinePair(
+    new THREE.Vector3(bbox.x_min, bbox.y_max, zf),
+    new THREE.Vector3(bbox.x_min, bbox.y_min, zf),
+    footPts
+  );
+  addWideLineSegmentsFromPts(
+    footPts,
+    COLORS.windFootprint,
+    windGroup,
+    5,
+    Math.max(elementLineWidthPx() * 0.85, 1.0),
+    ALPHA.windFootprint
+  );
+
+  (windCase.surfaces || []).forEach(function (s) {
+    const corners = windWallCorners(bbox, s);
+    if (!corners) return;
+    const isWindward = s.surface_role === "WINDWARD";
+    const color = isWindward ? COLORS.windWindward : COLORS.windLeeward;
+    addWindQuadMesh(corners, color, ALPHA.windWall, windGroup);
+    addWindWallOutline(corners, color, windGroup);
+  });
+
+  let zTop = zGround;
+  (windCase.surfaces || []).forEach(function (s) {
+    zTop = Math.max(zTop, Number(s.z_top) || zGround);
+  });
+  if (model.bounds) zTop = Math.max(zTop, model.bounds[5]);
+
+  const flowLen = Math.max(span * 0.42, 0.5);
+  const flowOrigin = new THREE.Vector3(cx, cy, zTop + span * 0.06);
+  const flowTail = flowOrigin.clone().addScaledVector(flowDir, -flowLen * 0.35);
+  const flowHead = flowOrigin.clone().addScaledVector(flowDir, flowLen * 0.65);
+  addDirectedArrow(
+    flowTail,
+    flowHead,
+    windGroup,
+    COLORS.windFlow,
+    loadLineWidthPx() * 1.15,
+    1.0,
+    8
+  );
+  const flowLabel = makeTextSprite(windCase.direction_label || "Wind", span, {
+    scaleFactor: loadLabelScaleFactor() * 0.95,
+    bg: "rgba(112, 96, 168, 0.82)",
+    fg: "#ffffff",
+  });
+  flowLabel.position.copy(flowHead).addScaledVector(flowDir, span * 0.02);
+  flowLabel.renderOrder = 18;
+  windLabelGroup.add(flowLabel);
+
+  const maxF = Math.max(
+    Number(windCase.max_f_story_kN) || 0,
+    ...(windCase.tributary_rows || []).map(function (r) { return Math.abs(Number(r.story_wind_force_kN) || 0); }),
+    ...(windCase.story_forces || []).map(function (sf) { return Math.abs(Number(sf.f_story_kN) || 0); }),
+    1e-6
+  );
+  const forceRows = (windCase.tributary_rows && windCase.tributary_rows.length)
+    ? windCase.tributary_rows
+    : (windCase.story_forces || []);
+  forceRows.forEach(function (row) {
+    const fKn = Number(row.story_wind_force_kN != null ? row.story_wind_force_kN : row.f_story_kN) || 0;
+    const len = Math.max(span * 0.035, (Math.abs(fKn) / maxF) * span * 0.2);
+    const z = Number(row.diaphragm_level != null ? row.diaphragm_level : row.z_ref);
+    const tail = new THREE.Vector3(cx, cy, z);
+    const sign = fKn >= 0 ? 1 : -1;
+    const head = tail.clone().addScaledVector(flowDir, len * sign);
+    addDirectedArrow(
+      tail,
+      head,
+      windGroup,
+      COLORS.windStoryForce,
+      loadLineWidthPx(),
+      0.85,
+      8
+    );
+    const labelStory = row.story != null ? row.story : String(row.diaphragm_id || "");
+    const label = makeTextSprite(
+      labelStory + " F=" + formatWindForceKn(fKn) + "kN",
+      span,
+      {
+        scaleFactor: loadLabelScaleFactor() * 0.82,
+        bg: "rgba(20, 83, 45, 0.78)",
+        fg: "#ffffff",
+      }
+    );
+    label.position.copy(head).add(new THREE.Vector3(0, 0, span * 0.012));
+    label.renderOrder = 17;
+    windLabelGroup.add(label);
+  });
+
+  (windCase.diaphragm_loads || []).forEach(function (dl) {
+    const z = Number(dl.load_level_m);
+    const sign = Number(dl.sign) >= 0 ? 1 : -1;
+    const axis = String(dl.axis || "X").toUpperCase();
+    const dir = axis === "Y"
+      ? new THREE.Vector3(0, sign, 0)
+      : new THREE.Vector3(sign, 0, 0);
+    const len = Math.max(span * 0.1, 0.25);
+    const origin = new THREE.Vector3(cx, cy, z);
+    addDirectionArrow(
+      origin,
+      dir,
+      len,
+      windGroup,
+      COLORS.load,
+      loadLineWidthPx() * 0.9,
+      0.7
+    );
+    const areaLoad = Number(dl.area_load_kN_m2);
+    if (isFinite(areaLoad) && Math.abs(areaLoad) > 1e-9) {
+      const tip = origin.clone().addScaledVector(dir, len);
+      const dlLabel = makeTextSprite(
+        "DIAP " + dl.diaphragm_id + " " + formatWindForceKn(areaLoad) + " kN/m²",
+        span,
+        {
+          scaleFactor: loadLabelScaleFactor() * 0.78,
+          bg: LABEL_BG.load,
+          fg: "#ffffff",
+        }
+      );
+      dlLabel.position.copy(tip).add(new THREE.Vector3(0, 0, span * 0.01));
+      dlLabel.renderOrder = 16;
+      windLabelGroup.add(dlLabel);
+    }
+  });
+}
+
+function populateWindCaseSelect() {
+  if (!el.windCaseSelect) return;
+  const sel = el.windCaseSelect;
+  sel.innerHTML = "";
+  const cases = (windVisualData && windVisualData.cases) || [];
+  if (!cases.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(none)";
+    sel.appendChild(opt);
+    sel.disabled = true;
+    return;
+  }
+  cases.forEach(function (c) {
+    const opt = document.createElement("option");
+    opt.value = String(c.wind_case_id);
+    opt.textContent = c.name + " (" + (c.direction_label || c.direction) + ", LC" + c.load_case + ")";
+    if (selectedWindCaseId != null && c.wind_case_id === selectedWindCaseId) {
+      opt.selected = true;
+    }
+    sel.appendChild(opt);
+  });
+  if (selectedWindCaseId == null) {
+    sel.value = String(cases[0].wind_case_id);
+    selectedWindCaseId = cases[0].wind_case_id;
+  } else {
+    sel.value = String(selectedWindCaseId);
+  }
+  sel.disabled = !(el.chkWindLoads && el.chkWindLoads.checked);
+}
+
+function updateWindControlsAvailability() {
+  const hasCases = !!(windVisualData && windVisualData.cases && windVisualData.cases.length);
+  if (el.chkWindLoads) {
+    el.chkWindLoads.disabled = !hasCases;
+    if (!hasCases) el.chkWindLoads.checked = false;
+  }
+  if (el.windCaseSelect) {
+    el.windCaseSelect.disabled = !hasCases || !(el.chkWindLoads && el.chkWindLoads.checked);
+  }
+  updateWindLegendOverlay();
+}
+
+function updateWindLegendOverlay() {
+  if (!el.windLegendOverlay) return;
+  const show = !!(el.chkWindLoads && el.chkWindLoads.checked && windVisualData);
+  if (!show) {
+    el.windLegendOverlay.hidden = true;
+    el.windLegendOverlay.classList.remove("visible");
+    return;
+  }
+  const wc = windCaseById(windVisualData, selectedWindCaseId);
+  if (!wc) {
+    el.windLegendOverlay.hidden = true;
+    el.windLegendOverlay.classList.remove("visible");
+    return;
+  }
+  el.windLegendOverlay.hidden = false;
+  el.windLegendOverlay.classList.add("visible");
+  if (el.windLegendCase) {
+    el.windLegendCase.textContent =
+      wc.name + " · " + (wc.direction_label || wc.direction) + " · LC" + wc.load_case
+      + " — orange=windward / blue=leeward / green=F_story / purple=wind dir";
+  }
+}
+
+async function loadWindVisualForCurrentModel() {
+  const path = getCurrentModelPath();
+  windVisualData = null;
+  selectedWindCaseId = null;
+  if (!path) {
+    populateWindCaseSelect();
+    updateWindControlsAvailability();
+    return;
+  }
+  try {
+    const view = await fetchApiJson("/api/loads/wind?path=" + encodeURIComponent(path));
+    if (view.found && view.visual && view.visual.cases && view.visual.cases.length) {
+      windVisualData = view.visual;
+      selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+    }
+  } catch (ex) {
+    console.warn("Wind visual load failed:", ex.message);
+  }
+  populateWindCaseSelect();
+  updateWindControlsAvailability();
+}
+
+function syncLcToWindCase(windCase) {
+  if (!windCase || !el.lcSelect) return;
+  const lcVal = String(windCase.load_case);
+  if (String(el.lcSelect.value) === lcVal) return;
+  const opt = Array.from(el.lcSelect.options).find(function (o) { return o.value === lcVal; });
+  if (opt) el.lcSelect.value = lcVal;
 }
 
 function drawElementInputLoads(model, opts) {
@@ -5737,11 +6134,55 @@ function renderProjectFieldInput(field, inputId) {
     html += "</select>" + hint;
     return html;
   }
-  const inputType = field.type === "number" || field.type === "optional_int" ? "number" : "text";
-  const step = field.type === "optional_int" ? "1" : "any";
-  return "<input class=\"proj-input\" type=\"" + inputType + "\" step=\"" + step + "\" data-path=\""
+  if (field.type === "number" || field.type === "optional_int") {
+    const inputMode = field.type === "optional_int" ? "numeric" : "decimal";
+    return "<input class=\"proj-input proj-input-num\" type=\"text\" inputmode=\"" + inputMode + "\" data-path=\""
+      + escapeHtml(field.path) + "\" data-type=\"" + escapeHtml(field.type) + "\" id=\"" + inputId + "\" value=\""
+      + escapeHtml(value) + "\">" + hint;
+  }
+  return "<input class=\"proj-input\" type=\"text\" data-path=\""
     + escapeHtml(field.path) + "\" data-type=\"" + escapeHtml(field.type) + "\" id=\"" + inputId + "\" value=\""
     + escapeHtml(value) + "\">" + hint;
+}
+
+function projectTableCellTdClass(col) {
+  if (col.type === "number" || col.type === "optional_int") return " proj-cell-num";
+  if (col.type === "select" || col.type === "bool") return " proj-cell-select";
+  return " proj-cell-text";
+}
+
+function renderProjectEditTableCellHtml(col, cellId, val) {
+  if (col.type === "csv_int") {
+    const cellValue = formatCsvInts(val);
+    return "<input class=\"proj-cell-input proj-cell-text\" type=\"text\" data-col=\""
+      + escapeHtml(col.path) + "\" data-type=\"csv_int\" id=\"" + cellId + "\" value=\""
+      + escapeHtml(cellValue) + "\">";
+  }
+  if (col.type === "select") {
+    let select = "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"select\" id=\"" + cellId + "\">";
+    for (const opt of col.options || []) {
+      select += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(val) ? " selected" : "") + ">"
+        + escapeHtml(opt) + "</option>";
+    }
+    select += "</select>";
+    return select;
+  }
+  if (col.type === "bool") {
+    const checked = val === true || val === "true" || val === 1 || val === "1";
+    return "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"bool\" id=\"" + cellId + "\">"
+      + "<option value=\"true\"" + (checked ? " selected" : "") + ">はい</option>"
+      + "<option value=\"false\"" + (!checked ? " selected" : "") + ">いいえ</option>"
+      + "</select>";
+  }
+  if (col.type === "number" || col.type === "optional_int") {
+    const inputMode = col.type === "optional_int" ? "numeric" : "decimal";
+    return "<input class=\"proj-cell-input proj-cell-num\" type=\"text\" inputmode=\"" + inputMode + "\" data-col=\""
+      + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
+      + escapeHtml(formatProjectFieldValue(col.type, val)) + "\">";
+  }
+  return "<input class=\"proj-cell-input proj-cell-text\" type=\"text\" data-col=\""
+    + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
+    + escapeHtml(formatProjectFieldValue(col.type, val)) + "\">";
 }
 
 function renderProjectEditSectionHtml(section, sectionIndex) {
@@ -5784,7 +6225,8 @@ function renderProjectEditTableHtml(table, sectionIndex) {
   }
   html += "<table class=\"proj-edit-table\"><thead><tr>";
   for (const col of table.columns) {
-    html += "<th>" + escapeHtml(col.label) + "</th>";
+    const thClass = projectTableCellTdClass(col).trim();
+    html += "<th" + (thClass ? " class=\"" + thClass + "\"" : "") + ">" + escapeHtml(col.label) + "</th>";
   }
   html += "<th class=\"proj-row-actions\">操作</th></tr></thead><tbody>";
   const rows = table.rows || [];
@@ -5807,23 +6249,9 @@ function renderProjectEditTableRowHtml(columns, row, sectionIndex, rowIndex) {
     const col = columns[ci];
     const cellId = "proj-cell-" + sectionIndex + "-" + rowIndex + "-" + ci;
     const val = row[col.path];
-    let cellValue = val;
-    if (col.type === "csv_int") {
-      cellValue = formatCsvInts(val);
-    } else if (col.type === "select") {
-      let select = "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"select\" id=\"" + cellId + "\">";
-      for (const opt of col.options || []) {
-        select += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(val) ? " selected" : "") + ">"
-          + escapeHtml(opt) + "</option>";
-      }
-      select += "</select>";
-      html += "<td>" + select + "</td>";
-      continue;
-    }
-    const inputType = col.type === "number" ? "number" : "text";
-    html += "<td><input class=\"proj-cell-input\" type=\"" + inputType + "\" step=\"any\" data-col=\""
-      + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
-      + escapeHtml(formatProjectFieldValue(col.type, cellValue)) + "\"></td>";
+    const tdClass = projectTableCellTdClass(col).trim();
+    html += "<td" + (tdClass ? " class=\"" + tdClass + "\"" : "") + ">"
+      + renderProjectEditTableCellHtml(col, cellId, val) + "</td>";
   }
   html += "<td class=\"proj-row-actions\"><button type=\"button\" class=\"btn-table-del\">削除</button></td>";
   html += "</tr>";
@@ -5956,12 +6384,22 @@ function initProjectEditorWindow(w, view, title) {
   doc.write(".proj-rows dd{margin:0;font-size:13px;color:#111;}");
   doc.write(".proj-readonly dt,.proj-readonly dd{color:#6b7280;}");
   doc.write(".proj-hint{display:block;margin-top:4px;font-size:11px;color:#6b7280;font-weight:400;}");
-  doc.write(".proj-input,.proj-cell-input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;padding:6px 8px;font:inherit;background:#fff;}");
-  doc.write(".proj-table-wrap{margin-top:8px;overflow:auto;}");
-  doc.write("table{width:100%;border-collapse:collapse;font-size:12px;}");
-  doc.write("th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:top;}");
-  doc.write("th{background:#f3f4f6;font-weight:600;}");
-  doc.write(".proj-row-actions{width:72px;text-align:center;}");
+  doc.write(".proj-input,.proj-cell-input{box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;padding:5px 7px;font:inherit;background:#fff;}");
+  doc.write(".proj-input{width:100%;max-width:420px;}");
+  doc.write(".proj-table-wrap{margin-top:8px;overflow:auto;max-width:100%;border:1px solid #e5e7eb;border-radius:6px;background:#fafbfc;}");
+  doc.write(".proj-edit-table{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px;}");
+  doc.write(".proj-edit-table th,.proj-edit-table td{border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:5px 7px;vertical-align:middle;}");
+  doc.write(".proj-edit-table th:first-child,.proj-edit-table td:first-child{border-left:1px solid #e5e7eb;}");
+  doc.write(".proj-edit-table thead th{border-top:1px solid #e5e7eb;background:#eef2f7;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:1;}");
+  doc.write(".proj-edit-table tbody tr:nth-child(even){background:#fff;}");
+  doc.write(".proj-edit-table tbody tr:nth-child(odd){background:#f8fafc;}");
+  doc.write(".proj-edit-table tbody tr:hover{background:#f1f5f9;}");
+  doc.write(".proj-cell-num,.proj-edit-table th.proj-cell-num{text-align:right;}");
+  doc.write(".proj-cell-select,.proj-edit-table th.proj-cell-select{text-align:center;}");
+  doc.write(".proj-cell-input.proj-cell-num{min-width:4.2em;max-width:7.5em;width:100%;text-align:right;font-variant-numeric:tabular-nums;}");
+  doc.write(".proj-cell-input.proj-cell-text{min-width:6.5em;max-width:12em;width:100%;}");
+  doc.write(".proj-cell-input{width:100%;}");
+  doc.write(".proj-row-actions{width:64px;min-width:64px;text-align:center;white-space:nowrap;}");
   doc.write(".btn-table-add{margin-top:8px;background:#eef2ff;color:#1e3a8a;border:1px solid #c7d2fe;border-radius:4px;padding:5px 10px;font-weight:600;cursor:pointer;}");
   doc.write(".btn-table-del{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;}");
   doc.write("#jsonEditor{width:100%;height:100%;min-height:100%;box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:monospace;font-size:12px;line-height:1.35;resize:none;}");
@@ -6045,6 +6483,49 @@ function initProjectEditorWindow(w, view, title) {
     return w > 0 ? w : fallback;
   }
 
+  function pickZFromSurfaces(surfaces, key, fallback) {
+    if (!Array.isArray(surfaces)) return fallback;
+    for (const s of surfaces) {
+      const v = Number(s && s[key]);
+      if (Number.isFinite(v)) return v;
+    }
+    return fallback;
+  }
+
+  function findOldWindSurface(oldSurfaces, faceDirection, surfaceRole) {
+    if (!Array.isArray(oldSurfaces)) return null;
+    const fd = String(faceDirection || "").toUpperCase();
+    const sr = String(surfaceRole || "").toUpperCase();
+    return oldSurfaces.find((s) =>
+      String(s && s.face_direction || "").toUpperCase() === fd
+      && String(s && s.surface_role || "").toUpperCase() === sr
+    ) || null;
+  }
+
+  function buildWindSurfaceEntry(spec, oldSurfaces, zFallback, widthFallback) {
+    const old = findOldWindSurface(oldSurfaces, spec.face_direction, spec.surface_role);
+    const cfDefault = spec.surface_role === "WINDWARD" ? 0.8 : -0.4;
+    const zBottom = old && Number.isFinite(Number(old.z_bottom))
+      ? Number(old.z_bottom) : zFallback.zBottom;
+    const zTop = old && Number.isFinite(Number(old.z_top))
+      ? Number(old.z_top) : zFallback.zTop;
+    const width = old && Number.isFinite(Number(old.width)) && Number(old.width) > 0
+      ? Number(old.width) : widthFallback;
+    const cf = old && old.Cf != null && old.Cf !== "" && Number.isFinite(Number(old.Cf))
+      ? Number(old.Cf) : cfDefault;
+    return {
+      id: spec.id,
+      name: spec.name,
+      wind_case_id: spec.wind_case_id,
+      face_direction: spec.face_direction,
+      surface_role: spec.surface_role,
+      z_bottom: zBottom,
+      z_top: zTop,
+      width: width,
+      Cf: cf,
+    };
+  }
+
   function buildWind4Dir(project) {
     const loadConditions = project.load_conditions || (project.load_conditions = {});
     const wind = loadConditions.wind || (loadConditions.wind = {});
@@ -6059,7 +6540,11 @@ function initProjectEditorWindow(w, view, title) {
     const pressureMode = String(baseCase.pressure_mode || "STORY_HEIGHT_KZ");
     const useKz = baseCase.use_Kz == null ? true : !!baseCase.use_Kz;
     const inputMode = String(baseCase.diaphragm_input_mode || "DIAPHRAGM_UNIFORM");
-    const zTop = computeStoryTop(project);
+    const storyTop = computeStoryTop(project);
+    const zFallback = {
+      zBottom: pickZFromSurfaces(oldSurfaces, "z_bottom", 0.0),
+      zTop: pickZFromSurfaces(oldSurfaces, "z_top", storyTop),
+    };
     const xWidth = pickWidthFromSurfaces(oldSurfaces, "x", 5.46);
     const yWidth = pickWidthFromSurfaces(oldSurfaces, "y", 8.0);
 
@@ -6070,16 +6555,19 @@ function initProjectEditorWindow(w, view, title) {
       { id: 4, name: "WY-", direction: "Y_MINUS", load_case: 7, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
     ];
 
-    wind.surfaces = [
-      { id: 1, name: "X_plus_windward_wall", wind_case_id: 1, face_direction: "X_PLUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: 0.8 },
-      { id: 2, name: "X_plus_leeward_wall", wind_case_id: 1, face_direction: "X_MINUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: -0.4 },
-      { id: 3, name: "X_minus_windward_wall", wind_case_id: 2, face_direction: "X_MINUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: 0.8 },
-      { id: 4, name: "X_minus_leeward_wall", wind_case_id: 2, face_direction: "X_PLUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: xWidth, Cf: -0.4 },
-      { id: 5, name: "Y_plus_windward_wall", wind_case_id: 3, face_direction: "Y_PLUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: 0.8 },
-      { id: 6, name: "Y_plus_leeward_wall", wind_case_id: 3, face_direction: "Y_MINUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: -0.4 },
-      { id: 7, name: "Y_minus_windward_wall", wind_case_id: 4, face_direction: "Y_MINUS", surface_role: "WINDWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: 0.8 },
-      { id: 8, name: "Y_minus_leeward_wall", wind_case_id: 4, face_direction: "Y_PLUS", surface_role: "LEEWARD", z_bottom: 0.0, z_top: zTop, width: yWidth, Cf: -0.4 },
+    const surfaceSpecs = [
+      { id: 1, name: "X_plus_windward_wall", wind_case_id: 1, face_direction: "X_PLUS", surface_role: "WINDWARD", width: xWidth },
+      { id: 2, name: "X_plus_leeward_wall", wind_case_id: 1, face_direction: "X_MINUS", surface_role: "LEEWARD", width: xWidth },
+      { id: 3, name: "X_minus_windward_wall", wind_case_id: 2, face_direction: "X_MINUS", surface_role: "WINDWARD", width: xWidth },
+      { id: 4, name: "X_minus_leeward_wall", wind_case_id: 2, face_direction: "X_PLUS", surface_role: "LEEWARD", width: xWidth },
+      { id: 5, name: "Y_plus_windward_wall", wind_case_id: 3, face_direction: "Y_PLUS", surface_role: "WINDWARD", width: yWidth },
+      { id: 6, name: "Y_plus_leeward_wall", wind_case_id: 3, face_direction: "Y_MINUS", surface_role: "LEEWARD", width: yWidth },
+      { id: 7, name: "Y_minus_windward_wall", wind_case_id: 4, face_direction: "Y_MINUS", surface_role: "WINDWARD", width: yWidth },
+      { id: 8, name: "Y_minus_leeward_wall", wind_case_id: 4, face_direction: "Y_PLUS", surface_role: "LEEWARD", width: yWidth },
     ];
+    wind.surfaces = surfaceSpecs.map((spec) =>
+      buildWindSurfaceEntry(spec, oldSurfaces, zFallback, spec.width)
+    );
     wind.member_loads = memberLoads;
     return project;
   }
@@ -6264,6 +6752,9 @@ function openLoadsVerifyWindow() {
 
 window.openProjectWindow = openProjectWindow;
 window.reloadCurrentModel = () => loadSelectedModel(false);
+window.refreshWindVisual = () => loadWindVisualForCurrentModel().then(function () {
+  if (currentModel) rebuildScene();
+});
 
 function showTextDocumentWindow(text, title) {
   const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
@@ -6612,6 +7103,7 @@ async function loadSelectedModel(solve, options) {
     setDispContourControlsEnabled(complete);
     if (!complete) el.chkDeformed.checked = false;
     if (!complete && el.chkDispContour) el.chkDispContour.checked = false;
+    await loadWindVisualForCurrentModel();
     if (solve && complete) {
       el.chkReactions.checked = true;
     }
@@ -6751,6 +7243,10 @@ el.btnLoads.addEventListener("click", () => openLoadsVerifyWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
+  if (windVisualData && el.chkWindLoads && el.chkWindLoads.checked) {
+    selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+    populateWindCaseSelect();
+  }
   if (currentModel) rebuildScene();
   updateSelectionPanel();
 });
@@ -6794,6 +7290,28 @@ el.chkLoads.addEventListener("change", () => {
 el.chkLoadValues.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });
+if (el.chkWindLoads) {
+  el.chkWindLoads.addEventListener("change", () => {
+    populateWindCaseSelect();
+    updateWindControlsAvailability();
+    if (el.chkWindLoads.checked && windVisualData) {
+      const wc = windCaseById(windVisualData, selectedWindCaseId);
+      syncLcToWindCase(wc);
+    }
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.windCaseSelect) {
+  el.windCaseSelect.addEventListener("change", () => {
+    const raw = el.windCaseSelect.value;
+    selectedWindCaseId = raw ? Number(raw) : null;
+    if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
+      const wc = windCaseById(windVisualData, selectedWindCaseId);
+      syncLcToWindCase(wc);
+    }
+    if (currentModel) rebuildScene();
+  });
+}
 el.chkReactions.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });

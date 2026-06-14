@@ -6,9 +6,10 @@ from stb_loads.wind import WIND_NOTICE, WindDistributionResult
 from stb_loads.wind_equilibrium import compute_wind_equilibrium
 
 UNIFORM_INPUT_NOTE = (
-    "MVP では DIAPHRAGM_UNIFORM として、階風力合力 F_story を "
-    "DLOD_area_load = F_story / diaphragm_area [kN/m²] の水平面荷重として等価入力します。"
-    "これは床面への風圧ではなく、外壁風荷重の全体解析用等価入力です。"
+    "DIAPHRAGM_DIRECT / DIAPHRAGM_UNIFORM では、外壁面風圧を各ダイアフラムの支配高さ "
+    "（隣接ダイアフラムとの中間高さで区切る）に集約し、"
+    "F_story を DLOD_area_load = F_story / diaphragm_area [kN/m²] として等価入力します。"
+    "基礎側に割り当てた F_wind_to_base は DLOD には出力しません。"
 )
 
 
@@ -101,7 +102,53 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
     else:
         parts.append("_受圧面別風力なし_")
 
-    parts.extend(["", "## 4. 階風力合力 F_story"])
+    parts.extend(["", "## 4. ダイアフラム支配高さ別 風力集約"])
+    if result.diaphragm_tributary_rows:
+        trib_rows = []
+        for row in result.diaphragm_tributary_rows:
+            trib_rows.append([
+                row.diaphragm_id,
+                _fmt(row.diaphragm_level_m, 3),
+                _fmt(row.lower_adjacent_level_m, 3) if row.lower_adjacent_level_m is not None else "—",
+                _fmt(row.upper_adjacent_level_m, 3) if row.upper_adjacent_level_m is not None else "—",
+                _fmt(row.tributary_z_bottom, 3),
+                _fmt(row.tributary_z_top, 3),
+                _fmt(row.tributary_height, 3),
+                _fmt(row.exposed_width, 3),
+                _fmt(row.tributary_area_m2, 3),
+                _fmt(row.wind_pressure_w_N_m2, 1),
+                _fmt(row.story_wind_force_kN, 3),
+                "Yes" if row.output_to_dlod else "No",
+            ])
+        parts.append(_md_table(
+            [
+                "DIAP", "level", "lower", "upper", "z_bot", "z_top", "h_trib",
+                "width", "A_trib", "w", "F_story", "DLOD",
+            ],
+            trib_rows,
+        ))
+    else:
+        parts.append("_ダイアフラム支配高さ集約なし_")
+
+    if result.base_wind_forces:
+        parts.extend(["", "### 基礎側風力 F_wind_to_base"])
+        base_rows = []
+        for row in result.base_wind_forces:
+            base_rows.append([
+                row.wind_case_id,
+                _fmt(row.z_bottom, 3),
+                _fmt(row.z_top, 3),
+                _fmt(row.tributary_height, 3),
+                _fmt(row.tributary_area_m2, 3),
+                _fmt(row.wind_pressure_w_N_m2, 1),
+                _fmt(row.f_wind_to_base_kN, 3),
+            ])
+        parts.append(_md_table(
+            ["case", "z_bot", "z_top", "h", "A_trib", "w", "F_to_base"],
+            base_rows,
+        ))
+
+    parts.extend(["", "## 5. 階風力合力 F_story（ダイアフラム集約）"])
     if result.story_forces:
         sf_rows = []
         for sf in result.story_forces:
@@ -122,7 +169,7 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
     else:
         parts.append("_階風力なし_")
 
-    parts.extend(["", "## 5. DLOD等価入力（DIAPHRAGM_UNIFORM）"])
+    parts.extend(["", "## 6. DLOD等価入力"])
     if result.diaphragm_loads:
         dl_rows = []
         for dl in result.diaphragm_loads:
@@ -144,7 +191,7 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
     else:
         parts.append("_DLOD出力なし_")
 
-    parts.extend(["", "## 6. 釣合チェック"])
+    parts.extend(["", "## 7. 釣合・分配チェック"])
     if mdl is not None:
         eq_rows = compute_wind_equilibrium(mdl, result)
         if eq_rows:
@@ -154,13 +201,15 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
                     row["wind_case_name"],
                     _fmt(row["sum_f_wind_generated_kN"], 3),
                     _fmt(row["sum_f_dlod_output_kN"], 3),
+                    _fmt(row.get("sum_f_to_base_kN", 0.0), 3),
                     _fmt(row["fx_applied_kN"], 3),
                     _fmt(row["sum_reaction_kN"], 3),
                     _fmt(row["equilibrium_residual_kN"], 4),
                     "OK" if row["equilibrium_ok"] else "NG",
+                    "OK" if row.get("distribution_ok", True) else "NG",
                 ])
             parts.append(_md_table(
-                ["ケース", "ΣF_story", "ΣF_DLOD", "ΣFx_applied", "ΣRx", "残差", "判定"],
+                ["ケース", "ΣF_wall", "ΣF_DLOD", "ΣF_base", "ΣFx", "ΣRx", "残差", "釣合", "分配"],
                 check_rows,
             ))
         else:
@@ -173,7 +222,7 @@ def render_wind_markdown(result: WindDistributionResult, project=None, mdl=None)
         for w in result.warnings:
             parts.append("- " + w)
 
-    parts.extend(["", "## 7. 注意", "", "> " + WIND_NOTICE, ""])
+    parts.extend(["", "## 8. 注意", "", "> " + WIND_NOTICE, ""])
     return "\n".join(parts)
 
 
@@ -278,6 +327,67 @@ def build_wind_story_force_rows(result: WindDistributionResult):
     return rows
 
 
+def build_wind_tributary_rows(result: WindDistributionResult):
+    case_names = {c.case_id: c.name for c in result.cases}
+    rows = []
+    for row in result.diaphragm_tributary_rows:
+        rows.append({
+            "wind_case_id": row.wind_case_id,
+            "wind_case": case_names.get(row.wind_case_id, str(row.wind_case_id)),
+            "diaphragm_id": row.diaphragm_id,
+            "diaphragm_level": row.diaphragm_level_m,
+            "lower_adjacent_level": row.lower_adjacent_level_m,
+            "upper_adjacent_level": row.upper_adjacent_level_m,
+            "tributary_z_bottom": row.tributary_z_bottom,
+            "tributary_z_top": row.tributary_z_top,
+            "tributary_height": row.tributary_height,
+            "exposed_width": row.exposed_width,
+            "tributary_area": row.tributary_area_m2,
+            "wind_pressure": row.wind_pressure_w_N_m2,
+            "story_wind_force": row.story_wind_force_kN,
+            "output_to_dlod": row.output_to_dlod,
+            "story": row.story,
+            "windward_force_kN": row.windward_force_kN,
+            "leeward_force_kN": row.leeward_force_kN,
+        })
+    return rows
+
+
+def build_wind_base_rows(result: WindDistributionResult):
+    case_names = {c.case_id: c.name for c in result.cases}
+    rows = []
+    for row in result.base_wind_forces:
+        rows.append({
+            "wind_case_id": row.wind_case_id,
+            "wind_case": case_names.get(row.wind_case_id, str(row.wind_case_id)),
+            "z_bottom": row.z_bottom,
+            "z_top": row.z_top,
+            "tributary_height": row.tributary_height,
+            "tributary_area": row.tributary_area_m2,
+            "wind_pressure": row.wind_pressure_w_N_m2,
+            "f_wind_to_base_kN": row.f_wind_to_base_kN,
+        })
+    return rows
+
+
+def build_wind_validation_rows(result: WindDistributionResult):
+    rows = []
+    for row in result.tributary_validations:
+        rows.append({
+            "wind_case_id": row.wind_case_id,
+            "gross_wall_area_m2": row.gross_wall_area_m2,
+            "diaphragm_tributary_area_m2": row.diaphragm_tributary_area_m2,
+            "base_tributary_area_m2": row.base_tributary_area_m2,
+            "gross_wall_force_kN": row.gross_wall_force_kN,
+            "diaphragm_force_kN": row.diaphragm_force_kN,
+            "base_force_kN": row.base_force_kN,
+            "area_conservation_ok": row.area_conservation_ok,
+            "force_conservation_ok": row.force_conservation_ok,
+            "conservation_ok": row.conservation_ok,
+        })
+    return rows
+
+
 def build_wind_diaphragm_rows(result: WindDistributionResult):
     rows = []
     for dl in result.diaphragm_loads:
@@ -371,6 +481,20 @@ def build_wind_visual_cases(mdl, result: WindDistributionResult):
                 "axis": dl.axis,
                 "sign": dl.sign,
             })
+        tributary_rows = []
+        for tr in result.diaphragm_tributary_rows:
+            if tr.wind_case_id != case.case_id:
+                continue
+            tributary_rows.append({
+                "diaphragm_id": tr.diaphragm_id,
+                "story": tr.story,
+                "diaphragm_level": tr.diaphragm_level_m,
+                "tributary_z_bottom": tr.tributary_z_bottom,
+                "tributary_z_top": tr.tributary_z_top,
+                "tributary_height": tr.tributary_height,
+                "story_wind_force_kN": tr.story_wind_force_kN,
+                "output_to_dlod": tr.output_to_dlod,
+            })
         visual_cases.append({
             "wind_case_id": case.case_id,
             "name": case.name,
@@ -384,6 +508,7 @@ def build_wind_visual_cases(mdl, result: WindDistributionResult):
             "surfaces": surfaces,
             "story_forces": story_forces,
             "diaphragm_loads": diaphragm_loads,
+            "tributary_rows": tributary_rows,
         })
 
     return {"bbox": bbox, "cases": visual_cases}
@@ -407,12 +532,25 @@ def build_wind_report_checks(result: WindDistributionResult, report: dict):
         "ok": dlod_count > 0,
         "detail": "{0} 件".format(dlod_count),
     })
+    if result.tributary_validations:
+        all_ok = all(r.conservation_ok for r in result.tributary_validations)
+        checks.append({
+            "label": "外壁面積・風力の支配高さ分配（ΣF_wall = ΣF_DLOD + ΣF_base）",
+            "ok": all_ok,
+            "detail": "OK" if all_ok else "NG あり",
+        })
     if report.get("equilibrium_rows"):
         all_ok = all(r.get("equilibrium_ok") for r in report["equilibrium_rows"])
         checks.append({
             "label": "解析モデルでの荷重・反力釣合",
             "ok": all_ok,
             "detail": "OK" if all_ok else "NG あり",
+        })
+        dist_ok = all(r.get("distribution_ok", True) for r in report["equilibrium_rows"])
+        checks.append({
+            "label": "DLOD + 基礎側風力 = 外壁生成風力",
+            "ok": dist_ok,
+            "detail": "OK" if dist_ok else "NG あり",
         })
     return checks
 
@@ -421,11 +559,14 @@ def build_wind_report_view(result: WindDistributionResult, project=None, mdl=Non
     report = {
         "summary": build_wind_summary_rows(result),
         "surface_rows": build_wind_surface_rows(result),
+        "tributary_rows": build_wind_tributary_rows(result),
+        "base_wind_rows": build_wind_base_rows(result),
+        "validation_rows": build_wind_validation_rows(result),
         "story_force_rows": build_wind_story_force_rows(result),
         "diaphragm_rows": build_wind_diaphragm_rows(result),
         "uniform_input_note": UNIFORM_INPUT_NOTE,
         "report_notice": WIND_NOTICE,
-        "dlod_section_title": "DLOD 等価入力（DIAPHRAGM_UNIFORM）",
+        "dlod_section_title": "DLOD 等価入力",
         "visual": build_wind_visual_cases(mdl, result),
     }
     if mdl is not None:

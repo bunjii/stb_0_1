@@ -11,9 +11,12 @@ import common
 from stb_loads.story import (
     diaphragm_area_m2,
     diaphragm_floor_z,
-    resolve_diaphragm_story,
-    sorted_stories,
-    story_mass_height,
+)
+from stb_loads.wind_tributary import (
+    aggregate_case_by_tributary,
+    build_diaphragm_levels,
+    resolve_base_support_context,
+    validate_tributary_conservation,
 )
 from stb_project import (
     DEFAULT_WIND_DIAPHRAGM_INPUT_MODE,
@@ -35,6 +38,7 @@ WIND_NOTICE = (
 )
 
 _DIAPHRAGM_OUTPUT_MODES = frozenset({
+    "DIAPHRAGM_DIRECT",
     "DIAPHRAGM_UNIFORM",
     "DIAPHRAGM_FORCE_WITH_TORSION",
 })
@@ -115,6 +119,54 @@ class WindStoryForce:
 
 
 @dataclass(frozen=True)
+class WindDiaphragmTributarySummary:
+    wind_case_id: int
+    diaphragm_id: int
+    story: str
+    diaphragm_level_m: float
+    lower_adjacent_level_m: Optional[float]
+    upper_adjacent_level_m: Optional[float]
+    tributary_z_bottom: float
+    tributary_z_top: float
+    tributary_height: float
+    exposed_width: float
+    tributary_area_m2: float
+    wind_pressure_w_N_m2: float
+    story_wind_force_kN: float
+    output_to_dlod: bool
+    windward_force_kN: float = 0.0
+    leeward_force_kN: float = 0.0
+
+
+@dataclass(frozen=True)
+class WindBaseWindForce:
+    wind_case_id: int
+    z_bottom: float
+    z_top: float
+    tributary_height: float
+    tributary_area_m2: float
+    wind_pressure_w_N_m2: float
+    f_wind_to_base_kN: float
+
+
+@dataclass(frozen=True)
+class WindTributaryValidation:
+    wind_case_id: int
+    gross_wall_area_m2: float
+    diaphragm_tributary_area_m2: float
+    base_tributary_area_m2: float
+    gross_wall_force_kN: float
+    diaphragm_force_kN: float
+    base_force_kN: float
+    area_conservation_ok: bool
+    force_conservation_ok: bool
+
+    @property
+    def conservation_ok(self) -> bool:
+        return self.area_conservation_ok and self.force_conservation_ok
+
+
+@dataclass(frozen=True)
 class WindDiaphragmLoad:
     wind_case_id: int
     load_case: int
@@ -139,6 +191,9 @@ class WindDistributionResult:
     surfaces: Tuple[WindSurfaceSummary, ...] = ()
     surface_contributions: Tuple[WindSurfaceStoryContribution, ...] = ()
     story_forces: Tuple[WindStoryForce, ...] = ()
+    diaphragm_tributary_rows: Tuple[WindDiaphragmTributarySummary, ...] = ()
+    base_wind_forces: Tuple[WindBaseWindForce, ...] = ()
+    tributary_validations: Tuple[WindTributaryValidation, ...] = ()
     diaphragm_loads: Tuple[WindDiaphragmLoad, ...] = ()
     warnings: Tuple[str, ...] = ()
 
@@ -191,14 +246,6 @@ def compute_story_torsion_mz_knm(f_story_kN: float, eccentricity_e_m: float) -> 
     return f_story_kN * float(eccentricity_e_m)
 
 
-def _intersect_height(z_bottom: float, z_top: float, story) -> Optional[Tuple[float, float, float]]:
-    z_lo = max(z_bottom, story.elevation)
-    z_hi = min(z_top, story.elevation + story.height)
-    if z_hi - z_lo <= common.PRES_ZERO:
-        return None
-    return z_lo, z_hi, z_hi - z_lo
-
-
 def _pressure_at_z(
     z_ref: float,
     case: WindLoadCaseSettings,
@@ -219,10 +266,6 @@ def _pressure_at_z(
         er = compute_er(building_h, roughness)
         q = compute_q_N_m2(case.v0, er, gf)
     return q, compute_w_N_m2(cf, q)
-
-
-def _diaphragm_story_map(project: ProjectDefinition) -> Dict[str, int]:
-    return {d.story: d.diaphragm_id for d in project.load_conditions.diaphragms}
 
 
 def _case_by_id(settings: WindLoadSettings) -> Dict[int, WindLoadCaseSettings]:
@@ -272,8 +315,6 @@ def compute_wind_distribution(
         return WindDistributionResult()
 
     warnings: List[str] = []
-    stories = sorted_stories(project.stories)
-    diap_by_story = _diaphragm_story_map(project)
     case_map = _case_by_id(wind)
     mode_warnings, blocked_surfaces = _validate_surface_output_modes(wind, case_map)
     warnings.extend(mode_warnings)
@@ -281,7 +322,16 @@ def compute_wind_distribution(
     case_summaries: List[WindCaseSummary] = []
     surface_summaries: List[WindSurfaceSummary] = []
     contributions: List[WindSurfaceStoryContribution] = []
-    story_buckets: Dict[Tuple[int, str], Dict[str, float]] = {}
+    tributary_rows: List[WindDiaphragmTributarySummary] = []
+    base_forces: List[WindBaseWindForce] = []
+    tributary_validations: List[WindTributaryValidation] = []
+    story_forces: List[WindStoryForce] = []
+    diaphragm_loads: List[WindDiaphragmLoad] = []
+
+    diap_levels = build_diaphragm_levels(mdl, project, warnings)
+    z_base, base_fixed = resolve_base_support_context(project)
+    if not diap_levels:
+        warnings.append("No diaphragm levels resolved; wind tributary aggregation skipped.")
 
     for case in wind.cases:
         if case.diaphragm_input_mode == "EDGE_OR_MEMBER_LOAD":
@@ -355,137 +405,186 @@ def compute_wind_distribution(
             cf=cf,
         ))
 
-        if case.diaphragm_input_mode not in _DIAPHRAGM_OUTPUT_MODES.union(_MEMBER_OUTPUT_MODES):
+    case_summary_map = {c.case_id: c for c in case_summaries}
+    active_surfaces = [s for s in wind.surfaces if s.surface_id not in blocked_surfaces]
+    for case in wind.cases:
+        if case.diaphragm_input_mode not in _DIAPHRAGM_OUTPUT_MODES:
+            continue
+        if not diap_levels:
             continue
 
         building_h = resolve_building_height_m(case, project.stories)
         gf, _ = resolve_wind_gf(case, building_h)
+        roughness = case.roughness_category
 
-        for story in stories:
-            hit = _intersect_height(surf.z_bottom, surf.z_top, story)
-            if hit is None:
-                continue
-            z_lo, z_hi, seg_h = hit
-            z_ref = 0.5 * (z_lo + z_hi)
-            trib_area = seg_h * surf.width
-            _, w = _pressure_at_z(z_ref, case, case.roughness_category, building_h, cf, gf)
-            force = story_force_kN(w, trib_area)
+        def pressure_at_z(z_ref: float, cf_value: float) -> float:
+            _, w = _pressure_at_z(z_ref, case, roughness, building_h, cf_value, gf)
+            return w
 
+        emit_dlod = True
+        diap_buckets, base_bucket, raw_contribs, gross_force = aggregate_case_by_tributary(
+            case,
+            active_surfaces,
+            diap_levels,
+            z_base,
+            base_fixed,
+            pressure_at_z,
+            emit_dlod,
+        )
+
+        ok, validation = validate_tributary_conservation(
+            case.case_id,
+            active_surfaces,
+            diap_buckets,
+            base_bucket,
+            gross_force,
+        )
+        tributary_validations.append(WindTributaryValidation(
+            wind_case_id=case.case_id,
+            gross_wall_area_m2=validation["gross_wall_area_m2"],
+            diaphragm_tributary_area_m2=validation["diaphragm_tributary_area_m2"],
+            base_tributary_area_m2=validation["base_tributary_area_m2"],
+            gross_wall_force_kN=validation["gross_wall_force_kN"],
+            diaphragm_force_kN=validation["diaphragm_force_kN"],
+            base_force_kN=validation["base_force_kN"],
+            area_conservation_ok=validation["area_conservation_ok"],
+            force_conservation_ok=validation["force_conservation_ok"],
+        ))
+        if not ok:
+            warnings.append(
+                "Wind case '{0}': tributary conservation check failed "
+                "(area_ok={1}, force_ok={2}).".format(
+                    case.name,
+                    validation["area_conservation_ok"],
+                    validation["force_conservation_ok"],
+                )
+            )
+
+        for row in raw_contribs:
+            z_ref = 0.5 * (row["z_bottom"] + row["z_top"])
             contributions.append(WindSurfaceStoryContribution(
-                wind_case_id=case.case_id,
-                story=story.name,
-                z_bottom=z_lo,
-                z_top=z_hi,
+                wind_case_id=row["wind_case_id"],
+                story=row["story"],
+                z_bottom=row["z_bottom"],
+                z_top=row["z_top"],
                 z_ref=z_ref,
-                surface_id=surf.surface_id,
-                surface_name=surf.name,
-                surface_role=surf.surface_role,
-                cf=cf,
-                tributary_area_m2=trib_area,
-                pressure_w_N_m2=w,
-                force_kN=force,
+                surface_id=row["surface_id"],
+                surface_name=row["surface_name"],
+                surface_role=row["surface_role"],
+                cf=row["cf"],
+                tributary_area_m2=row["tributary_area_m2"],
+                pressure_w_N_m2=row["pressure_w_N_m2"],
+                force_kN=row["force_kN"],
             ))
 
-            key = (case.case_id, story.name)
-            bucket = story_buckets.setdefault(key, {
-                "f_story_kN": 0.0,
-                "trib_area_m2": 0.0,
-                "windward_kN": 0.0,
-                "leeward_kN": 0.0,
-                "z_bottom": z_lo,
-                "z_top": z_hi,
-                "z_ref": story_mass_height(story),
-            })
-            bucket["f_story_kN"] += force
-            bucket["trib_area_m2"] += trib_area
-            if surf.surface_role == "LEEWARD":
-                bucket["leeward_kN"] += force
-            elif surf.surface_role == "WINDWARD":
-                bucket["windward_kN"] += force
-            bucket["z_bottom"] = min(bucket["z_bottom"], z_lo)
-            bucket["z_top"] = max(bucket["z_top"], z_hi)
+        if base_bucket is not None and base_bucket.f_wind_to_base_kN > common.PRES_ZERO:
+            base_forces.append(WindBaseWindForce(
+                wind_case_id=case.case_id,
+                z_bottom=base_bucket.z_bottom,
+                z_top=base_bucket.z_top,
+                tributary_height=base_bucket.height,
+                tributary_area_m2=base_bucket.tributary_area_m2,
+                wind_pressure_w_N_m2=base_bucket.wind_pressure_w_N_m2,
+                f_wind_to_base_kN=base_bucket.f_wind_to_base_kN,
+            ))
 
-    story_forces: List[WindStoryForce] = []
-    diap_accum: Dict[Tuple[int, int, int], Dict[str, float]] = {}
+        for bucket in diap_buckets.values():
+            if bucket.f_story_kN <= common.PRES_ZERO and bucket.tributary_area_m2 <= common.PRES_ZERO:
+                continue
+            tributary_rows.append(WindDiaphragmTributarySummary(
+                wind_case_id=bucket.wind_case_id,
+                diaphragm_id=bucket.diaphragm_id,
+                story=bucket.story,
+                diaphragm_level_m=bucket.diaphragm_level,
+                lower_adjacent_level_m=bucket.lower_adjacent_level,
+                upper_adjacent_level_m=bucket.upper_adjacent_level,
+                tributary_z_bottom=bucket.tributary_z_bottom,
+                tributary_z_top=bucket.tributary_z_top,
+                tributary_height=bucket.tributary_height,
+                exposed_width=bucket.exposed_width,
+                tributary_area_m2=bucket.tributary_area_m2,
+                wind_pressure_w_N_m2=bucket.wind_pressure_w_N_m2,
+                story_wind_force_kN=bucket.f_story_kN,
+                output_to_dlod=bucket.output_to_dlod,
+                windward_force_kN=bucket.windward_force_kN,
+                leeward_force_kN=bucket.leeward_force_kN,
+            ))
+            story_forces.append(WindStoryForce(
+                wind_case_id=bucket.wind_case_id,
+                story=bucket.story,
+                z_bottom=bucket.tributary_z_bottom,
+                z_top=bucket.tributary_z_top,
+                z_ref=bucket.diaphragm_level,
+                f_story_kN=bucket.f_story_kN,
+                tributary_wall_area_m2=bucket.tributary_area_m2,
+                windward_force_kN=bucket.windward_force_kN,
+                leeward_force_kN=bucket.leeward_force_kN,
+                target_diaphragm_id=bucket.diaphragm_id,
+                output_to_dlod=bucket.output_to_dlod,
+            ))
 
-    for (case_id, story_name), bucket in sorted(story_buckets.items()):
-        case = case_map[case_id]
-        diap_id = diap_by_story.get(story_name)
-        emit_dlod = case.diaphragm_input_mode in _DIAPHRAGM_OUTPUT_MODES and diap_id is not None
-        story_forces.append(WindStoryForce(
-            wind_case_id=case_id,
-            story=story_name,
-            z_bottom=bucket["z_bottom"],
-            z_top=bucket["z_top"],
-            z_ref=bucket["z_ref"],
-            f_story_kN=bucket["f_story_kN"],
-            tributary_wall_area_m2=bucket["trib_area_m2"],
-            windward_force_kN=bucket["windward_kN"],
-            leeward_force_kN=bucket["leeward_kN"],
-            target_diaphragm_id=diap_id,
-            output_to_dlod=emit_dlod,
-        ))
-        if emit_dlod and diap_id is not None:
-            key = (case_id, diap_id, case.load_case)
-            diap_accum[key] = {
-                "f_story_kN": bucket["f_story_kN"],
-                "trib_area_m2": bucket["trib_area_m2"],
-                "story": story_name,
-                "z_ref": bucket["z_ref"],
-                "eccentricity_e_m": None,
-            }
-
-    diaphragm_loads: List[WindDiaphragmLoad] = []
-    case_summary_map = {c.case_id: c for c in case_summaries}
-    for (case_id, diap_id, lc), bucket in sorted(diap_accum.items()):
-        case = case_summary_map[case_id]
-        area = diaphragm_area_m2(mdl, diap_id)
-        f_story = bucket["f_story_kN"]
-        p_area = uniform_diaphragm_area_load_kN_m2(f_story, area)
-        floor_z = diaphragm_floor_z(mdl, diap_id)
-        story_name = bucket["story"]
-        if not story_name and floor_z is not None:
-            story_name = resolve_diaphragm_story(
-                diap_id, floor_z, project.stories,
-                {d.diaphragm_id: d.story for d in project.load_conditions.diaphragms},
-                warnings,
-            )
-        ecc = bucket.get("eccentricity_e_m")
-        mz = compute_story_torsion_mz_knm(f_story, ecc) if ecc is not None else None
-        diaphragm_loads.append(WindDiaphragmLoad(
-            wind_case_id=case_id,
-            load_case=lc,
-            diaphragm_id=diap_id,
-            story=story_name,
-            direction=case.direction,
-            axis=case.axis,
-            sign=case.sign,
-            load_level_m=floor_z if floor_z is not None else bucket["z_ref"],
-            input_mode=case.diaphragm_input_mode,
-            f_story_kN=f_story,
-            diaphragm_area_m2=area,
-            area_load_kN_m2=p_area,
-            tributary_wall_area_m2=bucket["trib_area_m2"],
-            eccentricity_e_m=ecc,
-            mz_knm=mz,
-        ))
+            if not bucket.output_to_dlod:
+                continue
+            area = diaphragm_area_m2(mdl, bucket.diaphragm_id)
+            f_story = bucket.f_story_kN
+            p_area = uniform_diaphragm_area_load_kN_m2(f_story, area)
+            floor_z = diaphragm_floor_z(mdl, bucket.diaphragm_id)
+            summary = case_summary_map[bucket.wind_case_id]
+            ecc = None
+            mz = compute_story_torsion_mz_knm(f_story, ecc) if ecc is not None else None
+            diaphragm_loads.append(WindDiaphragmLoad(
+                wind_case_id=bucket.wind_case_id,
+                load_case=summary.load_case,
+                diaphragm_id=bucket.diaphragm_id,
+                story=bucket.story,
+                direction=summary.direction,
+                axis=summary.axis,
+                sign=summary.sign,
+                load_level_m=floor_z if floor_z is not None else bucket.diaphragm_level,
+                input_mode=case.diaphragm_input_mode,
+                f_story_kN=f_story,
+                diaphragm_area_m2=area,
+                area_load_kN_m2=p_area,
+                tributary_wall_area_m2=bucket.tributary_area_m2,
+                eccentricity_e_m=ecc,
+                mz_knm=mz,
+            ))
 
     return WindDistributionResult(
         cases=tuple(case_summaries),
         surfaces=tuple(surface_summaries),
         surface_contributions=tuple(contributions),
         story_forces=tuple(story_forces),
+        diaphragm_tributary_rows=tuple(tributary_rows),
+        base_wind_forces=tuple(base_forces),
+        tributary_validations=tuple(tributary_validations),
         diaphragm_loads=tuple(diaphragm_loads),
         warnings=tuple(warnings),
     )
 
 
 def total_wind_generated_kN(result: WindDistributionResult, wind_case_id: Optional[int] = None) -> float:
+    if result.tributary_validations:
+        total = 0.0
+        for row in result.tributary_validations:
+            if wind_case_id is not None and row.wind_case_id != wind_case_id:
+                continue
+            total += row.gross_wall_force_kN
+        return total
     total = 0.0
     for sf in result.story_forces:
         if wind_case_id is not None and sf.wind_case_id != wind_case_id:
             continue
         total += sf.f_story_kN
+    return total
+
+
+def total_base_wind_kN(result: WindDistributionResult, wind_case_id: Optional[int] = None) -> float:
+    total = 0.0
+    for row in result.base_wind_forces:
+        if wind_case_id is not None and row.wind_case_id != wind_case_id:
+            continue
+        total += row.f_wind_to_base_kN
     return total
 
 

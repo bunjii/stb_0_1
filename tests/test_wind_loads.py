@@ -222,11 +222,46 @@ class TestWindDistribution(unittest.TestCase):
             report=project.report,
         )
         result = compute_wind_distribution(self.mdl, project)
-        story2 = next(sf for sf in result.story_forces if sf.story == "2")
+        diap10 = next(tr for tr in result.diaphragm_tributary_rows if tr.diaphragm_id == 10)
         comp_sum = sum(
-            c.force_kN for c in result.surface_contributions if c.story == "2"
+            c.force_kN for c in result.surface_contributions
+            if c.story == diap10.story
         )
-        self.assertAlmostEqual(story2.f_story_kN, comp_sum, places=3)
+        self.assertAlmostEqual(diap10.story_wind_force_kN, comp_sum, places=3)
+
+    def test_tributary_midpoint_zones_for_two_diaphragms(self):
+        from stb_loads.wind_tributary import build_diaphragm_levels, tributary_zone_for_diaphragm
+
+        project = self._project_with_wind()
+        levels = build_diaphragm_levels(self.mdl, project, [])
+        self.assertEqual([lv.diaphragm_id for lv in levels], [10, 20])
+        z_base = 0.0
+        zone10 = tributary_zone_for_diaphragm(0, levels, z_base, True)
+        zone20 = tributary_zone_for_diaphragm(1, levels, z_base, True)
+        self.assertAlmostEqual(zone10.tributary_z_bottom, 1.5175, places=3)
+        self.assertAlmostEqual(zone10.tributary_z_top, 4.54, places=2)
+        self.assertAlmostEqual(zone20.tributary_z_bottom, 4.54, places=2)
+        self.assertAlmostEqual(zone20.tributary_z_top, 6.045, places=3)
+
+    def test_roof_diaphragm_gets_upper_wall_when_surfaces_extend_above(self):
+        project = self._project_with_wind()
+        result = compute_wind_distribution(self.mdl, project)
+        diap20_rows = [tr for tr in result.diaphragm_tributary_rows if tr.diaphragm_id == 20]
+        self.assertTrue(diap20_rows)
+        self.assertGreater(diap20_rows[0].story_wind_force_kN, 0.0)
+        dlod20 = [dl for dl in result.diaphragm_loads if dl.diaphragm_id == 20]
+        self.assertTrue(dlod20)
+
+    def test_force_conservation_dlod_plus_base(self):
+        project = self._project_with_wind()
+        result = compute_wind_distribution(self.mdl, project)
+        for val in result.tributary_validations:
+            self.assertTrue(val.force_conservation_ok)
+            self.assertAlmostEqual(
+                val.gross_wall_force_kN,
+                val.diaphragm_force_kN + val.base_force_kN,
+                places=3,
+            )
 
     def test_no_dlod_for_edge_or_member_load_mode(self):
         wind = WindLoadSettings(
@@ -262,7 +297,7 @@ class TestWindDistribution(unittest.TestCase):
             report=project.report,
         )
         result = compute_wind_distribution(self.mdl, project)
-        self.assertGreater(len(result.story_forces), 0)
+        self.assertEqual(len(result.story_forces), 0)
         self.assertEqual(len(result.diaphragm_loads), 0)
         self.assertEqual(len(generate_wind_dlod_records(result)), 0)
 

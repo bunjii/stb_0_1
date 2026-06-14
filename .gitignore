@@ -19,6 +19,10 @@ build/
 .coverage
 htmlcov/
 
+# .NET / Grasshopper build artifacts
+[Bb]in/
+[Oo]bj/
+
 # Generated docs
 docs/element_stiffness_matrix.html
 

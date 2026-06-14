@@ -323,6 +323,55 @@
     return html;
   }
 
+  function renderWindTributaryTable(rows) {
+    if (!rows || !rows.length) return "";
+    let html = '<section class="lv-section"><h2 class="lv-section-title">ダイアフラム支配高さ別 風力集約</h2>';
+    html += '<div class="lv-table-wrap"><table class="lv-table"><thead><tr>';
+    html += "<th>ケース</th><th>DIAP</th><th>level m</th><th>lower m</th><th>upper m</th>";
+    html += "<th>z_bot</th><th>z_top</th><th>h_trib</th><th>width</th><th>A_trib</th><th>w</th><th>F_story</th><th>DLOD</th>";
+    html += "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      html += "<tr>";
+      html += "<td>" + escapeHtml(r.wind_case) + "</td>";
+      html += '<td class="num">' + escapeHtml(r.diaphragm_id) + "</td>";
+      html += '<td class="num">' + fmtNum(r.diaphragm_level) + "</td>";
+      html += '<td class="num">' + fmtNum(r.lower_adjacent_level) + "</td>";
+      html += '<td class="num">' + fmtNum(r.upper_adjacent_level) + "</td>";
+      html += '<td class="num">' + fmtNum(r.tributary_z_bottom) + "</td>";
+      html += '<td class="num">' + fmtNum(r.tributary_z_top) + "</td>";
+      html += '<td class="num">' + fmtNum(r.tributary_height) + "</td>";
+      html += '<td class="num">' + fmtNum(r.exposed_width) + "</td>";
+      html += '<td class="num">' + fmtNum(r.tributary_area) + "</td>";
+      html += '<td class="num">' + fmtNum(r.wind_pressure, 1) + "</td>";
+      html += '<td class="num">' + fmtNum(r.story_wind_force) + "</td>";
+      html += "<td>" + (r.output_to_dlod ? "出力" : "—") + "</td>";
+      html += "</tr>";
+    });
+    html += "</tbody></table></div></section>";
+    return html;
+  }
+
+  function renderWindBaseTable(rows) {
+    if (!rows || !rows.length) return "";
+    let html = '<section class="lv-section"><h2 class="lv-section-title">基礎側風力 F_wind_to_base</h2>';
+    html += '<div class="lv-table-wrap"><table class="lv-table"><thead><tr>';
+    html += "<th>ケース</th><th>z_bot</th><th>z_top</th><th>h</th><th>A_trib</th><th>w</th><th>F_to_base</th>";
+    html += "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      html += "<tr>";
+      html += "<td>" + escapeHtml(r.wind_case) + "</td>";
+      html += '<td class="num">' + fmtNum(r.z_bottom) + "</td>";
+      html += '<td class="num">' + fmtNum(r.z_top) + "</td>";
+      html += '<td class="num">' + fmtNum(r.tributary_height) + "</td>";
+      html += '<td class="num">' + fmtNum(r.tributary_area) + "</td>";
+      html += '<td class="num">' + fmtNum(r.wind_pressure, 1) + "</td>";
+      html += '<td class="num">' + fmtNum(r.f_wind_to_base_kN) + "</td>";
+      html += "</tr>";
+    });
+    html += "</tbody></table></div></section>";
+    return html;
+  }
+
   function renderWindStoryForceTable(rows) {
     if (!rows || !rows.length) return "";
     let html = '<section class="lv-section"><h2 class="lv-section-title">階風力合力 F_story</h2>';
@@ -375,7 +424,7 @@
     if (!rows || !rows.length) return "";
     let html = '<section class="lv-section"><h2 class="lv-section-title">荷重・反力釣合（解析モデル）</h2>';
     html += '<div class="lv-table-wrap"><table class="lv-table"><thead><tr>';
-    html += "<th>ケース</th><th>LC</th><th>方向</th><th>ΣF_story</th><th>ΣF_DLOD</th><th>ΣFx</th><th>ΣRx</th><th>残差</th><th>判定</th>";
+    html += "<th>ケース</th><th>LC</th><th>方向</th><th>ΣF_wall</th><th>ΣF_DLOD</th><th>ΣF_base</th><th>ΣFx</th><th>ΣRx</th><th>残差</th><th>判定</th>";
     html += "</tr></thead><tbody>";
     rows.forEach(function (r) {
       html += "<tr>";
@@ -384,6 +433,7 @@
       html += "<td>" + escapeHtml(r.direction) + "</td>";
       html += '<td class="num">' + fmtNum(r.sum_f_wind_generated_kN) + "</td>";
       html += '<td class="num">' + fmtNum(r.sum_f_dlod_output_kN) + "</td>";
+      html += '<td class="num">' + fmtNum(r.sum_f_to_base_kN) + "</td>";
       html += '<td class="num">' + fmtNum(r.fx_applied_kN) + "</td>";
       html += '<td class="num">' + fmtNum(r.sum_reaction_kN) + "</td>";
       html += '<td class="num">' + fmtNum(r.equilibrium_residual_kN, 4) + "</td>";
@@ -535,6 +585,8 @@
     }
     html += renderNotice(view.report_notice);
     html += renderWindSurfaceTable(view.surface_rows);
+    html += renderWindTributaryTable(view.tributary_rows);
+    html += renderWindBaseTable(view.base_wind_rows);
     html += renderWindStoryForceTable(view.story_force_rows);
     html += renderWindDiaphragmTable(view);
     html += renderWindEquilibrium(view.equilibrium_rows);

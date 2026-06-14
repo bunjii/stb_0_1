@@ -137,6 +137,15 @@
     </div>
     <div id="distanceOverlay" class="distance-overlay" hidden></div>
     <div id="viewerInfoOverlay" class="viewer-info-overlay"></div>
+    <div id="windLegendOverlay" class="viewport-wind-legend" hidden>
+      <div id="windLegendTitle" class="viewport-wind-legend-title">Wind loads</div>
+      <div id="windLegendCase" class="viewport-wind-legend-case"></div>
+      <div class="viewport-wind-legend-items">
+        <span class="wind-legend-windward">■ Windward</span>
+        <span class="wind-legend-leeward">■ Leeward</span>
+        <span class="wind-legend-flow">→ Wind dir / F_story</span>
+      </div>
+    </div>
     <div id="ejntEditPanel" class="ejnt-edit-panel" hidden>
       <div class="ejnt-edit-header">
         <span class="ejnt-edit-title">Edit joint (EJNT)</span>
@@ -198,6 +207,13 @@
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkLoadValues"> Load values
+        </label>
+        <label class="panel-check">
+          <input type="checkbox" id="chkWindLoads"> Wind (surfaces / F_story)
+        </label>
+        <label class="panel-row">
+          <span>Wind case</span>
+          <select id="windCaseSelect" disabled></select>
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkReactions"> Reactions

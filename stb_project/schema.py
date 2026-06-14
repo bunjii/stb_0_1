@@ -37,13 +37,14 @@ ALLOWED_WIND_DIRECTIONS = ("X_PLUS", "X_MINUS", "Y_PLUS", "Y_MINUS")
 ALLOWED_ROUGHNESS_CATEGORIES = ("I", "II", "III", "IV")
 ALLOWED_WIND_PRESSURE_MODES = ("BUILDING_HEIGHT_UNIFORM", "STORY_HEIGHT_KZ")
 ALLOWED_WIND_DIAPHRAGM_INPUT_MODES = (
+    "DIAPHRAGM_DIRECT",
     "DIAPHRAGM_UNIFORM",
     "DIAPHRAGM_FORCE_WITH_TORSION",
     "EDGE_OR_MEMBER_LOAD",
 )
-ALLOWED_WIND_SURFACE_ROLES = ("WINDWARD", "LEEWARD", "SIDE", "ROOF")
+ALLOWED_WIND_SURFACE_ROLES = ("WINDWARD", "LEEWARD", "SIDE", "ROOF", "PARAPET")
 DEFAULT_WIND_PRESSURE_MODE = "BUILDING_HEIGHT_UNIFORM"
-DEFAULT_WIND_DIAPHRAGM_INPUT_MODE = "DIAPHRAGM_UNIFORM"
+DEFAULT_WIND_DIAPHRAGM_INPUT_MODE = "DIAPHRAGM_DIRECT"
 DEFAULT_WIND_SURFACE_ROLE = "WINDWARD"
 
 ROUGHNESS_ZB = {"I": 5.0, "II": 5.0, "III": 5.0, "IV": 10.0}
@@ -502,27 +503,28 @@ def normalize_wind_surface_role(value: str) -> str:
         "LEESIDE": "LEEWARD",
         "SIDE": "SIDE",
         "ROOF": "ROOF",
+        "PARAPET": "PARAPET",
     }
     if text not in aliases:
-        raise ValueError("surface_role must be WINDWARD, LEEWARD, SIDE, or ROOF")
+        raise ValueError("surface_role must be WINDWARD, LEEWARD, SIDE, ROOF, or PARAPET")
     return aliases[text]
 
 
 def normalize_diaphragm_input_mode(value: str) -> str:
     text = str(value or "").strip().upper()
     aliases = {
+        "DIAPHRAGM_DIRECT": "DIAPHRAGM_DIRECT",
         "DIAPHRAGM_UNIFORM": "DIAPHRAGM_UNIFORM",
         "DIAPHRAGM_DLOD": "DIAPHRAGM_UNIFORM",
-        "DIAPHRAGM_DIRECT": "DIAPHRAGM_UNIFORM",
         "DIAPHRAGM_FORCE_WITH_TORSION": "DIAPHRAGM_FORCE_WITH_TORSION",
         "EDGE_OR_MEMBER_LOAD": "EDGE_OR_MEMBER_LOAD",
         "MEMBER_LOAD": "EDGE_OR_MEMBER_LOAD",
         "MEMBER_TRANSFER": "EDGE_OR_MEMBER_LOAD",
-        "BOTH_WITH_CHECK": "DIAPHRAGM_UNIFORM",
+        "BOTH_WITH_CHECK": "DIAPHRAGM_DIRECT",
     }
     if text not in aliases:
         raise ValueError(
-            "diaphragm_input_mode must be DIAPHRAGM_UNIFORM, "
+            "diaphragm_input_mode must be DIAPHRAGM_DIRECT, DIAPHRAGM_UNIFORM, "
             "DIAPHRAGM_FORCE_WITH_TORSION, or EDGE_OR_MEMBER_LOAD"
         )
     return aliases[text]
