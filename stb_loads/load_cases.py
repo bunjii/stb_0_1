@@ -14,6 +14,15 @@ def _lcases(mdl):
     return getattr(mdl, "lcases", []) or []
 
 
+def resolve_load_cases_by_type(mdl, load_type: int) -> Tuple[List[int], List[str]]:
+    """Return LC ids for one LNME TYPE (e.g. TYPE 1 DL, TYPE 2 LL)."""
+    typed = sorted(
+        lc.lc for lc in _lcases(mdl)
+        if getattr(lc, "load_type", None) == load_type
+    )
+    return typed, []
+
+
 def resolve_seismic_weight_load_cases(mdl, seismic_settings=None) -> Tuple[List[int], List[str]]:
     """Return LC ids used for Wi aggregation (TYPE 1 DL + TYPE 3 LL(E))."""
 

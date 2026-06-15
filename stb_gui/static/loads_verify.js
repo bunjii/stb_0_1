@@ -11,22 +11,29 @@
     main: document.getElementById("lvMain"),
     status: document.getElementById("lvStatus"),
     btnRefresh: document.getElementById("btnLvRefresh"),
-    btnApply: document.getElementById("btnLvApply"),
-    btnProject: document.getElementById("btnLvProject"),
   };
 
   let currentView = null;
-  let activeTab = "seismic";
-  let selectedWindCaseId = null;
+  let activeTab = "dead";
 
   function apiPathForTab(tab) {
     if (tab === "wind") return "/api/loads/wind";
-    return "/api/loads/seismic";
+    if (tab === "live") return "/api/loads/live";
+    if (tab === "dead") return "/api/loads/dead";
+    if (tab === "seismic") return "/api/loads/seismic";
+    return "/api/loads/dead";
+  }
+
+  function apiQueryForTab(tab, path) {
+    const params = new URLSearchParams({ path: path });
+    if (tab === "wind") params.set("include_visual", "0");
+    return "?" + params.toString();
   }
 
   function applyPathForTab(tab) {
     if (tab === "wind") return "/api/loads/wind/apply";
-    return "/api/loads/seismic/apply";
+    if (tab === "seismic") return "/api/loads/seismic/apply";
+    return "";
   }
 
   function guiApiOrigin() {
@@ -281,6 +288,58 @@
     return html;
   }
 
+  function renderGravityStoryTable(rows) {
+    return renderRawWeightTable(rows);
+  }
+
+  function renderGravityLcTable(rows) {
+    if (!rows || !rows.length) return "";
+    let html = '<section class="lv-section"><h2 class="lv-section-title">荷重ケース別</h2>';
+    html += '<div class="lv-table-wrap"><table class="lv-table"><thead><tr>';
+    html += "<th>LC</th><th>名称</th><th>TYPE</th><th>Wi kN</th><th>ΣTz kN</th><th>釣合</th>";
+    html += "<th>GLD</th><th>PLD</th><th>ELD</th><th>ALD</th><th>DLOD</th>";
+    html += "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      html += "<tr>";
+      html += '<td class="num">' + escapeHtml(r.load_case) + "</td>";
+      html += "<td>" + escapeHtml(r.label || "—") + "</td>";
+      html += "<td>" + escapeHtml(r.type_name || "—") + "</td>";
+      html += '<td class="num">' + fmtNum(r.wi_kN) + "</td>";
+      html += '<td class="num">' + fmtNum(r.reaction_tz_kN) + "</td>";
+      html += "<td>" + (r.equilibrium_ok ? "OK" : "NG") + "</td>";
+      html += '<td class="num">' + escapeHtml(r.gld) + "</td>";
+      html += '<td class="num">' + escapeHtml(r.pld) + "</td>";
+      html += '<td class="num">' + escapeHtml(r.eld) + "</td>";
+      html += '<td class="num">' + escapeHtml(r.ald) + "</td>";
+      html += '<td class="num">' + escapeHtml(r.dlod_total) + "</td>";
+      html += "</tr>";
+    });
+    html += "</tbody></table></div></section>";
+    return html;
+  }
+
+  function renderGravity(view) {
+    let html = renderSummary(view);
+    html += renderNotice(view.report_notice);
+    if (!view.found) {
+      html += '<div class="lv-placeholder">対象の LNME 荷重ケースが定義されていません。</div>';
+    }
+    html += renderGravityStoryTable(view.story_rows);
+    html += renderGravityLcTable(view.lc_rows);
+    html += renderChecks(view.checks);
+    html += renderWarnings(view.warnings);
+    return html;
+  }
+
+  function renderApplyAction(view) {
+    if (!view || !view.can_apply_dlod) return "";
+    const label = view.kind === "wind"
+      ? "風DLODを .dat へ反映"
+      : "地震DLODを .dat へ反映";
+    return '<section class="lv-section"><button type="button" id="btnLvApplyInline" class="lv-apply-btn">'
+      + escapeHtml(label) + "</button></section>";
+  }
+
   function renderSeismic(view) {
     let html = renderSummary(view);
     html += renderNotice(view.report_notice);
@@ -289,6 +348,7 @@
     html += renderDiaphragmTable(view);
     html += renderQiFiRules(view.qi_fi_rules_text);
     html += renderEquilibrium(view.equilibrium_rows);
+    html += renderApplyAction(view);
     html += renderChecks(view.checks);
     html += renderWarnings(view.warnings);
     if (view.dlod_record_count) {
@@ -444,141 +504,8 @@
     return html;
   }
 
-  function windCaseById(visual, caseId) {
-    const cases = (visual && visual.cases) || [];
-    if (!cases.length) return null;
-    if (caseId == null) return cases[0];
-    return cases.find(function (c) { return c.wind_case_id === caseId; }) || cases[0];
-  }
-
-  function renderWindVisual(view) {
-    const visual = view.visual;
-    if (!visual || !visual.bbox || !visual.cases || !visual.cases.length) {
-      return '<section class="lv-section"><h2 class="lv-section-title">風荷重の当たり方（平面図）</h2>'
-        + '<p class="lv-section-note">モデル節点から平面範囲を取得できないか、風荷重ケースが未定義です。</p></section>';
-    }
-
-    const wc = windCaseById(visual, selectedWindCaseId);
-    selectedWindCaseId = wc.wind_case_id;
-    const bbox = visual.bbox;
-    const pad = 48;
-    const w = 420;
-    const h = 320;
-    const spanX = Math.max(bbox.x_max - bbox.x_min, 1e-6);
-    const spanY = Math.max(bbox.y_max - bbox.y_min, 1e-6);
-    const scale = Math.min((w - 2 * pad) / spanX, (h - 2 * pad) / spanY);
-    const ox = pad + (w - 2 * pad - spanX * scale) / 2;
-    const oy = pad + (h - 2 * pad - spanY * scale) / 2;
-
-    function tx(x) { return ox + (x - bbox.x_min) * scale; }
-    function ty(y) { return h - oy - (y - bbox.y_min) * scale; }
-
-    const x0 = tx(bbox.x_min);
-    const x1 = tx(bbox.x_max);
-    const y0 = ty(bbox.y_min);
-    const y1 = ty(bbox.y_max);
-
-    let svg = '<svg class="lv-wind-svg" viewBox="0 0 ' + w + " " + h + '" role="img" aria-label="風荷重平面図">';
-    svg += '<rect x="0" y="0" width="' + w + '" height="' + h + '" class="lv-wind-bg"/>';
-    svg += '<rect x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1)
-      + '" class="lv-wind-footprint"/>';
-
-    (wc.surfaces || []).forEach(function (s) {
-      const roleCls = s.surface_role === "WINDWARD" ? "lv-wind-wall-windward" : "lv-wind-wall-leeward";
-      const thick = 8;
-      let lx0, ly0, lx1, ly1;
-      if (s.wall_side === "x_max") {
-        lx0 = lx1 = x1; ly0 = y1; ly1 = y0;
-      } else if (s.wall_side === "x_min") {
-        lx0 = lx1 = x0; ly0 = y1; ly1 = y0;
-      } else if (s.wall_side === "y_max") {
-        ly0 = ly1 = y0; lx0 = x0; lx1 = x1;
-      } else {
-        ly0 = ly1 = y1; lx0 = x0; lx1 = x1;
-      }
-      svg += '<line x1="' + lx0 + '" y1="' + ly0 + '" x2="' + lx1 + '" y2="' + ly1
-        + '" class="lv-wind-wall ' + roleCls + '" stroke-width="' + thick + '"/>';
-    });
-
-    const flow = wc.flow || { ux: 0, uy: 0 };
-    const cx = (x0 + x1) / 2;
-    const cy = (y0 + y1) / 2;
-    const arrowLen = 56;
-    let ax = cx - flow.ux * arrowLen * 0.5;
-    let ay = cy - flow.uy * arrowLen * 0.5;
-    let bx = cx + flow.ux * arrowLen * 0.5;
-    let by = cy + flow.uy * arrowLen * 0.5;
-    if (Math.abs(flow.ux) > Math.abs(flow.uy)) {
-      ax = flow.ux < 0 ? x1 + 18 : x0 - 18;
-      bx = flow.ux < 0 ? x0 - 10 : x1 + 10;
-      ay = by = cy;
-    } else {
-      ay = flow.uy < 0 ? y0 + 18 : y1 - 18;
-      by = flow.uy < 0 ? y1 - 10 : y0 + 10;
-      ax = bx = cx;
-    }
-    svg += '<defs><marker id="lvWindArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">'
-      + '<path d="M0,0 L6,3 L0,6 Z" class="lv-wind-arrow-head"/></marker></defs>';
-    svg += '<line x1="' + ax + '" y1="' + ay + '" x2="' + bx + '" y2="' + by
-      + '" class="lv-wind-flow" marker-end="url(#lvWindArrow)"/>';
-    svg += '<text x="' + bx + '" y="' + (by - 8) + '" class="lv-wind-flow-label">'
-      + escapeHtml(wc.direction_label) + "</text>";
-
-    const stories = wc.story_forces || [];
-    const maxF = wc.max_f_story_kN || 1;
-    const innerW = x1 - x0 - 24;
-    stories.forEach(function (sf, idx) {
-      const rowY = y1 + 18 + idx * 22;
-      if (rowY > y0 - 12) return;
-      const len = Math.max(4, (Math.abs(sf.f_story_kN) / maxF) * innerW * 0.45);
-      const sx = cx;
-      const sy = rowY;
-      const ex = sx + (flow.ux || 0) * len;
-      const ey = sy - (flow.uy || 0) * len;
-      svg += '<line x1="' + sx + '" y1="' + sy + '" x2="' + ex + '" y2="' + ey
-        + '" class="lv-wind-story-force" marker-end="url(#lvWindArrow)"/>';
-      svg += '<text x="' + (x0 + 4) + '" y="' + (rowY + 4) + '" class="lv-wind-story-label">'
-        + escapeHtml(sf.story) + " F=" + fmtNum(sf.f_story_kN) + "kN</text>";
-    });
-
-    svg += '<text x="' + x0 + '" y="' + (y0 + 14) + '" class="lv-wind-axis">X</text>';
-    svg += '<text x="' + (x1 - 8) + '" y="' + (y1 - 6) + '" class="lv-wind-axis">Y</text>';
-    svg += "</svg>";
-
-    let html = '<section class="lv-section lv-wind-visual-section"><h2 class="lv-section-title">風荷重の当たり方（平面図）</h2>';
-    html += '<p class="lv-section-note">建物平面（節点範囲）上に、選択ケースの受圧面（橙=風上、青=風下）と風向・階別 F_story を表示します。'
-      + " DLOD は床面への等価水平荷重です。</p>";
-    html += '<div class="lv-wind-controls"><label>表示ケース ';
-    html += '<select id="lvWindCaseSelect" class="lv-wind-select">';
-    visual.cases.forEach(function (c) {
-      html += '<option value="' + c.wind_case_id + '"'
-        + (c.wind_case_id === selectedWindCaseId ? " selected" : "") + ">"
-        + escapeHtml(c.name + " (" + c.direction_label + ", LC" + c.load_case + ")") + "</option>";
-    });
-    html += "</select></label>";
-    html += '<span class="lv-wind-legend"><span class="lv-legend-windward">■ 風上</span> '
-      + '<span class="lv-legend-leeward">■ 風下</span> '
-      + '<span class="lv-legend-flow">→ 風向 / 階 F_story</span></span></div>';
-    html += '<div class="lv-wind-diagram-wrap">' + svg + "</div>";
-    html += "</section>";
-    return html;
-  }
-
-  function bindWindCaseSelect() {
-    const sel = document.getElementById("lvWindCaseSelect");
-    if (!sel) return;
-    sel.addEventListener("change", function () {
-      selectedWindCaseId = Number(sel.value);
-      if (currentView && currentView.kind === "wind") {
-        el.main.innerHTML = renderWind(currentView);
-        bindWindCaseSelect();
-      }
-    });
-  }
-
   function renderWind(view) {
-    let html = renderWindVisual(view);
-    html += renderSummary(view);
+    let html = renderSummary(view);
     if (view.uniform_input_note) {
       html += '<section class="lv-section"><h2 class="lv-section-title">入力方式</h2>'
         + '<p class="lv-section-note">' + escapeHtml(view.uniform_input_note) + "</p></section>";
@@ -590,6 +517,7 @@
     html += renderWindStoryForceTable(view.story_force_rows);
     html += renderWindDiaphragmTable(view);
     html += renderWindEquilibrium(view.equilibrium_rows);
+    html += renderApplyAction(view);
     html += renderChecks(view.checks);
     html += renderWarnings(view.warnings);
     if (view.dlod_record_count) {
@@ -607,16 +535,18 @@
     el.path.textContent = pathLine + proj;
     renderTabs(view);
 
-    if (view.kind === "seismic") {
+    if (view.kind === "dead" || view.kind === "live") {
+      el.main.innerHTML = renderGravity(view);
+    } else if (view.kind === "seismic") {
       el.main.innerHTML = renderSeismic(view);
     } else if (view.kind === "wind") {
       el.main.innerHTML = renderWind(view);
-      bindWindCaseSelect();
     } else {
       el.main.innerHTML = '<div class="lv-placeholder">この荷重種別は未対応です。</div>';
     }
 
-    el.btnApply.disabled = !view.can_apply_dlod;
+    const inlineApply = document.getElementById("btnLvApplyInline");
+    if (inlineApply) inlineApply.addEventListener("click", applyDlod);
     setStatus(view.applied ? "DLOD を .dat に反映しました。" : "");
   }
 
@@ -626,10 +556,9 @@
       return;
     }
     setStatus("読み込み中…");
-    el.btnApply.disabled = true;
     try {
       const view = await fetchJson(
-        apiPathForTab(activeTab) + "?path=" + encodeURIComponent(modelPath)
+        apiPathForTab(activeTab) + apiQueryForTab(activeTab, modelPath)
       );
       view.active_tab = activeTab;
       renderView(view);
@@ -647,10 +576,9 @@
       : "地震 DLOD ブロックを .dat に書き込みます。よろしいですか？";
     if (!window.confirm(msg)) return;
     setStatus("DLOD 反映中…");
-    el.btnApply.disabled = true;
     try {
       const body = await fetchJson(
-        applyPathForTab(tab) + "?path=" + encodeURIComponent(modelPath),
+        applyPathForTab(tab) + apiQueryForTab(tab, modelPath),
         { method: "POST" }
       );
       renderView(body.view);
@@ -663,25 +591,10 @@
       }
     } catch (ex) {
       setStatus("反映エラー: " + ex.message);
-      el.btnApply.disabled = false;
     }
-  }
-
-  function openProject() {
-    try {
-      if (window.opener && !window.opener.closed && typeof window.opener.openProjectWindow === "function") {
-        window.opener.openProjectWindow();
-        return;
-      }
-    } catch (_) {
-      /* ignore */
-    }
-    window.alert("メイン画面から Project… を開いてください。");
   }
 
   el.btnRefresh.addEventListener("click", loadView);
-  el.btnApply.addEventListener("click", applyDlod);
-  el.btnProject.addEventListener("click", openProject);
 
   if (window.opener) {
     try {

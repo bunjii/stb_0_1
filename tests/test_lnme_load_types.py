@@ -98,6 +98,7 @@ class TestLnmeLoadTypes(unittest.TestCase):
             "grids": [],
             "stories": [{"name": "1", "elevation": 0.0, "height": 3.0}],
             "member_classes": [],
+            "load_conditions": {"seismic": {"ci": 0.3}},
             "report": {"title": "", "mode": "practice", "language": "ja", "format": "markdown"},
         })
         result = aggregate_story_weights(mdl, project)

@@ -297,6 +297,7 @@ def cmd_gui(args):
             port=args.port,
             open_browser=(not args.no_browser),
             log_file=getattr(args, "log_file", None),
+            exit_with_browser=not getattr(args, "no_exit_with_browser", False),
         )
     except KeyboardInterrupt:
         return EXIT_OK
@@ -443,6 +444,11 @@ def _build_parser():
         "--log-file",
         default=None,
         help="Also write server logs to this file (debug)",
+    )
+    p_gui.add_argument(
+        "--no-exit-with-browser",
+        action="store_true",
+        help="Keep the server running after the browser tab closes (default: stop with browser)",
     )
     p_gui.set_defaults(func=cmd_gui)
 

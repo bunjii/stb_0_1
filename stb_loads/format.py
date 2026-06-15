@@ -1,4 +1,8 @@
-from stb_loads.equilibrium import build_equilibrium_check_rows, compute_seismic_equilibrium
+from stb_loads.equilibrium import (
+    build_equilibrium_check_rows,
+    compute_seismic_equilibrium,
+    prepare_solved_model,
+)
 from stb_loads.seismic import SeismicDistributionResult
 
 import common
@@ -161,16 +165,13 @@ def _bottom_story_summary(result: SeismicDistributionResult):
     return min(result.stories, key=lambda s: s.mass_height_m)
 
 
-def _check_vertical_weight_reactions(mdl, result: SeismicDistributionResult):
-    import copy
+def _check_vertical_weight_reactions(mdl, result: SeismicDistributionResult, mdl_solved=None, project=None):
+    if mdl_solved is None:
+        mdl_solved = prepare_solved_model(mdl)
+    from stb_loads.weight import aggregate_weight_for_load_case
 
-    from stb_engine import solve_model
-
-    mdl_solved = copy.deepcopy(mdl)
-    solve_model(mdl_solved)
-    total_tz = 0.0
     lc_parts = []
-    tol = max(1.0, result.total_weight_kN * 0.05)
+    all_ok = True
     for lc in result.weight_result.weight_load_cases:
         try:
             col = mdl_solved.lcs.index(lc)
@@ -182,14 +183,41 @@ def _check_vertical_weight_reactions(mdl, result: SeismicDistributionResult):
             if reacts is None:
                 continue
             lc_tz += float(reacts[col, 2]) * 1e-3
-        total_tz += lc_tz
-        lc_parts.append("LC{0} ΣTz={1} kN".format(lc, _fmt_num(lc_tz)))
-    ok = abs(abs(total_tz) - result.total_weight_kN) <= tol
+        lc_weight = (
+            aggregate_weight_for_load_case(mdl, project, lc)
+            if project is not None
+            else None
+        )
+        if lc_weight is not None:
+            tol = max(1.0e-3, abs(lc_weight) * 1.0e-9)
+            lc_ok = abs(abs(lc_tz) - lc_weight) <= tol
+            all_ok = all_ok and lc_ok
+            lc_parts.append(
+                "LC{0} Wi={1} kN, ΣTz={2} kN".format(
+                    lc, _fmt_num(lc_weight), _fmt_num(lc_tz)
+                )
+            )
+        else:
+            lc_parts.append("LC{0} ΣTz={1} kN".format(lc, _fmt_num(lc_tz)))
+    if project is None:
+        total_tz = 0.0
+        for lc in result.weight_result.weight_load_cases:
+            try:
+                col = mdl_solved.lcs.index(lc)
+            except ValueError:
+                continue
+            for c in mdl_solved.cons:
+                reacts = getattr(c.nd, "reacts", None)
+                if reacts is None:
+                    continue
+                total_tz += float(reacts[col, 2]) * 1e-3
+        tol = max(1.0e-3, abs(result.total_weight_kN) * 1.0e-9)
+        all_ok = abs(abs(total_tz) - result.total_weight_kN) <= tol
     detail = "ΣWi_total={0} kN, 反力 {1}".format(
         _fmt_num(result.total_weight_kN),
         ", ".join(lc_parts) if lc_parts else "—",
     )
-    return ok, detail
+    return all_ok, detail
 
 
 def build_seismic_diaphragm_rows(result: SeismicDistributionResult):
@@ -214,7 +242,13 @@ def build_seismic_diaphragm_rows(result: SeismicDistributionResult):
     return rows
 
 
-def build_seismic_report_checks(result: SeismicDistributionResult, report: dict, mdl=None):
+def build_seismic_report_checks(
+    result: SeismicDistributionResult,
+    report: dict,
+    mdl=None,
+    mdl_solved=None,
+    project=None,
+):
     tol = max(1.0e-3, result.q1_kN * 1.0e-6)
     tol_w = max(0.01, result.total_weight_kN * 1.0e-4)
     mass_rows = report.get("mass_level_rows") or []
@@ -270,7 +304,7 @@ def build_seismic_report_checks(result: SeismicDistributionResult, report: dict,
     vertical_reaction_detail = "解析モデル未指定"
     if mdl is not None and result.weight_result.weight_load_cases:
         vertical_reaction_ok, vertical_reaction_detail = _check_vertical_weight_reactions(
-            mdl, result
+            mdl, result, mdl_solved=mdl_solved, project=project
         )
 
     return [
@@ -329,17 +363,24 @@ def build_seismic_report_checks(result: SeismicDistributionResult, report: dict,
             "detail": alpha_ratio_detail,
         },
         {
-            "label": "ΣWi_total が鉛直荷重反力合計と概ね一致すること",
+            "label": "ΣWi_total が鉛直荷重反力合計と一致すること",
             "ok": vertical_reaction_ok,
             "detail": vertical_reaction_detail,
         },
     ]
 
 
+def _needs_seismic_solver(mdl, result: SeismicDistributionResult) -> bool:
+    if mdl is None:
+        return False
+    return bool(result.diaphragm_loads or result.weight_result.weight_load_cases)
+
+
 def build_seismic_report_view(result: SeismicDistributionResult, project=None, mdl=None):
     raw_weight_rows = build_raw_weight_rows(result, project)
     mass_level_rows = build_seismic_story_rows(result)
     diaphragm_rows = build_seismic_diaphragm_rows(result)
+    mdl_solved = prepare_solved_model(mdl) if _needs_seismic_solver(mdl, result) else None
     report = {
         "summary": build_seismic_summary_rows(result),
         "raw_weight_rows": raw_weight_rows,
@@ -356,10 +397,19 @@ def build_seismic_report_view(result: SeismicDistributionResult, project=None, m
             "階 | 階レベル m | 階高 m | Wi kN"
         ),
     }
-    report["checks"] = build_seismic_report_checks(result, report, mdl=mdl)
+    report["checks"] = build_seismic_report_checks(
+        result, report, mdl=mdl, mdl_solved=mdl_solved, project=project
+    )
     if mdl is not None:
-        report["equilibrium_rows"] = compute_seismic_equilibrium(mdl, result)
-        report["checks"] = report["checks"] + build_equilibrium_check_rows(mdl, result)
+        eq_rows = (
+            compute_seismic_equilibrium(mdl, result, mdl_solved=mdl_solved)
+            if result.diaphragm_loads
+            else []
+        )
+        report["equilibrium_rows"] = eq_rows
+        report["checks"] = report["checks"] + build_equilibrium_check_rows(
+            mdl, result, eq_rows=eq_rows, mdl_solved=mdl_solved
+        )
     return report
 
 

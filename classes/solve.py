@@ -9,6 +9,16 @@ from scipy.sparse import csc_matrix
 
 #from classes.elm import Elm1D
 
+
+def _as_dense_disps(disps):
+    """Normalize solver output to a dense 2D displacement matrix."""
+    if np.ndim(disps) == 1:
+        return np.expand_dims(disps, axis=1)
+    if hasattr(disps, "toarray"):
+        return disps.toarray()
+    return np.asarray(disps)
+
+
 class Solve:
 
     def __init__(self, _mdl):
@@ -128,10 +138,7 @@ class Solve:
 
         kG_orig = self.kG_orig
 
-        if np.ndim(_disps) == 1:
-            U = np.expand_dims(_disps, axis=1)
-        else:
-            U = _disps.toarray()
+        U = _as_dense_disps(_disps)
 
         # KU = F
         for c in self.mdl.cons: 
@@ -279,10 +286,7 @@ class Solve:
         mdl  = self.mdl
         ndof = self.ndof
 
-        if np.ndim(_disps) == 1:
-            disps = np.expand_dims(_disps, axis=1)
-        else:
-            disps = _disps.toarray()
+        disps = _as_dense_disps(_disps)
             
         cnt = 0 # loop counter
         while cnt * ndof < self.num_row:
@@ -546,6 +550,13 @@ class Solve:
         return kG
     
     def CreateLoadMx(self, apply_constraints=True):
+
+        # ALOD / ELOD / GLOD accumulate into e.elds (and related arrays) with +=.
+        # Clear them so a second Solve on the same model does not double-count.
+        for e in self.mdl.elms:
+            e.elds = None
+            e.alds = None
+            e.glds = None
 
         # max_clc_pld  = max(list(map(lambda l: l.clc, self.mdl.lds))) if self.mdl.lds else 0
         # max_clc_eld  = max(list(map(lambda l: l.clc, self.mdl.elds))) if self.mdl.elds else 0

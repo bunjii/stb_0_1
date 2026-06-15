@@ -487,6 +487,31 @@ class TestGuiApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["ok"])
 
+    def test_api_gui_config_default(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        r = self.client.get("/api/gui-config")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["exit_with_browser"])
+
+    def test_watchdog_does_not_terminate_when_disabled(self):
+        if self.client is None:
+            self.skipTest("fastapi not installed")
+        import time
+        import unittest.mock as mock
+        import stb_gui.server as server_mod
+        from stb_gui.server import _start_gui_client_watchdog
+
+        with mock.patch.object(server_mod, "_GUI_HEARTBEAT_INTERVAL", 0.01), mock.patch.object(
+            server_mod, "_GUI_HEARTBEAT_TIMEOUT", 0.02
+        ), mock.patch.object(server_mod, "_terminate_gui_server") as stop:
+            server_mod._GUI_WATCHDOG_STARTED = False
+            server_mod._GUI_WATCH_CLIENT = False
+            _start_gui_client_watchdog()
+            server_mod._GUI_LAST_HEARTBEAT = time.time() - 1.0
+            time.sleep(0.05)
+            stop.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,10 @@ def main():
         "--no-browser", action="store_true",
         help="Do not open a browser window",
     )
+    parser.add_argument(
+        "--no-exit-with-browser", action="store_true",
+        help="Keep the server running after the browser tab closes",
+    )
     args = parser.parse_args()
 
     try:
@@ -32,6 +36,7 @@ def main():
         host=args.host,
         port=args.port,
         open_browser=(not args.no_browser),
+        exit_with_browser=(not args.no_exit_with_browser),
     )
 
 

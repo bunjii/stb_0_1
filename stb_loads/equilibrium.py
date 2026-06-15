@@ -37,15 +37,51 @@ def _load_matrix_kN(mdl):
     return lm * 1e-3, solver.ndof
 
 
-def _sum_translation_kN(mdl, lc: int, dof: int) -> float:
+def _sum_translation_kN(mdl, lc: int, dof: int, lm=None, ndof: int = 6) -> float:
     col = _lc_column(mdl, lc)
     if col is None:
         return 0.0
-    lm, ndof = _load_matrix_kN(mdl)
+    if lm is None:
+        lm, ndof = _load_matrix_kN(mdl)
     total = 0.0
     for n in mdl.nds:
         total += float(lm[n.cid * ndof + dof, col])
     return total
+
+
+_SOLVED_MODEL_CACHE: Dict[str, Tuple[float, Any]] = {}
+
+
+def invalidate_solved_model_cache(full: str) -> None:
+    _SOLVED_MODEL_CACHE.pop(full, None)
+
+
+def seed_solved_model_cache(mdl) -> None:
+    """Register an already-solved model (e.g. after /api/model?solve=1)."""
+    cache_key = getattr(mdl, "filepath", None)
+    if not cache_key or not os.path.isfile(cache_key):
+        return
+    mtime = os.path.getmtime(cache_key)
+    _SOLVED_MODEL_CACHE[cache_key] = (mtime, mdl)
+
+
+def prepare_solved_model(mdl, cache_key: Optional[str] = None):
+    """Deep-copy the model and run a full static solve once (cached by filepath)."""
+    from stb_engine import solve_model
+
+    cache_key = cache_key or getattr(mdl, "filepath", None)
+    mtime = None
+    if cache_key:
+        mtime = os.path.getmtime(cache_key)
+        cached = _SOLVED_MODEL_CACHE.get(cache_key)
+        if cached and cached[0] == mtime:
+            return cached[1]
+
+    mdl_solved = copy.deepcopy(mdl)
+    solve_model(mdl_solved)
+    if cache_key is not None and mtime is not None:
+        _SOLVED_MODEL_CACHE[cache_key] = (mtime, mdl_solved)
+    return mdl_solved
 
 
 def _sum_reaction_translation_kN(mdl, lc: int, dof: int) -> float:
@@ -153,10 +189,12 @@ def _dat_dlod_pressure_mismatch(mdl, result: SeismicDistributionResult, tol: flo
     return mismatches
 
 
-def compute_seismic_equilibrium(mdl, result: SeismicDistributionResult) -> List[Dict[str, Any]]:
+def compute_seismic_equilibrium(
+    mdl,
+    result: SeismicDistributionResult,
+    mdl_solved=None,
+) -> List[Dict[str, Any]]:
     """Return per-direction equilibrium rows for seismic load cases in the model."""
-    from stb_engine import solve_model
-
     keys: List[Tuple[int, str, int]] = []
     seen = set()
     for d in result.diaphragm_loads:
@@ -168,13 +206,14 @@ def compute_seismic_equilibrium(mdl, result: SeismicDistributionResult) -> List[
     if not keys:
         return []
 
-    mdl_solved = copy.deepcopy(mdl)
-    solve_model(mdl_solved)
+    if mdl_solved is None:
+        mdl_solved = prepare_solved_model(mdl)
 
+    lm, ndof = _load_matrix_kN(mdl)
     rows: List[Dict[str, Any]] = []
     for lc, axis, sign in sorted(keys):
         dof = 0 if axis == "x" else 1
-        fx_applied = _sum_translation_kN(mdl, lc, dof)
+        fx_applied = _sum_translation_kN(mdl, lc, dof, lm=lm, ndof=ndof)
         sum_tx = _sum_reaction_translation_kN(mdl_solved, lc, dof)
         fi_dlod = _expected_fi_dlod_kN(result, axis, sign)
         residual = abs(fx_applied + sum_tx)
@@ -201,9 +240,15 @@ def compute_seismic_equilibrium(mdl, result: SeismicDistributionResult) -> List[
     return rows
 
 
-def build_equilibrium_check_rows(mdl, result: SeismicDistributionResult) -> List[Dict[str, Any]]:
+def build_equilibrium_check_rows(
+    mdl,
+    result: SeismicDistributionResult,
+    eq_rows: Optional[List[Dict[str, Any]]] = None,
+    mdl_solved=None,
+) -> List[Dict[str, Any]]:
     """Markdown/GUI check list for load–reaction equilibrium."""
-    eq_rows = compute_seismic_equilibrium(mdl, result)
+    if eq_rows is None:
+        eq_rows = compute_seismic_equilibrium(mdl, result, mdl_solved=mdl_solved)
     checks: List[Dict[str, Any]] = []
     for row in eq_rows:
         label_dir = "LC{0} {1}".format(row["load_case"], row["direction"])

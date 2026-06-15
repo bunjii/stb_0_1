@@ -618,24 +618,25 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
 def _load_mdl(path, solve=False, quiet=True):
     """Parse model file; optionally run analysis. Returns Mdl instance."""
 
+    import copy
     import sys
     root = project_root()
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    from stb_engine import parse_input, read_input_file, solve_model
+    from stb_engine import solve_model
     from stb_engine.errors import StbParseError, StbSolveError
+    from stb_gui.model_session import get_parsed_model
+    from stb_loads.equilibrium import seed_solved_model_cache
 
     full = resolve_model_path(path)
-    lines = read_input_file(full)
     try:
-        mdl = parse_input(lines)
+        mdl = get_parsed_model(full)
     except StbParseError as ex:
         raise ValueError(str(ex))
 
-    mdl.filepath = full
-
     if solve:
+        mdl = copy.deepcopy(mdl)
         if quiet:
             old_stdout = sys.stdout
             devnull = open(os.devnull, "w")
@@ -652,6 +653,7 @@ def _load_mdl(path, solve=False, quiet=True):
                 solve_model(mdl)
             except StbSolveError as ex:
                 raise ValueError(str(ex))
+        seed_solved_model_cache(mdl)
 
     return mdl, full
 

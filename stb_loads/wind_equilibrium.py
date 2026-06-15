@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import copy
-from typing import Any, Dict, List, Optional, Tuple
+from stb_loads.equilibrium import prepare_solved_model
 
 from stb_loads.wind import (
     WindDistributionResult,
@@ -42,11 +41,12 @@ def _load_matrix_kN(mdl):
     return lm * 1e-3, solver.ndof
 
 
-def _sum_translation_kN(mdl, lc: int, dof: int) -> float:
+def _sum_translation_kN(mdl, lc: int, dof: int, lm=None, ndof: int = 6) -> float:
     col = _lc_column(mdl, lc)
     if col is None:
         return 0.0
-    lm, ndof = _load_matrix_kN(mdl)
+    if lm is None:
+        lm, ndof = _load_matrix_kN(mdl)
     total = 0.0
     for n in mdl.nds:
         total += float(lm[n.cid * ndof + dof, col])
@@ -69,9 +69,11 @@ def _sum_reaction_translation_kN(mdl, lc: int, dof: int) -> float:
 from stb_project.schema import format_applied_load_direction_label, format_wind_case_short_name
 
 
-def compute_wind_equilibrium(mdl, result: WindDistributionResult) -> List[Dict[str, Any]]:
-    from stb_engine import solve_model
-
+def compute_wind_equilibrium(
+    mdl,
+    result: WindDistributionResult,
+    mdl_solved=None,
+) -> List[Dict[str, Any]]:
     keys: List[Tuple[int, int, str, int]] = []
     seen = set()
     for dl in result.diaphragm_loads:
@@ -83,13 +85,14 @@ def compute_wind_equilibrium(mdl, result: WindDistributionResult) -> List[Dict[s
     if not keys:
         return []
 
-    mdl_solved = copy.deepcopy(mdl)
-    solve_model(mdl_solved)
+    if mdl_solved is None:
+        mdl_solved = prepare_solved_model(mdl)
 
+    lm, ndof = _load_matrix_kN(mdl)
     rows: List[Dict[str, Any]] = []
     for case_id, lc, axis, sign in sorted(keys):
         dof = 0 if axis == "x" else 1
-        fx_applied = _sum_translation_kN(mdl, lc, dof)
+        fx_applied = _sum_translation_kN(mdl, lc, dof, lm=lm, ndof=ndof)
         sum_rx = _sum_reaction_translation_kN(mdl_solved, lc, dof)
         f_wind = total_wind_generated_kN(result, case_id)
         f_dlod = total_dlod_output_kN(result, case_id)

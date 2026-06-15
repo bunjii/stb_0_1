@@ -11,9 +11,13 @@ from stb_gui.input_format import EJNT_EDITOR_HEADER
 from stb_gui.loads_view import (
     apply_seismic_dlod_for_model,
     apply_wind_dlod_for_model,
+    load_dead_view_for_model,
+    load_live_view_for_model,
     load_seismic_view_for_model,
     load_wind_view_for_model,
 )
+from stb_gui.model_session import invalidate_model_session
+from stb_loads.equilibrium import invalidate_solved_model_cache
 from stb_gui.project_view import load_project_view_for_model, save_project_json_for_model
 from stb_gui.model_json import (
     project_root,
@@ -33,7 +37,8 @@ _GUI_WATCH_CLIENT = False
 _GUI_LAST_HEARTBEAT = None
 _GUI_WATCHDOG_STARTED = False
 _GUI_HEARTBEAT_INTERVAL = 4.0
-_GUI_HEARTBEAT_TIMEOUT = 12.0
+# Background browser tabs throttle timers; keep a generous margin when enabled.
+_GUI_HEARTBEAT_TIMEOUT = 120.0
 
 
 def _terminate_gui_server():
@@ -63,9 +68,11 @@ def _start_gui_client_watchdog():
     threading.Thread(target=_loop, daemon=True, name="stb-gui-watchdog").start()
 
 
-def create_app(default_model=None, watch_client=False):
+def create_app(default_model=None, watch_client=False, exit_with_browser=None):
     global _GUI_WATCH_CLIENT
-    _GUI_WATCH_CLIENT = bool(watch_client)
+    if exit_with_browser is None:
+        exit_with_browser = watch_client
+    _GUI_WATCH_CLIENT = bool(exit_with_browser)
     default_model = normalize_model_relpath(default_model)
     try:
         from fastapi import FastAPI, HTTPException, Query, Body
@@ -163,6 +170,8 @@ def create_app(default_model=None, watch_client=False):
         try:
             full = resolve_model_path(path)
             write_dat_text(full, text)
+            invalidate_model_session(full)
+            invalidate_solved_model_cache(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -180,6 +189,8 @@ def create_app(default_model=None, watch_client=False):
             new_text, warnings = apply_edit_action(text, body)
             validate_dat_text(new_text)
             write_dat_text(full, new_text)
+            invalidate_model_session(full)
+            invalidate_solved_model_cache(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -230,13 +241,36 @@ def create_app(default_model=None, watch_client=False):
         if project is None:
             raise HTTPException(status_code=400, detail="project is required")
         try:
-            resolve_model_path(path)
+            full = resolve_model_path(path)
             data = save_project_json_for_model(path, project)
+            invalidate_model_session(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
             raise HTTPException(status_code=500, detail=str(ex))
         return JSONResponse({"ok": True, "view": data})
+
+    @app.get("/api/loads/dead")
+    def api_loads_dead(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+    ):
+        try:
+            resolve_model_path(path)
+            data = load_dead_view_for_model(path)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return JSONResponse(data)
+
+    @app.get("/api/loads/live")
+    def api_loads_live(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+    ):
+        try:
+            resolve_model_path(path)
+            data = load_live_view_for_model(path)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return JSONResponse(data)
 
     @app.get("/api/loads/seismic")
     def api_loads_seismic(
@@ -252,10 +286,14 @@ def create_app(default_model=None, watch_client=False):
     @app.get("/api/loads/wind")
     def api_loads_wind(
         path: str = Query(..., description="Relative path to .dat under project root"),
+        include_visual: bool = Query(
+            True,
+            description="Include 3D overlay metadata (omit in loads-verify window)",
+        ),
     ):
         try:
             resolve_model_path(path)
-            data = load_wind_view_for_model(path)
+            data = load_wind_view_for_model(path, include_visual=include_visual)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         return JSONResponse(data)
@@ -310,6 +348,10 @@ def create_app(default_model=None, watch_client=False):
             raise HTTPException(status_code=500, detail=str(ex))
         return JSONResponse({"ok": True, "path": rel})
 
+    @app.get("/api/gui-config")
+    def api_gui_config():
+        return JSONResponse({"exit_with_browser": _GUI_WATCH_CLIENT})
+
     @app.post("/api/heartbeat")
     def api_heartbeat():
         global _GUI_LAST_HEARTBEAT
@@ -345,6 +387,7 @@ def run_server(
     default_model=None,
     open_browser=True,
     log_file=None,
+    exit_with_browser=True,
 ):
     try:
         import uvicorn
@@ -354,7 +397,7 @@ def run_server(
             "Install with: pip install -e \".[gui]\""
         )
 
-    app = create_app(default_model=default_model, watch_client=open_browser)
+    app = create_app(default_model=default_model, exit_with_browser=exit_with_browser)
     url = gui_open_url(host, port)
 
     if _port_is_open(host, port):
@@ -378,6 +421,8 @@ def run_server(
     print("Structural Toolbox: {0}".format(url))
     print("  project root: {0}".format(project_root()))
     print("  Close the GUI window or press Ctrl+C here to stop the server.")
+    if not exit_with_browser:
+        print("  (--no-exit-with-browser: server keeps running after the browser tab closes.)")
     if log_file:
         print("  Log file: {0}".format(os.path.abspath(log_file)))
 

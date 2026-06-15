@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from stb_loads.equilibrium import prepare_solved_model
 from stb_loads.wind import WIND_NOTICE, WindDistributionResult
 from stb_loads.wind_equilibrium import compute_wind_equilibrium
 from stb_project.schema import (
@@ -573,7 +574,14 @@ def build_wind_report_checks(result: WindDistributionResult, report: dict):
     return checks
 
 
-def build_wind_report_view(result: WindDistributionResult, project=None, mdl=None):
+def build_wind_report_view(
+    result: WindDistributionResult,
+    project=None,
+    mdl=None,
+    *,
+    include_visual: bool = True,
+):
+    mdl_solved = prepare_solved_model(mdl) if mdl is not None and result.diaphragm_loads else None
     report = {
         "summary": build_wind_summary_rows(result),
         "surface_rows": build_wind_surface_rows(result),
@@ -585,10 +593,12 @@ def build_wind_report_view(result: WindDistributionResult, project=None, mdl=Non
         "uniform_input_note": UNIFORM_INPUT_NOTE,
         "report_notice": WIND_NOTICE,
         "dlod_section_title": "DLOD 等価入力",
-        "visual": build_wind_visual_cases(mdl, result),
+        "visual": build_wind_visual_cases(mdl, result) if include_visual else None,
     }
     if mdl is not None:
-        report["equilibrium_rows"] = compute_wind_equilibrium(mdl, result)
+        report["equilibrium_rows"] = compute_wind_equilibrium(
+            mdl, result, mdl_solved=mdl_solved
+        )
     else:
         report["equilibrium_rows"] = []
     report["checks"] = build_wind_report_checks(result, report)

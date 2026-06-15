@@ -195,13 +195,29 @@ class TestUkSeismicSample(unittest.TestCase):
     def test_uk_wi_above_and_alpha_i(self):
         result = compute_seismic_distribution(self.mdl, self.project)
         by_story = {s.story_name: s for s in result.stories}
-        self.assertAlmostEqual(result.total_weight_kN, 341.852, places=1)
-        self.assertAlmostEqual(by_story["3"].w_supported_above_kN, 60.603, places=1)
-        self.assertAlmostEqual(by_story["2"].w_supported_above_kN, 125.735, places=1)
-        self.assertAlmostEqual(by_story["1"].w_supported_above_kN, 341.852, places=1)
-        self.assertAlmostEqual(by_story["3"].beta, 60.603 / 341.852, places=3)
-        self.assertAlmostEqual(by_story["2"].beta, 125.735 / 341.852, places=3)
+        self.assertAlmostEqual(result.total_weight_kN, 341.897, places=2)
+        self.assertAlmostEqual(by_story["3"].w_supported_above_kN, 60.617, places=2)
+        self.assertAlmostEqual(by_story["2"].w_supported_above_kN, 125.771, places=2)
+        self.assertAlmostEqual(by_story["1"].w_supported_above_kN, 341.897, places=2)
+        self.assertAlmostEqual(by_story["3"].beta, 60.617 / 341.897, places=3)
+        self.assertAlmostEqual(by_story["2"].beta, 125.771 / 341.897, places=3)
         self.assertAlmostEqual(by_story["1"].beta, 1.0, places=3)
+
+    def test_uk_wi_matches_fem_applied_loads(self):
+        from classes.solve import Solve
+        from stb_loads.weight import aggregate_weight_for_load_case
+
+        result = compute_seismic_distribution(self.mdl, self.project)
+        solver = Solve.__new__(Solve)
+        solver.mdl = self.mdl
+        solver.ndof = 6
+        solver.num_row = 6 * len(self.mdl.nds)
+        lm = solver.CreateLoadMx(apply_constraints=False)
+        for lc in result.weight_result.weight_load_cases:
+            col = self.mdl.lcs.index(lc)
+            applied_kN = -sum(float(lm[n.cid * 6 + 2, col]) for n in self.mdl.nds) * 1e-3
+            wi_kN = aggregate_weight_for_load_case(self.mdl, self.project, lc)
+            self.assertAlmostEqual(wi_kN, applied_kN, places=3)
 
     def test_uk_lc3_lle_vertical_reactions(self):
         from stb_engine import solve_model
@@ -242,13 +258,29 @@ class TestUkSeismicSample(unittest.TestCase):
         self.assertAlmostEqual(dloads[(10, 3)], 0.8, places=3)
         self.assertAlmostEqual(dloads[(20, 3)], 0.8, places=3)
 
+    def test_uk_vertical_weight_reactions_after_resolve(self):
+        import copy
+        from stb_engine import solve_model
+        from stb_loads.format import _check_vertical_weight_reactions
+
+        result = compute_seismic_distribution(self.mdl, self.project)
+        solve_model(self.mdl)
+        mdl_s = copy.deepcopy(self.mdl)
+        solve_model(mdl_s)
+        ok, detail = _check_vertical_weight_reactions(
+            self.mdl, result, mdl_solved=mdl_s, project=self.project
+        )
+        self.assertTrue(ok, detail)
+        self.assertIn("LC0 Wi=", detail)
+        self.assertIn("LC3 Wi=", detail)
+
     def test_uk_per_story_ci_values(self):
         result = compute_seismic_distribution(self.mdl, self.project)
         by_story = {s.story_name: s for s in result.stories}
         self.assertAlmostEqual(by_story["3"].ci_story, 0.455, places=3)
         self.assertAlmostEqual(by_story["2"].ci_story, 0.390, places=3)
         self.assertAlmostEqual(by_story["1"].ci_story, 0.300, places=3)
-        self.assertAlmostEqual(result.fi_dlod_output_kN, 49.053, places=1)
+        self.assertAlmostEqual(result.fi_dlod_output_kN, 49.066, places=2)
 
     def test_uk_base_mass_warning_and_no_first_floor_dlod(self):
         result = compute_seismic_distribution(self.mdl, self.project)
@@ -269,9 +301,9 @@ class TestUkSeismicSample(unittest.TestCase):
         row = eq[0]
         self.assertEqual(row["load_case"], 1)
         self.assertEqual(row["direction"], "X+")
-        self.assertAlmostEqual(row["fi_dlod_output_kN"], 49.053, places=1)
-        self.assertAlmostEqual(row["fx_applied_kN"], 49.053, places=1)
-        self.assertAlmostEqual(row["sum_reaction_kN"], -49.053, places=1)
+        self.assertAlmostEqual(row["fi_dlod_output_kN"], 49.066, places=2)
+        self.assertAlmostEqual(row["fx_applied_kN"], 49.053, places=2)
+        self.assertAlmostEqual(row["sum_reaction_kN"], -49.053, places=2)
         self.assertLess(row["equilibrium_residual_kN"], 0.05)
         self.assertFalse(row["other_loads"])
         self.assertFalse(row["pressure_mismatches"])

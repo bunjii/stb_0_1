@@ -6725,12 +6725,23 @@ async function openProjectWindow() {
   }
 }
 
+function prefetchLoadsVerifyView(path) {
+  if (!path) return;
+  try {
+    const q = "?path=" + encodeURIComponent(path);
+    fetch(guiApiUrl("/api/loads/dead" + q, window)).catch(function () {});
+  } catch (_) {
+    /* ignore */
+  }
+}
+
 function openLoadsVerifyWindow() {
   const path = getCurrentModelPath();
   if (!path) {
     setStatus("Open a model before using Loads…");
     return;
   }
+  prefetchLoadsVerifyView(path);
   let url;
   try {
     url = guiApiUrl(
@@ -7031,6 +7042,7 @@ async function openUploadedModelFile(file) {
 
 let stbShutdownRequested = false;
 let stbPageReloading = false;
+let stbExitWithBrowser = false;
 
 function requestServerShutdown() {
   if (stbShutdownRequested) return;
@@ -7047,12 +7059,30 @@ function markStbPageReload() {
   stbPageReloading = true;
 }
 
+function sendGuiHeartbeat() {
+  fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => {});
+}
+
 function startGuiHeartbeat() {
-  const beat = () => {
-    fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => {});
-  };
-  beat();
-  window.setInterval(beat, 4000);
+  sendGuiHeartbeat();
+  window.setInterval(sendGuiHeartbeat, 4000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      sendGuiHeartbeat();
+    }
+  });
+}
+
+async function initGuiLifecycle() {
+  try {
+    const cfg = await fetchApiJson("/api/gui-config");
+    stbExitWithBrowser = !!cfg.exit_with_browser;
+  } catch (_) {
+    stbExitWithBrowser = false;
+  }
+  if (stbExitWithBrowser) {
+    startGuiHeartbeat();
+  }
 }
 
 async function closeApplication() {
@@ -7069,6 +7099,7 @@ window.addEventListener("keydown", (ev) => {
 });
 
 window.addEventListener("pagehide", (ev) => {
+  if (!stbExitWithBrowser) return;
   if (ev.persisted || stbPageReloading) {
     stbPageReloading = false;
     return;
@@ -7076,7 +7107,7 @@ window.addEventListener("pagehide", (ev) => {
   requestServerShutdown();
 });
 
-startGuiHeartbeat();
+initGuiLifecycle();
 
 async function loadSelectedModel(solve, options) {
   options = options || {};
