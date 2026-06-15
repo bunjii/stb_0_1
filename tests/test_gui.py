@@ -341,6 +341,14 @@ class TestGuiApi(unittest.TestCase):
         self.assertGreater(len(body["diaphragm_rows"]), 0)
         self.assertTrue(body["can_apply_dlod"])
 
+    def test_api_loads_wind_view_missing_project_returns_404(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_ROOF_240420.dat"
+        r = self.client.get("/api/loads/wind", params={"path": path})
+        self.assertEqual(r.status_code, 404, r.text)
+        self.assertIn("Project file not found", r.json().get("detail", ""))
+
     def test_api_project_save_seismic_rt_default(self):
         if self.client == None:
             self.skipTest("fastapi not installed")

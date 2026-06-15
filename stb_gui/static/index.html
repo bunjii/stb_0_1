@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Structural Toolbox</title>
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#e1dee4">
+  <meta name="color-scheme" content="dark light">
   <link rel="icon" href="/static/icons/st-icon-32.png" type="image/png" sizes="32x32">
   <link rel="icon" href="/static/icons/st-icon-48.png" type="image/png" sizes="48x48">
   <link rel="icon" href="/static/icons/st-icon-256.png" type="image/png" sizes="256x256">
@@ -17,7 +18,7 @@
   <div id="toolbar">
     <button id="btnNew" type="button">New</button>
     <button id="btnOpen" type="button">Open</button>
-    <button id="btnSave" type="button">Save</button>
+    <button id="btnSave" type="button" title="Save (Ctrl+S)">Save</button>
     <button id="btnClose" type="button" class="btn-secondary">Close</button>
     <span id="modelPath" class="model-path" title=""></span>
     <input type="file" id="openFileInput" accept=".dat,text/plain" hidden>
@@ -173,6 +174,7 @@
 
       <section class="panel-section">
         <div class="panel-section-title">Load case &amp; display</div>
+        <p class="panel-hint">Display choices are saved automatically.</p>
         <label class="panel-row">
           <span>LC</span>
           <select id="lcSelect"></select>
@@ -191,7 +193,7 @@
           <input type="checkbox" id="chkSupports" checked> Supports
         </label>
         <label class="panel-check">
-          <input type="checkbox" id="chkEJnt"> EJNT
+          <input type="checkbox" id="chkEJnt"> Element joints
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkLoads" checked> Input loads
@@ -202,6 +204,7 @@
             <option value="all">All</option>
             <option value="area">Area (ALOD)</option>
             <option value="gravity">Gravity (GLOD)</option>
+            <option value="dlod">Diaphragm (DLOD)</option>
             <option value="linepoint">Line + Point</option>
           </select>
         </label>
@@ -235,17 +238,17 @@
         </label>
         <div class="panel-check-row">
           <label class="panel-check panel-check-compact">
-            <input type="checkbox" id="chkMembrane" checked> DMEM
+            <input type="checkbox" id="chkMembrane" checked> Diaphragm members
           </label>
-          <label class="panel-check panel-check-compact panel-check-edge" title="Show DMEM region edge lines">
+          <label class="panel-check panel-check-compact panel-check-edge" title="Show diaphragm member edge lines">
             <input type="checkbox" id="chkMembraneEdge" checked> Edge
           </label>
         </div>
         <div class="panel-check-row">
           <label class="panel-check panel-check-compact">
-            <input type="checkbox" id="chkWoodWall" checked> WRW
+            <input type="checkbox" id="chkWoodWall" checked> Wood walls
           </label>
-          <label class="panel-check panel-check-compact panel-check-edge" title="Show WRW region edge lines">
+          <label class="panel-check panel-check-compact panel-check-edge" title="Show wood wall edge lines">
             <input type="checkbox" id="chkWoodWallEdge" checked> Edge
           </label>
         </div>
@@ -349,8 +352,13 @@
           <span class="range-val" id="optLoadArrowVal">1.0</span>
         </label>
         <label class="panel-row">
-          <span>Support gizmo</span>
-          <input type="range" id="optSupportGizmo" min="25" max="50" value="25">
+          <span>Reaction arrow</span>
+          <input type="range" id="optReactionArrow" min="0.1" max="5" step="0.1" value="1.0">
+          <span class="range-val" id="optReactionArrowVal">1.0</span>
+        </label>
+        <label class="panel-row">
+          <span>Support symbol</span>
+          <input type="range" id="optSupportGizmo" min="20" max="100" value="25">
           <span class="range-val" id="optSupportGizmoVal">25</span>
         </label>
         <label class="panel-row">
@@ -371,6 +379,11 @@
         <label class="panel-row">
           <span>Load line</span>
           <input type="number" id="optLoadLineWidth" min="0.5" max="3" step="0.5" value="1.5">
+          <span class="range-val">px</span>
+        </label>
+        <label class="panel-row">
+          <span>Reaction line</span>
+          <input type="number" id="optReactionLineWidth" min="0.5" max="3" step="0.5" value="2">
           <span class="range-val">px</span>
         </label>
         <label class="panel-row">

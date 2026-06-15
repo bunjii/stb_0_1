@@ -6,7 +6,7 @@ import time
 
 from stb_gui.browser import open_gui_browser
 from stb_gui.dat_edit import apply_edit_action, validate_dat_text, ejnt_lines_for_elements
-from stb_gui.dat_format_headers import write_dat_text
+from stb_gui.dat_format_headers import prepare_dat_text_for_write, write_dat_text
 from stb_gui.input_format import EJNT_EDITOR_HEADER
 from stb_gui.loads_view import (
     apply_seismic_dlod_for_model,
@@ -84,6 +84,11 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         )
 
     app = FastAPI(title="Structural Toolbox", version="0.1.0")
+
+    def _raise_os_error(ex: OSError) -> None:
+        msg = str(ex)
+        status = 404 if "Project file not found" in msg else 500
+        raise HTTPException(status_code=status, detail=msg)
 
     @app.on_event("startup")
     def _on_startup():
@@ -169,6 +174,14 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
     ):
         try:
             full = resolve_model_path(path)
+            current = load_input_text(path)
+            normalized = prepare_dat_text_for_write(text)
+            if prepare_dat_text_for_write(current) == normalized:
+                return JSONResponse({
+                    "ok": True,
+                    "path": normalize_model_relpath(path),
+                    "changed": False,
+                })
             write_dat_text(full, text)
             invalidate_model_session(full)
             invalidate_solved_model_cache(full)
@@ -176,7 +189,11 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
             raise HTTPException(status_code=500, detail=str(ex))
-        return JSONResponse({"ok": True, "path": normalize_model_relpath(path)})
+        return JSONResponse({
+            "ok": True,
+            "path": normalize_model_relpath(path),
+            "changed": True,
+        })
 
     @app.post("/api/model/edit")
     def api_model_edit(
@@ -230,6 +247,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             data = load_project_view_for_model(path)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            _raise_os_error(ex)
         return JSONResponse(data)
 
     @app.put("/api/project")
@@ -259,6 +278,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             data = load_dead_view_for_model(path)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            _raise_os_error(ex)
         return JSONResponse(data)
 
     @app.get("/api/loads/live")
@@ -270,6 +291,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             data = load_live_view_for_model(path)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            _raise_os_error(ex)
         return JSONResponse(data)
 
     @app.get("/api/loads/seismic")
@@ -281,6 +304,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             data = load_seismic_view_for_model(path)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            _raise_os_error(ex)
         return JSONResponse(data)
 
     @app.get("/api/loads/wind")
@@ -296,6 +321,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             data = load_wind_view_for_model(path, include_visual=include_visual)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            _raise_os_error(ex)
         return JSONResponse(data)
 
     @app.post("/api/loads/seismic/apply")
@@ -308,7 +335,7 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
-            raise HTTPException(status_code=500, detail=str(ex))
+            _raise_os_error(ex)
         return JSONResponse({"ok": True, "view": data})
 
     @app.post("/api/loads/wind/apply")
@@ -321,7 +348,7 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
-            raise HTTPException(status_code=500, detail=str(ex))
+            _raise_os_error(ex)
         return JSONResponse({"ok": True, "view": data})
 
     @app.post("/api/model/new")

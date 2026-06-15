@@ -7,6 +7,8 @@
   color: #e8e6ed;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
+  color-scheme: dark light;
+  accent-color: #555568;
 }
 
 .loads-verify-toolbar {
@@ -16,8 +18,9 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
-  background: #252530;
-  border-bottom: 1px solid #3a3a48;
+  background: #e1dee4;
+  border-bottom: 1px solid #b8b4bc;
+  color: #111111;
 }
 
 .loads-verify-toolbar-left {
@@ -31,11 +34,12 @@
   margin: 0;
   font-size: 15px;
   font-weight: 700;
+  color: #111111;
 }
 
 .loads-verify-path {
   font-size: 11px;
-  color: #a8a4b8;
+  color: #444444;
   word-break: break-all;
 }
 

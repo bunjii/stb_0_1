@@ -8,6 +8,8 @@ html, body {
   font-family: "Segoe UI", system-ui, sans-serif;
   background: #1a1a22;
   color: #e8e6ed;
+  color-scheme: dark light;
+  accent-color: #555568;
 }
 
 #toolbar {
@@ -636,8 +638,9 @@ select.context-menu-input {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.45rem 0.55rem;
-  background: #2e2e3a;
-  border-bottom: 1px solid #4a4a58;
+  background: #e1dee4;
+  border-bottom: 1px solid #b8b4bc;
+  color: #111111;
   cursor: grab;
   user-select: none;
 }
@@ -649,12 +652,13 @@ select.context-menu-input {
 .float-panel-title {
   font-weight: 600;
   font-size: 13px;
+  color: #111111;
 }
 
 .btn-icon {
   background: transparent;
-  border: 1px solid #5a5a68;
-  color: #e8e6ed;
+  border: 1px solid #8a8690;
+  color: #111111;
   border-radius: 4px;
   width: 1.5rem;
   height: 1.5rem;
@@ -665,7 +669,7 @@ select.context-menu-input {
 }
 
 .btn-icon:hover {
-  background: #3a3a48;
+  background: #d4d0d8;
 }
 
 .float-panel-body {

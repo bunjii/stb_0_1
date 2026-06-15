@@ -11,7 +11,7 @@ const COLORS = {
   supportTrans: 0xBF3434,
   supportRot: 0x618FCD,
   supportAnchor: 0x374151,
-  load: 0xd45087,
+  load: 0xc00000,
   reaction: 0x0d9488,
   reactionMoment: 0x9333ea,
   ejnt: 0xff8c00,
@@ -53,9 +53,13 @@ const ALPHA = {
   opaque: 1.0,
   windWall: 0.38,
   windFootprint: 0.2,
+  dlodEnvelopeEdge: 1.0,
 };
 
+const LOAD_VALUE_LABEL_FG = "#c00000";
+
 const OPTIONS_STORAGE_KEY = "stb_gui_options";
+const RESULTS_DISPLAY_STORAGE_KEY = "stb_gui_results_display";
 const MODEL_STORAGE_KEY = "stb_gui_last_model";
 const WRW_CREATE_MODEL_KEY = "stb_gui_wwll_create_model";
 const LABEL_BG = {
@@ -69,12 +73,14 @@ const LABEL_BG = {
 
 const OPTIONS_DEFAULTS = {
   loadArrowSize: 1.0,
+  reactionArrowSize: 1.0,
   inputLoadType: "all",
   supportGizmoSize: 25,
   supportLineWidth: 2,
   dispContourLineWidth: 2.5,
   elementLineWidth: 2.0,
   loadLineWidth: 2.0,
+  reactionLineWidth: 2.0,
   forceLineWidth: 1.0,
   nodeLabelSize: 1.0,
   elemLabelSize: 1.0,
@@ -87,11 +93,13 @@ const OPTIONS_DEFAULTS = {
 
 const OPTIONS_LIMITS = {
   loadArrowSize: { min: 0.1, max: 5.0 },
-  supportGizmoSize: { min: 25, max: 50 },
+  reactionArrowSize: { min: 0.1, max: 5.0 },
+  supportGizmoSize: { min: 20, max: 100 },
   supportLineWidth: { min: 0.5, max: 3 },
   dispContourLineWidth: { min: 0.5, max: 3 },
   elementLineWidth: { min: 0.5, max: 3 },
   loadLineWidth: { min: 0.5, max: 3 },
+  reactionLineWidth: { min: 0.5, max: 3 },
   forceLineWidth: { min: 0.5, max: 3 },
   nodeLabelSize: { min: 0.1, max: 2.0 },
   elemLabelSize: { min: 0.1, max: 2.0 },
@@ -100,6 +108,36 @@ const OPTIONS_LIMITS = {
   loadLabelSize: { min: 0.1, max: 2.0 },
   reactionLabelSize: { min: 0.1, max: 2.0 },
   forceLabelSize: { min: 0.1, max: 2.5 },
+};
+
+const RESULTS_DISPLAY_DEFAULTS = {
+  defFactor: 50,
+  deformed: false,
+  dispContour: false,
+  supports: true,
+  ejnt: false,
+  loads: true,
+  loadValues: false,
+  windLoads: false,
+  reactions: false,
+  reactionValues: false,
+  nodeLabels: false,
+  elemLabels: false,
+  material: false,
+  section: false,
+  membrane: true,
+  membraneEdge: true,
+  woodWall: true,
+  woodWallEdge: true,
+  forceComponent: 0,
+  forceDiv: 8,
+  forceFactor: 10,
+  forceValues: true,
+  loadCase: null,
+  windCaseId: null,
+  dispContourMin: "",
+  dispContourMax: "",
+  showWorldAxes: true,
 };
 
 function clampViewerOption(key, value) {
@@ -241,12 +279,15 @@ const el = {
   btnEjntEditClose: document.getElementById("btnEjntEditClose"),
   optLoadArrow: document.getElementById("optLoadArrow"),
   optLoadArrowVal: document.getElementById("optLoadArrowVal"),
+  optReactionArrow: document.getElementById("optReactionArrow"),
+  optReactionArrowVal: document.getElementById("optReactionArrowVal"),
   optSupportGizmo: document.getElementById("optSupportGizmo"),
   optSupportGizmoVal: document.getElementById("optSupportGizmoVal"),
   optSupportLineWidth: document.getElementById("optSupportLineWidth"),
   optDispContourLineWidth: document.getElementById("optDispContourLineWidth"),
   optElementLineWidth: document.getElementById("optElementLineWidth"),
   optLoadLineWidth: document.getElementById("optLoadLineWidth"),
+  optReactionLineWidth: document.getElementById("optReactionLineWidth"),
   optForceLineWidth: document.getElementById("optForceLineWidth"),
   optNodeLabel: document.getElementById("optNodeLabel"),
   optNodeLabelVal: document.getElementById("optNodeLabelVal"),
@@ -281,6 +322,15 @@ let selectionDrag = null;
 const _worldProj = new THREE.Vector3();
 const _ndcScratch = new THREE.Vector3();
 const _viewPosScratch = new THREE.Vector3();
+const _gizmoCenterScratch = new THREE.Vector3();
+const _screenDirScratch = new THREE.Vector3();
+const _viewToCenterScratch = new THREE.Vector3();
+const REACTION_TRANS_COLORS = [0xff0000, 0x00ff00, 0x0000ff];
+const REACTION_TRANS_AXES = [
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(0, 1, 0),
+  new THREE.Vector3(0, 0, 1),
+];
 const _leaderStart = new THREE.Vector3();
 const _leaderEnd = new THREE.Vector3();
 const _labelNdc = new THREE.Vector3();
@@ -294,14 +344,16 @@ let editRedoStack = [];
 let editHistoryBusy = false;
 let currentResultsText = null;
 let viewerOptions = Object.assign({}, OPTIONS_DEFAULTS);
+let displayPrefs = Object.assign({}, RESULTS_DISPLAY_DEFAULTS);
 let wideLineMaterials = new Set();
 let dispContourScaleKey = null;
 let supportGizmoEntries = [];
+let reactionForceEntries = [];
 let nodeLabelEntries = [];
 let _nodeLabelLeaderMat = null;
 let currentModelPath = null;
 const inputEditors = new Map();
-let showWorldAxes = true;
+let showWorldAxes = RESULTS_DISPLAY_DEFAULTS.showWorldAxes;
 const _supportDiscTexCache = new Map();
 let _nodePointTexture = null;
 let windVisualData = null;
@@ -2681,18 +2733,18 @@ function updateViewerInfoOverlay(model) {
   if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
   if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
   if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
-  if (el.chkEJnt && el.chkEJnt.checked) displayLines.push("EJNT markers");
+  if (el.chkEJnt && el.chkEJnt.checked) displayLines.push("element joints");
   if (el.chkLabels && el.chkLabels.checked) displayLines.push("node IDs");
   if (el.chkElemLabels && el.chkElemLabels.checked) displayLines.push("element IDs");
   if (el.chkMaterial && el.chkMaterial.checked) displayLines.push("material labels");
   if (el.chkSection && el.chkSection.checked) displayLines.push("section labels");
   if (el.chkMembrane && el.chkMembrane.checked) {
     const nmem = model.membrane_elements ? model.membrane_elements.length : 0;
-    displayLines.push("DMEM (" + nmem + ")");
+    displayLines.push("diaphragm members (" + nmem + ")");
   }
   if (el.chkWoodWall && el.chkWoodWall.checked) {
     const nwrw = model.wood_rated_walls ? model.wood_rated_walls.length : 0;
-    displayLines.push("WRW (" + nwrw + ")");
+    displayLines.push("wood walls (" + nwrw + ")");
   }
   if (forceComp !== "None") {
     displayLines.push(
@@ -2733,8 +2785,8 @@ function updateViewerInfoOverlay(model) {
   lines.push(
     "nodes: " + (model.nodes ? model.nodes.length : 0),
     "elements: " + (model.elements ? model.elements.length : 0),
-    "DMEM: " + (model.membrane_elements ? model.membrane_elements.length : 0),
-    "WRW: " + (model.wood_rated_walls ? model.wood_rated_walls.length : 0),
+    "Diaphragm members: " + (model.membrane_elements ? model.membrane_elements.length : 0),
+    "Wood walls: " + (model.wood_rated_walls ? model.wood_rated_walls.length : 0),
     "supports: " + supports,
     "point loads: " + pointLoads,
     "element loads: " + elemLoads,
@@ -2752,6 +2804,7 @@ function updateViewerInfoOverlay(model) {
     "",
     "[Options]",
     "load arrow scale: " + Number(viewerOptions.loadArrowSize).toFixed(1),
+    "reaction arrow scale: " + Number(viewerOptions.reactionArrowSize).toFixed(1),
     "load label scale: " + Number(viewerOptions.loadLabelSize).toFixed(0),
     "reaction label scale: " + Number(viewerOptions.reactionLabelSize).toFixed(0),
   );
@@ -2836,6 +2889,7 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   updateSupportGizmoPositions();
+  updateReactionForceDisplay();
   updateNodeLabelPositions();
   renderer.render(scene, camera);
 }
@@ -3228,6 +3282,7 @@ function applyDispContourAutoRange() {
   const autoRange = dispMagnitudeRange(currentModel, lc, defFac);
   dispContourScaleKey = null;
   syncDispContourInputs(autoRange, lc, defFac, true);
+  onResultsDisplayChanged();
   rebuildScene();
 }
 
@@ -3356,6 +3411,7 @@ function buildModelScene(model) {
   clearGroup(labelGroup);
   clearWideLineMaterials();
   supportGizmoEntries = [];
+  reactionForceEntries = [];
   nodeLabelEntries = [];
 
   enrichModelReactions(model);
@@ -3579,10 +3635,23 @@ function buildModelScene(model) {
       showValues: showLoadValues,
       loadLabelScale,
     });
+
+    drawDiaphragmInputLoads(model, {
+      lc,
+      defFac,
+      deformed,
+      span,
+      nm,
+      arrowBase,
+      maxWMag: Math.max(maxWMag, maxDiaphragmLoadMag(model, lc)),
+      showValues: showLoadValues,
+      loadLabelScale,
+    });
   }
 
+  const showReactionArrows = complete && el.chkReactions && el.chkReactions.checked;
   const showReactionLabels = complete && (
-    el.chkReactionValues.checked || (el.chkReactions && el.chkReactions.checked)
+    el.chkReactionValues && el.chkReactionValues.checked
   );
 
   drawSupportReactions(model, {
@@ -3590,6 +3659,7 @@ function buildModelScene(model) {
     lcKey,
     defFac,
     deformed,
+    showArrows: showReactionArrows,
     showValues: showReactionLabels,
     span,
     nm,
@@ -3831,6 +3901,98 @@ function updateSupportGizmoPositions() {
     supportGizmoCenter(
       entry.nodePos, currentModel, entry.gizmoRadius, camera, renderer, entry.sprite.position
     );
+  }
+}
+
+function reactionForceDirection(axisIndex, fval) {
+  return REACTION_TRANS_AXES[axisIndex].clone().multiplyScalar(fval >= 0 ? 1 : -1);
+}
+
+function computeReactionTransArrowEndpoints(gizmoCenter, gizmoRadius, screenDir, arrowLen) {
+  const d = screenDir.clone().normalize();
+  const head = gizmoCenter.clone().addScaledVector(d, -gizmoRadius);
+  const tail = gizmoCenter.clone().addScaledVector(d, -(gizmoRadius + arrowLen));
+  return { tail, head };
+}
+
+function billboardViewDirection(worldPos, camera, target) {
+  const out = target || new THREE.Vector3();
+  out.subVectors(camera.position, worldPos);
+  if (out.lengthSq() < 1e-18) {
+    return out.copy(camera.getWorldDirection(new THREE.Vector3()));
+  }
+  return out.normalize();
+}
+
+function billboardScreenDirection(worldPos, worldDir, camera, target) {
+  const out = target || new THREE.Vector3();
+  const viewDir = billboardViewDirection(worldPos, camera, _viewToCenterScratch);
+  const d = worldDir.clone().normalize();
+  out.copy(d).addScaledVector(viewDir, -d.dot(viewDir));
+  if (out.lengthSq() < 1e-12) {
+    out.copy(camera.up).addScaledVector(viewDir, -camera.up.dot(viewDir));
+    if (out.lengthSq() < 1e-12) {
+      out.set(1, 0, 0);
+    }
+  }
+  return out.normalize();
+}
+
+function reactionArrowLength(model) {
+  const span = modelSpan(model);
+  const pct = parseFloat(viewerOptions.reactionArrowSize);
+  if (!isFinite(pct) || pct <= 0) return span * 0.01;
+  return span * (pct / 100);
+}
+
+function reactionLineWidthPx(mag, maxMag) {
+  const base = clampLineWidthPx(
+    viewerOptions.reactionLineWidth, 2, OPTIONS_LIMITS.reactionLineWidth.max
+  );
+  if (maxMag < 1e-9) return base * 0.25;
+  return base * Math.max(0.25, Math.abs(mag) / maxMag);
+}
+
+function updateReactionForceLabel(entry, tail, screenDir) {
+  if (!entry.labelSprite) return;
+  const worldH = entry.span * entry.scaleFactor;
+  const gap = worldH * 0.08;
+  entry.labelSprite.position.copy(tail).addScaledVector(
+    screenDir, -(worldH * 0.5 + gap)
+  );
+}
+
+function updateReactionZeroLabel(entry, gizmoCenter, screenDir) {
+  if (!entry.labelSprite) return;
+  const worldH = entry.span * entry.scaleFactor;
+  const inset = entry.gizmoRadius * 0.12;
+  entry.labelSprite.position.copy(gizmoCenter).addScaledVector(
+    screenDir, -(entry.gizmoRadius + inset + worldH * 0.35)
+  );
+}
+
+function updateReactionForceDisplay() {
+  if (!camera || !renderer || !currentModel || reactionForceEntries.length === 0) return;
+  for (const entry of reactionForceEntries) {
+    const center = supportGizmoCenter(
+      entry.nodePos, currentModel, entry.gizmoRadius, camera, renderer, _gizmoCenterScratch
+    );
+    if (entry.zeroDisplay) {
+      const axisDir = REACTION_TRANS_AXES[entry.axisIndex];
+      const screenDir = billboardScreenDirection(center, axisDir, camera, _screenDirScratch);
+      updateReactionZeroLabel(entry, center, screenDir);
+      continue;
+    }
+    const forceDir = reactionForceDirection(entry.axisIndex, entry.fval);
+    const screenDir = billboardScreenDirection(center, forceDir, camera, _screenDirScratch);
+    const viewDir = billboardViewDirection(center, camera, _viewToCenterScratch);
+    const { tail, head } = computeReactionTransArrowEndpoints(
+      center, entry.gizmoRadius, screenDir, entry.arrowLen
+    );
+    if (entry.lines) {
+      updateBillboardDirectedWideArrow(entry.lines, tail, head, viewDir, entry.headScale);
+    }
+    updateReactionForceLabel(entry, tail, screenDir);
   }
 }
 
@@ -4095,16 +4257,19 @@ function forceLineWidthPx() {
   return clampLineWidthPx(viewerOptions.forceLineWidth, 1.5, OPTIONS_LIMITS.forceLineWidth.max);
 }
 
-function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx, opacity) {
-  if (pts.length < 6) return;
+function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx, opacity, opaque) {
+  if (pts.length < 6) return null;
   const geo = new LineSegmentsGeometry();
   geo.setPositions(pts);
+  const useOpaque = opaque === true;
   const mat = new LineMaterial({
     color: color,
     linewidth: lineWidthPx,
     worldUnits: false,
-    transparent: opacity != null && opacity < ALPHA.opaque,
-    opacity: opacity != null ? opacity : ALPHA.opaque,
+    transparent: useOpaque ? false : (opacity != null && opacity < ALPHA.opaque),
+    opacity: useOpaque ? 1 : (opacity != null ? opacity : ALPHA.opaque),
+    depthTest: useOpaque ? false : true,
+    depthWrite: useOpaque ? false : true,
   });
   const w = el.viewport.clientWidth || 1;
   const h = el.viewport.clientHeight || 1;
@@ -4114,6 +4279,7 @@ function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx,
   lines.frustumCulled = false;
   lines.renderOrder = renderOrder;
   group.add(lines);
+  return lines;
 }
 
 function supportDiscTextureKey(fixed) {
@@ -4302,17 +4468,24 @@ function loadValueLabelPoint(tail, tip, span, scaleFactor) {
 
 function loadTypeFilterValue() {
   const t = viewerOptions.inputLoadType;
-  if (t === "area" || t === "gravity" || t === "linepoint") return t;
+  if (t === "area" || t === "gravity" || t === "linepoint" || t === "dlod") return t;
   return "all";
+}
+
+function shouldDrawDiaphragmLoad() {
+  const t = loadTypeFilterValue();
+  return t === "all" || t === "dlod";
 }
 
 function shouldDrawPointLoad() {
   const t = loadTypeFilterValue();
+  if (t === "dlod") return false;
   return t === "all" || t === "linepoint";
 }
 
 function shouldDrawElementLoad(ld) {
   const t = loadTypeFilterValue();
+  if (t === "dlod") return false;
   if (t === "all") return true;
   if (t === "area") return isAreaLoad(ld);
   if (t === "gravity") return isGravityLoad(ld);
@@ -4322,7 +4495,25 @@ function shouldDrawElementLoad(ld) {
 
 function addLoadValueLabel(text, point, span, scaleFactor, group) {
   if (!text) return;
-  addReactionValueLabel(text, point, span, scaleFactor, group, colorHex(COLORS.load));
+  const sprite = makeLoadValueLabelSprite(text, span, scaleFactor);
+  sprite.position.copy(point);
+  sprite.renderOrder = 15;
+  group.add(sprite);
+}
+
+function makeLoadValueLabelSprite(text, span, scaleFactor) {
+  const factor = scaleFactor != null ? scaleFactor : 0.06;
+  const quality = Math.min(20, Math.max(4, labelTextureQualityScale(factor) * 1.75));
+  return makeTextSprite(text, span, {
+    bg: "transparent",
+    fg: LOAD_VALUE_LABEL_FG,
+    pad: 2,
+    scaleFactor: factor,
+    qualityScale: quality,
+    transparent: true,
+    alphaTest: 0.01,
+    labelPremultiplied: true,
+  });
 }
 
 function elemMap(model) {
@@ -4721,7 +4912,11 @@ async function loadWindVisualForCurrentModel() {
     const view = await fetchApiJson("/api/loads/wind?path=" + encodeURIComponent(path));
     if (view.found && view.visual && view.visual.cases && view.visual.cases.length) {
       windVisualData = view.visual;
-      selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+      if (displayPrefs.windCaseId != null && windCaseById(windVisualData, displayPrefs.windCaseId)) {
+        selectedWindCaseId = displayPrefs.windCaseId;
+      } else {
+        selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+      }
     }
   } catch (ex) {
     console.warn("Wind visual load failed:", ex.message);
@@ -4770,6 +4965,288 @@ function drawElementInputLoads(model, opts) {
   }
 }
 
+function diaphragmLoadType(dl) {
+  return String(dl && dl.type != null ? dl.type : "").toUpperCase();
+}
+
+function diaphragmCentroid(model, diapId, nm, lc, defFac, deformed) {
+  const pts = [];
+  for (const mem of model.membrane_elements || []) {
+    if (mem.diaphragm_id !== diapId) continue;
+    for (const nid of mem.nodes || []) {
+      const n = nm[nid];
+      if (n) pts.push(nodePosition(n, model, lc, defFac, deformed));
+    }
+  }
+  if (pts.length === 0) return null;
+  const c = new THREE.Vector3();
+  for (const p of pts) c.add(p);
+  return c.multiplyScalar(1 / pts.length);
+}
+
+function membraneMemberCentroid(model, memberId, nm, lc, defFac, deformed) {
+  const mem = (model.membrane_elements || []).find(function (m) { return m.id === memberId; });
+  if (!mem || !mem.nodes || mem.nodes.length < 3) return null;
+  const pts = [];
+  for (const nid of mem.nodes) {
+    const n = nm[nid];
+    if (n) pts.push(nodePosition(n, model, lc, defFac, deformed));
+  }
+  if (pts.length === 0) return null;
+  const c = new THREE.Vector3();
+  for (const p of pts) c.add(p);
+  return c.multiplyScalar(1 / pts.length);
+}
+
+function maxDiaphragmLoadMag(model, lc) {
+  let max = 0;
+  for (const dl of model.diaphragm_loads || []) {
+    if (String(dl.lc) !== String(lc)) continue;
+    const lt = diaphragmLoadType(dl);
+    if (lt === "AREA" || lt === "LINE" || lt === "MEMBER_TRANSFER") {
+      max = Math.max(max, Math.abs(dl.px), Math.abs(dl.py));
+    } else if (lt === "MASS") {
+      max = Math.max(max, Math.abs(dl.mass) * Math.max(Math.abs(dl.ax), Math.abs(dl.ay), 1));
+    } else if (lt === "WEIGHT") {
+      max = Math.max(max, Math.abs(dl.weight) * Math.max(Math.abs(dl.ax), Math.abs(dl.ay), 1));
+    }
+  }
+  return max;
+}
+
+function formatDlodPressureLabel(mag) {
+  if (Math.abs(mag) < 1e-9) return "";
+  return formatReactionValue(mag) + " kN/m²";
+}
+
+function quantizeDlodPointKey(p) {
+  const q = (v) => Math.round(v * 1e4);
+  return q(p.x) + "," + q(p.y) + "," + q(p.z);
+}
+
+function dlodEdgeKey(p0, p1) {
+  const k0 = quantizeDlodPointKey(p0);
+  const k1 = quantizeDlodPointKey(p1);
+  return k0 < k1 ? k0 + "|" + k1 : k1 + "|" + k0;
+}
+
+function registerDlodTriangleEdge(edgeMap, p0, p1) {
+  const key = dlodEdgeKey(p0, p1);
+  let entry = edgeMap.get(key);
+  if (!entry) {
+    entry = { count: 0, a: p0.clone(), b: p1.clone() };
+    edgeMap.set(key, entry);
+  }
+  entry.count += 1;
+}
+
+function boundaryEdgesFromMap(edgeMap) {
+  const edgePts = [];
+  for (const entry of edgeMap.values()) {
+    if (entry.count !== 1) continue;
+    edgePts.push(
+      entry.a.x, entry.a.y, entry.a.z,
+      entry.b.x, entry.b.y, entry.b.z
+    );
+  }
+  return edgePts;
+}
+
+function collectMembraneEnvelope(model, opts) {
+  const { diapId, memberId, nm, lc, defFac, deformed } = opts;
+  const edgeMap = new Map();
+  for (const mem of model.membrane_elements || []) {
+    if (diapId != null && mem.diaphragm_id !== diapId) continue;
+    if (memberId != null && mem.id !== memberId) continue;
+    const ids = mem.nodes;
+    if (!ids || ids.length !== 3) continue;
+    const n0 = nm[ids[0]];
+    const n1 = nm[ids[1]];
+    const n2 = nm[ids[2]];
+    if (!n0 || !n1 || !n2) continue;
+    const p0 = nodePosition(n0, model, lc, defFac, deformed);
+    const p1 = nodePosition(n1, model, lc, defFac, deformed);
+    const p2 = nodePosition(n2, model, lc, defFac, deformed);
+    registerDlodTriangleEdge(edgeMap, p0, p1);
+    registerDlodTriangleEdge(edgeMap, p1, p2);
+    registerDlodTriangleEdge(edgeMap, p2, p0);
+  }
+  return { edgePts: boundaryEdgesFromMap(edgeMap) };
+}
+
+function addDlodEnvelopeOutline(edgePts) {
+  if (edgePts.length < 6) return;
+  addWideLineSegmentsFromPts(
+    edgePts,
+    COLORS.load,
+    modelGroup,
+    6,
+    Math.max(loadLineWidthPx() * 1.15, 1.0),
+    null,
+    true
+  );
+}
+
+function dlodLineEnvelopeHalfWidth(span) {
+  return Math.max(span * 0.012, 0.06);
+}
+
+function horizontalPerpToSegment(p0, p1) {
+  const along = new THREE.Vector3().subVectors(p1, p0);
+  if (along.lengthSq() < 1e-18) return null;
+  along.z = 0;
+  if (along.lengthSq() < 1e-18) return null;
+  along.normalize();
+  const perp = new THREE.Vector3(-along.y, along.x, 0);
+  if (perp.lengthSq() < 1e-18) return null;
+  return perp.normalize();
+}
+
+function addDlodLineEnvelope(p0, p1, span) {
+  const perp = horizontalPerpToSegment(p0, p1);
+  if (!perp) return;
+  const halfW = dlodLineEnvelopeHalfWidth(span);
+  const off = perp.clone().multiplyScalar(halfW);
+  const a = p0.clone().add(off);
+  const b = p0.clone().sub(off);
+  const c = p1.clone().sub(off);
+  const d = p1.clone().add(off);
+  const edgePts = [
+    a.x, a.y, a.z, b.x, b.y, b.z,
+    b.x, b.y, b.z, c.x, c.y, c.z,
+    c.x, c.y, c.z, d.x, d.y, d.z,
+    d.x, d.y, d.z, a.x, a.y, a.z,
+  ];
+  addDlodEnvelopeOutline(edgePts);
+}
+
+function drawDlodMembraneEnvelope(model, diapId, memberId, nm, lc, defFac, deformed) {
+  const env = collectMembraneEnvelope(model, {
+    diapId: diapId,
+    memberId: memberId,
+    nm: nm,
+    lc: lc,
+    defFac: defFac,
+    deformed: deformed,
+  });
+  if (env.edgePts.length > 0) addDlodEnvelopeOutline(env.edgePts);
+}
+
+function addDlodHorizontalArrow(origin, hx, hy, arrowBase, maxMag, span, loadLabelScale, showValues, labelPrefix) {
+  const comps = [
+    { val: hx, dir: new THREE.Vector3(1, 0, 0), name: "Px" },
+    { val: hy, dir: new THREE.Vector3(0, 1, 0), name: "Py" },
+  ];
+  for (const c of comps) {
+    if (Math.abs(c.val) < 1e-9) continue;
+    const sign = c.val >= 0 ? 1 : -1;
+    const dir = c.dir.clone().multiplyScalar(sign);
+    const mag = Math.abs(c.val);
+    const len = scaledReactionArrowLength(arrowBase, mag, maxMag);
+    const tip = addLoadArrow(origin, dir, len, modelGroup);
+    if (showValues && tip) {
+      const text = (labelPrefix ? labelPrefix + " " : "") + c.name + " " + formatDlodPressureLabel(mag);
+      addLoadValueLabel(
+        text,
+        loadValueLabelPoint(origin, tip, span, loadLabelScale),
+        span,
+        loadLabelScale,
+        labelGroup
+      );
+    }
+  }
+}
+
+function drawDiaphragmInputLoads(model, opts) {
+  if (!shouldDrawDiaphragmLoad()) return;
+  const {
+    lc, defFac, deformed, span, nm, arrowBase, maxWMag, showValues, loadLabelScale,
+  } = opts;
+  const loads = model.diaphragm_loads;
+  if (!loads || loads.length === 0) return;
+
+  for (const dl of loads) {
+    if (String(dl.lc) !== String(lc)) continue;
+    const lt = diaphragmLoadType(dl);
+    const prefix = "DIAP " + dl.diaphragm_id;
+
+    if (lt === "AREA") {
+      drawDlodMembraneEnvelope(model, dl.diaphragm_id, null, nm, lc, defFac, deformed);
+      const origin = diaphragmCentroid(model, dl.diaphragm_id, nm, lc, defFac, deformed);
+      if (!origin) continue;
+      addDlodHorizontalArrow(
+        origin, dl.px, dl.py, arrowBase, maxWMag, span, loadLabelScale, showValues, prefix
+      );
+      continue;
+    }
+
+    if (lt === "LINE") {
+      const ids = dl.nodes || [];
+      if (ids.length < 2) continue;
+      const n0 = nm[ids[0]];
+      const n1 = nm[ids[1]];
+      if (!n0 || !n1) continue;
+      const p0 = nodePosition(n0, model, lc, defFac, deformed);
+      const p1 = nodePosition(n1, model, lc, defFac, deformed);
+      addDlodLineEnvelope(p0, p1, span);
+      const mid = p0.clone().add(p1).multiplyScalar(0.5);
+      addDlodHorizontalArrow(
+        mid, dl.px, dl.py, arrowBase, maxWMag, span, loadLabelScale, showValues, prefix + " LINE"
+      );
+      continue;
+    }
+
+    if (lt === "MEMBER_TRANSFER") {
+      drawDlodMembraneEnvelope(model, null, dl.member_id, nm, lc, defFac, deformed);
+      const origin = membraneMemberCentroid(model, dl.member_id, nm, lc, defFac, deformed)
+        || diaphragmCentroid(model, dl.diaphragm_id, nm, lc, defFac, deformed);
+      if (!origin) continue;
+      addDlodHorizontalArrow(
+        origin, dl.px, dl.py, arrowBase, maxWMag, span, loadLabelScale, showValues, prefix + " MBTR"
+      );
+      continue;
+    }
+
+    if (lt === "MASS" || lt === "WEIGHT") {
+      drawDlodMembraneEnvelope(model, dl.diaphragm_id, null, nm, lc, defFac, deformed);
+      const origin = diaphragmCentroid(model, dl.diaphragm_id, nm, lc, defFac, deformed);
+      if (!origin) continue;
+      const ax = Number(dl.ax) || 0;
+      const ay = Number(dl.ay) || 0;
+      const scalar = lt === "MASS" ? Number(dl.mass) || 0 : Number(dl.weight) || 0;
+      if (Math.abs(ax) > 1e-9 || Math.abs(ay) > 1e-9) {
+        const dir = new THREE.Vector3(ax, ay, 0);
+        const mag = dir.length();
+        if (mag > 1e-9) {
+          dir.multiplyScalar(1 / mag);
+          const eff = scalar * mag;
+          const len = scaledReactionArrowLength(arrowBase, eff, maxWMag);
+          const tip = addLoadArrow(origin, dir, len, modelGroup);
+          if (showValues && tip) {
+            const kind = lt === "MASS" ? "M" : "W";
+            addLoadValueLabel(
+              prefix + " " + kind + "=" + formatReactionValue(scalar) + " ax=" + formatReactionValue(ax) + " ay=" + formatReactionValue(ay),
+              loadValueLabelPoint(origin, tip, span, loadLabelScale),
+              span,
+              loadLabelScale,
+              labelGroup
+            );
+          }
+        }
+      } else if (showValues && Math.abs(scalar) > 1e-9) {
+        const kind = lt === "MASS" ? "M" : "W";
+        addLoadValueLabel(
+          prefix + " " + kind + "=" + formatReactionValue(scalar),
+          origin.clone().add(new THREE.Vector3(0, 0, span * 0.01)),
+          span,
+          loadLabelScale,
+          labelGroup
+        );
+      }
+    }
+  }
+}
+
 function drawTrapezoidalDistributedLoad(ld, e, p0, p1, opts) {
   const { arrowBase, maxWMag, span, loadLabelScale, showValues } = opts;
   const w = ld.w;
@@ -4815,11 +5292,11 @@ function drawTrapezoidalDistributedLoad(ld, e, p0, p1, opts) {
       if (isParallel) {
         if (j === LOAD_DIV_NUM) continue;
         const tip = pt.clone().add(vOff);
-        addDirectedArrow(pt, tip, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(pt, tip, modelGroup, loadColor, loadLineWidthPx(), undefined, undefined, true);
       } else {
         const ept = pt.clone().sub(vOff);
         outlineOffsets.push(ept);
-        addDirectedArrow(ept, pt, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(ept, pt, modelGroup, loadColor, loadLineWidthPx(), undefined, undefined, true);
       }
     }
 
@@ -4828,21 +5305,24 @@ function drawTrapezoidalDistributedLoad(ld, e, p0, p1, opts) {
       for (let i = 0; i < outlineOffsets.length - 1; i++) {
         addLinePair(outlineOffsets[i], outlineOffsets[i + 1], outlinePts);
       }
-      addWideLineSegmentsFromPts(outlinePts, loadColor, modelGroup, 4, loadLineWidthPx(), 1.0);
+      addWideLineSegmentsFromPts(outlinePts, loadColor, modelGroup, 4, loadLineWidthPx(), null, true);
       if (!isAreaLoad(ld)) {
-        addDirectedArrow(outlineOffsets[0], p0, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(outlineOffsets[0], p0, modelGroup, loadColor, loadLineWidthPx(), undefined, undefined, true);
         addDirectedArrow(
           outlineOffsets[outlineOffsets.length - 1],
           p1,
           modelGroup,
           loadColor,
-          loadLineWidthPx()
+          loadLineWidthPx(),
+          undefined,
+          undefined,
+          true
         );
       } else {
         const endPts = [];
         addLinePair(outlineOffsets[0], p0, endPts);
         addLinePair(outlineOffsets[outlineOffsets.length - 1], p1, endPts);
-        addWideLineSegmentsFromPts(endPts, loadColor, modelGroup, 4, loadLineWidthPx(), 1.0);
+        addWideLineSegmentsFromPts(endPts, loadColor, modelGroup, 4, loadLineWidthPx(), null, true);
       }
     }
   }
@@ -5030,6 +5510,23 @@ function formatReactionValue(val) {
   return val.toFixed(1);
 }
 
+function reactionForceIsZeroDisplay(fval) {
+  if (Math.abs(fval) < 1e-6) return true;
+  return Math.abs(parseFloat(fval.toFixed(1))) < 1e-9;
+}
+
+function makeReactionForceLabelSprite(text, span, color, scaleFactor) {
+  return makeTextSprite(text, span, {
+    bg: "transparent",
+    fg: colorHex(color),
+    pad: 2,
+    scaleFactor: scaleFactor,
+    transparent: true,
+    alphaTest: 0.01,
+    labelPremultiplied: true,
+  });
+}
+
 function supportReactsForLc(model, s, lcKey) {
   if (s.reacts) {
     if (s.reacts[lcKey]) return s.reacts[lcKey];
@@ -5081,16 +5578,29 @@ function orientMeshAxisX(mesh, dir) {
   mesh.setRotationFromMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
 }
 
-function createLabelTexture(canvas, opaqueText) {
+function createLabelTexture(canvas, premultiplyOnUpload) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  tex.premultiplyAlpha = opaqueText;
+  tex.premultiplyAlpha = !!premultiplyOnUpload;
   if (renderer && renderer.capabilities) {
     tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   }
   return tex;
+}
+
+function drawLabelCanvasText(ctx, text, x, y, fg, opts) {
+  const quality = opts.quality || 1;
+  if (opts.textOutline) {
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.strokeStyle = opts.outlineColor || fg;
+    ctx.lineWidth = Math.max(2, quality * 3);
+    ctx.strokeText(text, x, y);
+  }
+  ctx.fillStyle = fg;
+  ctx.fillText(text, x, y);
 }
 
 function buildLabelCanvas(text, span, opts) {
@@ -5100,7 +5610,9 @@ function buildLabelCanvas(text, span, opts) {
   const fg = opts.fg || "#ffffff";
   const pad = opts.pad != null ? opts.pad : 4;
   const factor = opts.scaleFactor != null ? opts.scaleFactor : 0.06;
-  const quality = labelTextureQualityScale(factor);
+  const quality = opts.qualityScale != null
+    ? opts.qualityScale
+    : labelTextureQualityScale(factor);
   const baseFs = 28;
 
   const canvas = document.createElement("canvas");
@@ -5119,28 +5631,35 @@ function buildLabelCanvas(text, span, opts) {
   if (ctx.imageSmoothingQuality) {
     ctx.imageSmoothingQuality = "high";
   }
+  if (ctx.textRendering) {
+    ctx.textRendering = "optimizeLegibility";
+  }
 
   if (bg != null && bg !== "transparent") {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
-  ctx.fillStyle = fg;
-  ctx.globalAlpha = ALPHA.opaque;
-  ctx.fillText(text, padPx, quality * (baseFs + pad - 2));
+  const textY = quality * (baseFs + pad - 2);
+  drawLabelCanvasText(ctx, text, padPx, textY, fg, { quality: quality, textOutline: opts.textOutline });
 
-  const opaqueText = opts.opaque && (bg == null || bg === "transparent");
-  if (opaqueText) {
-    premultiplyCanvasAlpha(canvas);
+  if (opts.solidAlpha) {
+    solidifyCanvasAlpha(canvas);
   }
+
+  const labelPremultiplied = !!(
+    opts.labelPremultiplied
+    || opts.textOutline
+    || (opts.opaque && (bg == null || bg === "transparent") && !opts.solidAlpha)
+  );
 
   const worldH = span * factor;
   const worldW = worldH * (canvas.width / canvas.height);
-  return { canvas, opaqueText, worldW, worldH };
+  return { canvas, labelPremultiplied, worldW, worldH };
 }
 
 function makeTextPlaneMesh(text, span, opts) {
-  const { canvas, opaqueText, worldW, worldH } = buildLabelCanvas(text, span, opts);
-  const tex = createLabelTexture(canvas, opaqueText);
+  const { canvas, labelPremultiplied, worldW, worldH } = buildLabelCanvas(text, span, opts);
+  const tex = createLabelTexture(canvas, labelPremultiplied);
   const mat = new THREE.MeshBasicMaterial({
     map: tex,
     transparent: true,
@@ -5148,8 +5667,8 @@ function makeTextPlaneMesh(text, span, opts) {
     depthWrite: false,
     side: THREE.DoubleSide,
     opacity: ALPHA.opaque,
-    premultipliedAlpha: opaqueText,
-    alphaTest: opaqueText ? 0.01 : 0,
+    premultipliedAlpha: labelPremultiplied,
+    alphaTest: labelPremultiplied ? 0.01 : 0,
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(worldW, worldH), mat);
   mesh.renderOrder = 15;
@@ -5163,6 +5682,7 @@ function addOrientedReactionLabel(text, contact, axisDir, span, scaleFactor, gro
     fg: fgColor,
     pad: 2,
     scaleFactor: scaleFactor,
+    labelPremultiplied: true,
   });
   orientMeshAxisX(mesh, d);
   const pad = labelOffsetDistance(span, scaleFactor, 0.03);
@@ -5172,10 +5692,14 @@ function addOrientedReactionLabel(text, contact, axisDir, span, scaleFactor, gro
 
 function drawSupportReactions(model, opts) {
   const {
-    lc, lcKey, defFac, deformed, showValues, span, nm, reactionLabelScale,
+    lc, lcKey, defFac, deformed, showArrows, showValues, span, nm, reactionLabelScale,
   } = opts;
-  if (!showValues) return;
+  if (!showArrows && !showValues) return;
   if (!analysisComplete(model) || !model.supports || model.supports.length === 0) return;
+
+  const arrowLen = reactionArrowLength(model);
+  const maxForceMag = maxReactionForceMag(model, lcKey);
+  const gizmoRadius = supportGizmoSize(model);
 
   for (const s of model.supports) {
     const r = supportReactsForLc(model, s, lcKey);
@@ -5185,28 +5709,81 @@ function drawSupportReactions(model, opts) {
     const p = nodePosition(n, model, lc, defFac, deformed);
     const tx = r[0], ty = r[1], tz = r[2];
     const rx = r[3], ry = r[4], rz = r[5];
-
-    const forceAxes = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, 0, 1),
-    ];
     const forces = [tx, ty, tz];
-    const forceLabels = ["Tx", "Ty", "Tz"];
+
+    const gizmoCenter = supportGizmoCenter(p, model, gizmoRadius, camera, renderer, _gizmoCenterScratch);
+
     for (let i = 0; i < 3; i++) {
       const fval = forces[i];
-      if (Math.abs(fval) < 1e-9) continue;
-      const dir = forceAxes[i].clone().multiplyScalar(fval >= 0 ? 1 : -1);
-      addOrientedReactionLabel(
-        forceLabels[i] + " " + formatReactionValue(fval),
-        p,
-        dir,
-        span,
-        reactionLabelScale,
-        labelGroup,
-        colorHex(COLORS.reaction),
-        -1
+      const color = REACTION_TRANS_COLORS[i];
+      const zeroDisplay = reactionForceIsZeroDisplay(fval);
+
+      if (zeroDisplay) {
+        if (!showArrows && !showValues) continue;
+        const axisDir = REACTION_TRANS_AXES[i];
+        const screenDir = billboardScreenDirection(gizmoCenter, axisDir, camera, _screenDirScratch);
+        const entry = {
+          nodePos: p.clone(),
+          gizmoRadius: gizmoRadius,
+          axisIndex: i,
+          fval: fval,
+          arrowLen: arrowLen,
+          lines: null,
+          headScale: 0.85,
+          labelSprite: null,
+          zeroDisplay: true,
+          span: span,
+          scaleFactor: reactionLabelScale,
+        };
+        const sprite = makeReactionForceLabelSprite("0", span, color, reactionLabelScale);
+        sprite.renderOrder = 15;
+        entry.labelSprite = sprite;
+        updateReactionZeroLabel(entry, gizmoCenter, screenDir);
+        labelGroup.add(sprite);
+        reactionForceEntries.push(entry);
+        continue;
+      }
+
+      const forceDir = reactionForceDirection(i, fval);
+      const screenDir = billboardScreenDirection(gizmoCenter, forceDir, camera, _screenDirScratch);
+      const viewDir = billboardViewDirection(gizmoCenter, camera, _viewToCenterScratch);
+      const { tail, head } = computeReactionTransArrowEndpoints(
+        gizmoCenter, gizmoRadius, screenDir, arrowLen
       );
+
+      const entry = {
+        nodePos: p.clone(),
+        gizmoRadius: gizmoRadius,
+        axisIndex: i,
+        fval: fval,
+        arrowLen: arrowLen,
+        lines: null,
+        headScale: 0.85,
+        labelSprite: null,
+        zeroDisplay: false,
+        span: span,
+        scaleFactor: reactionLabelScale,
+      };
+
+      if (showArrows) {
+        const lineW = reactionLineWidthPx(fval, maxForceMag);
+        entry.lines = addDirectedArrowWideMutable(
+          tail, head, modelGroup, color, lineW, entry.headScale, 7, true, viewDir
+        );
+      }
+
+      if (showValues) {
+        const text = formatReactionValue(fval);
+        const sprite = makeReactionForceLabelSprite(text, span, color, reactionLabelScale);
+        sprite.renderOrder = 15;
+        entry.labelSprite = sprite;
+        updateReactionForceLabel(entry, tail, screenDir);
+        labelGroup.add(sprite);
+      }
+
+      if (showArrows || showValues) {
+        reactionForceEntries.push(entry);
+      }
     }
 
     const momentAxes = [
@@ -5216,20 +5793,22 @@ function drawSupportReactions(model, opts) {
     ];
     const moments = [rx, ry, rz];
     const momentLabels = ["Rx", "Ry", "Rz"];
-    for (let i = 0; i < 3; i++) {
-      const mval = moments[i];
-      if (Math.abs(mval) < 1e-9) continue;
-      const axisDir = momentAxes[i].clone().multiplyScalar(mval >= 0 ? 1 : -1);
-      addOrientedReactionLabel(
-        momentLabels[i] + " " + formatReactionValue(mval),
-        p,
-        axisDir,
-        span,
-        reactionLabelScale,
-        labelGroup,
-        colorHex(COLORS.reactionMoment),
-        1
-      );
+    if (showValues) {
+      for (let i = 0; i < 3; i++) {
+        const mval = moments[i];
+        if (Math.abs(mval) < 1e-9) continue;
+        const axisDir = momentAxes[i].clone().multiplyScalar(mval >= 0 ? 1 : -1);
+        addOrientedReactionLabel(
+          momentLabels[i] + " " + formatReactionValue(mval),
+          p,
+          axisDir,
+          span,
+          reactionLabelScale,
+          labelGroup,
+          colorHex(COLORS.reactionMoment),
+          1
+        );
+      }
     }
   }
 }
@@ -5308,7 +5887,78 @@ function arrowPerpendicular(dir) {
   return new THREE.Vector3().crossVectors(d, ref).normalize();
 }
 
-function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, renderOrder) {
+function directedArrowLinePoints(tail, head, headScale) {
+  const d = head.clone().sub(tail);
+  const length = d.length();
+  if (length < 1e-12) return [];
+  const dir = d.clone().normalize();
+  const hs = (headScale != null && isFinite(headScale) && headScale > 0) ? headScale : 1.0;
+  const headLen = Math.max(length * 0.22 * hs, length * 0.08 * hs);
+  const headWide = headLen * 0.55;
+  const wingBase = head.clone().addScaledVector(dir, -headLen);
+  const perp = arrowPerpendicular(dir);
+  const wingA = wingBase.clone().addScaledVector(perp, headWide);
+  const wingB = wingBase.clone().addScaledVector(perp, -headWide);
+  const pts = [];
+  addLinePair(tail, head, pts);
+  addLinePair(wingA, head, pts);
+  addLinePair(wingB, head, pts);
+  return pts;
+}
+
+function updateDirectedWideArrow(lines, tail, head, headScale) {
+  if (!lines) return;
+  const pts = directedArrowLinePoints(tail, head, headScale);
+  if (pts.length < 6) return;
+  lines.geometry.setPositions(pts);
+  lines.geometry.computeBoundingSphere();
+}
+
+function billboardArrowPerpendicular(screenDir, viewDir) {
+  const perp = new THREE.Vector3().crossVectors(viewDir, screenDir);
+  if (perp.lengthSq() < 1e-12) {
+    return arrowPerpendicular(screenDir);
+  }
+  return perp.normalize();
+}
+
+function billboardDirectedArrowLinePoints(tail, head, viewDir, headScale) {
+  const d = head.clone().sub(tail);
+  const length = d.length();
+  if (length < 1e-12) return [];
+  const dir = d.clone().normalize();
+  const hs = (headScale != null && isFinite(headScale) && headScale > 0) ? headScale : 1.0;
+  const headLen = Math.max(length * 0.22 * hs, length * 0.08 * hs);
+  const headWide = headLen * 0.55;
+  const wingBase = head.clone().addScaledVector(dir, -headLen);
+  const perp = billboardArrowPerpendicular(dir, viewDir);
+  const wingA = wingBase.clone().addScaledVector(perp, headWide);
+  const wingB = wingBase.clone().addScaledVector(perp, -headWide);
+  const pts = [];
+  addLinePair(tail, head, pts);
+  addLinePair(wingA, head, pts);
+  addLinePair(wingB, head, pts);
+  return pts;
+}
+
+function updateBillboardDirectedWideArrow(lines, tail, head, viewDir, headScale) {
+  if (!lines) return;
+  const pts = billboardDirectedArrowLinePoints(tail, head, viewDir, headScale);
+  if (pts.length < 6) return;
+  lines.geometry.setPositions(pts);
+  lines.geometry.computeBoundingSphere();
+}
+
+function addDirectedArrowWideMutable(tail, head, group, color, lineWidthPx, headScale, renderOrder, opaque, viewDir) {
+  const pts = viewDir
+    ? billboardDirectedArrowLinePoints(tail, head, viewDir, headScale)
+    : directedArrowLinePoints(tail, head, headScale);
+  if (pts.length < 6) return null;
+  const ro = (renderOrder != null && isFinite(renderOrder)) ? renderOrder : 5;
+  return addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx, null, opaque === true);
+}
+
+function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, renderOrder, opaque) {
   const d = head.clone().sub(tail);
   const length = d.length();
   if (length < 1e-12) return head.clone();
@@ -5323,11 +5973,8 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, rend
   const ro = (renderOrder != null && isFinite(renderOrder)) ? renderOrder : 5;
 
   if (lineWidthPx != null) {
-    const pts = [];
-    addLinePair(tail, head, pts);
-    addLinePair(wingA, head, pts);
-    addLinePair(wingB, head, pts);
-    addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx);
+    const pts = directedArrowLinePoints(tail, head, headScale);
+    addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx, null, opaque === true);
     return head.clone();
   }
 
@@ -5354,15 +6001,15 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, rend
   return head.clone();
 }
 
-function addDirectionArrow(origin, dir, length, group, color, lineWidthPx, headScale) {
+function addDirectionArrow(origin, dir, length, group, color, lineWidthPx, headScale, opaque) {
   const d = dir.clone().normalize();
   const tip = origin.clone().addScaledVector(d, length);
-  return addDirectedArrow(origin, tip, group, color, lineWidthPx, headScale);
+  return addDirectedArrow(origin, tip, group, color, lineWidthPx, headScale, undefined, opaque);
 }
 
 function addLoadArrow(origin, dir, length, group) {
   // Slightly slimmer load arrows for better readability on dense scenes.
-  return addDirectionArrow(origin, dir, length, group, COLORS.load, loadLineWidthPx(), 0.75);
+  return addDirectionArrow(origin, dir, length, group, COLORS.load, loadLineWidthPx(), 0.75, true);
 }
 
 function nodeLabelScaleFactor() {
@@ -5717,18 +6364,32 @@ function premultiplyCanvasAlpha(canvas) {
   ctx.putImageData(img, 0, 0);
 }
 
+function solidifyCanvasAlpha(canvas) {
+  const ctx = canvas.getContext("2d");
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] > 8) d[i + 3] = 255;
+    else d[i + 3] = 0;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 function makeTextSprite(text, span, opts) {
-  const { canvas, opaqueText, worldW, worldH } = buildLabelCanvas(text, span, opts);
-  const tex = createLabelTexture(canvas, opaqueText);
-  const useTransparent = !(opts && opts.transparent === false);
+  opts = opts || {};
+  const { canvas, labelPremultiplied, worldW, worldH } = buildLabelCanvas(text, span, opts);
+  const tex = createLabelTexture(canvas, labelPremultiplied);
+  const useTransparent = opts.transparent !== false;
   const mat = new THREE.SpriteMaterial({
     map: tex,
     depthTest: false,
     depthWrite: false,
     transparent: useTransparent,
     opacity: ALPHA.opaque,
-    premultipliedAlpha: opaqueText,
-    alphaTest: useTransparent ? (opaqueText ? 0.01 : 0) : 0,
+    premultipliedAlpha: labelPremultiplied,
+    alphaTest: opts.alphaTest != null
+      ? opts.alphaTest
+      : (useTransparent ? (labelPremultiplied ? 0.01 : 0) : 0),
   });
   const sp = new THREE.Sprite(mat);
   sp.scale.set(worldW, worldH, 1);
@@ -5750,6 +6411,10 @@ function fillLcSelect(model) {
     opt.value = String(lc);
     opt.textContent = "LC " + lc;
     el.lcSelect.appendChild(opt);
+  }
+  const savedLc = displayPrefs.loadCase;
+  if (savedLc && Array.from(el.lcSelect.options).some(function (o) { return o.value === savedLc; })) {
+    el.lcSelect.value = savedLc;
   }
 }
 
@@ -5807,10 +6472,97 @@ function primeStbPopupOrigin(popupWin) {
   }
 }
 
-function openStbPopup(features) {
+const childWindows = new Set();
+const childWindowRefs = Object.create(null);
+
+const CHILD_WINDOW_NAMES = {
+  input: "stb_gui_input",
+  project: "stb_gui_project",
+  loadsVerify: "stb_loads_verify",
+  results: "stb_gui_results",
+};
+
+function getLivingChildWindow(kind) {
+  const w = childWindowRefs[kind];
+  if (!w) return null;
+  if (w.closed) {
+    delete childWindowRefs[kind];
+    return null;
+  }
+  return w;
+}
+
+function focusChildWindow(w) {
+  if (!w || w.closed) return;
+  try {
+    w.focus();
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function registerChildWindow(win) {
+  if (!win) return;
+  childWindows.add(win);
+}
+
+function pruneClosedChildWindows() {
+  for (const w of childWindows) {
+    if (!w || w.closed) childWindows.delete(w);
+  }
+}
+
+function closeAllChildWindows() {
+  pruneClosedChildWindows();
+  for (const w of childWindows) {
+    try {
+      if (!w.closed) w.close();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  childWindows.clear();
+  for (const kind of Object.keys(childWindowRefs)) {
+    delete childWindowRefs[kind];
+  }
+  inputEditors.clear();
+}
+
+function openNamedChildPopup(kind, features) {
+  pruneClosedChildWindows();
+  const existing = getLivingChildWindow(kind);
+  if (existing) {
+    focusChildWindow(existing);
+    return existing;
+  }
   const url = guiApiUrl("/static/popup.html", window);
-  const w = window.open(url, "_blank", features);
+  const w = window.open(url, CHILD_WINDOW_NAMES[kind] || "_blank", features);
   primeStbPopupOrigin(w);
+  if (w) {
+    childWindowRefs[kind] = w;
+    registerChildWindow(w);
+  }
+  return w;
+}
+
+function openNamedChildUrl(kind, url, features) {
+  pruneClosedChildWindows();
+  const existing = getLivingChildWindow(kind);
+  if (existing) {
+    try {
+      if (existing.location.href !== url) existing.location.href = url;
+    } catch (_) {
+      /* cross-origin during navigation */
+    }
+    focusChildWindow(existing);
+    return existing;
+  }
+  const w = window.open(url, CHILD_WINDOW_NAMES[kind] || "_blank", features);
+  primeStbPopupOrigin(w);
+  if (w) {
+    childWindowRefs[kind] = w;
+    registerChildWindow(w);
+  }
   return w;
 }
 
@@ -5834,7 +6586,8 @@ function runWhenPopupReady(w, initFn) {
 
 function stbIconHeadHtml(targetWindow) {
   const base = guiApiOrigin(targetWindow) || "";
-  return "<meta name=\"theme-color\" content=\"#000000\">"
+  return "<meta name=\"theme-color\" content=\"#e1dee4\">"
+    + "<meta name=\"color-scheme\" content=\"dark light\">"
     + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-32.png\" type=\"image/png\" sizes=\"32x32\">"
     + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-48.png\" type=\"image/png\" sizes=\"48x48\">"
     + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-256.png\" type=\"image/png\" sizes=\"256x256\">"
@@ -6345,12 +7098,20 @@ function populateFormFromProject(formRoot, editForm, project) {
 
 function showProjectWindow(view) {
   const title = view.project_path || view.title || "project.json";
-  const w = openStbPopup("width=980,height=820,scrollbars=yes,resizable=yes");
+  const w = openNamedChildPopup("project", "width=980,height=820,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
-  runWhenPopupReady(w, () => initProjectEditorWindow(w, view, title));
+  const init = () => initProjectEditorWindow(w, view, title);
+  if (w.__stbProjectEditorReady) {
+    init();
+    return;
+  }
+  runWhenPopupReady(w, () => {
+    w.__stbProjectEditorReady = true;
+    init();
+  });
 }
 
 function initProjectEditorWindow(w, view, title) {
@@ -6368,7 +7129,7 @@ function initProjectEditorWindow(w, view, title) {
   doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
   doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
   doc.write(".toolbar .path{font-size:12px;color:#aaa;margin-left:auto;}");
-  doc.write(".toolbar .status{font-size:12px;color:#9cdcfe;}");
+  doc.write(".toolbar .status{font-size:12px;color:#555;}");
   doc.write(".tabs{display:flex;gap:0;background:#252530;padding:0 16px;border-bottom:1px solid #3a3a48;flex-shrink:0;}");
   doc.write(".tab{background:transparent;color:#aaa;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-weight:600;cursor:pointer;}");
   doc.write(".tab.active{color:#e8e6ed;border-bottom-color:#e1dee4;}");
@@ -6709,6 +7470,13 @@ function initProjectEditorWindow(w, view, title) {
       alert("4方向生成に失敗しました: " + ex.message);
     }
   });
+
+  doc.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "S")) {
+      ev.preventDefault();
+      doc.getElementById("btnSave").click();
+    }
+  });
 }
 
 async function openProjectWindow() {
@@ -6752,8 +7520,11 @@ function openLoadsVerifyWindow() {
     setStatus("Error: " + ex.message);
     return;
   }
-  const w = window.open(url, "stb_loads_verify", "width=1040,height=860,scrollbars=yes,resizable=yes");
-  primeStbPopupOrigin(w);
+  const w = openNamedChildUrl(
+    "loadsVerify",
+    url,
+    "width=1040,height=860,scrollbars=yes,resizable=yes"
+  );
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
@@ -6770,58 +7541,79 @@ window.refreshWindVisual = () => loadWindVisualForCurrentModel().then(function (
 function showTextDocumentWindow(text, title) {
   const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
   const saveName = title;
-  const w = openStbPopup("width=920,height=720,scrollbars=yes,resizable=yes");
+  const w = openNamedChildPopup("results", "width=920,height=720,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
+  const init = () => initTextDocumentWindow(w, text, title, pdfName, saveName);
+  if (w.__stbTextDocumentReady) {
+    init();
+    return;
+  }
   runWhenPopupReady(w, () => {
-    const doc = w.document;
-    doc.open();
-    doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
-    doc.write(stbIconHeadHtml(w));
-    doc.write("<title>");
-    doc.write(title);
-    doc.write("</title><style>");
-    doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
-    doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
-    doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
-    doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
-    doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
-    doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
-    doc.write("@page{size:A4 landscape;margin:10mm;}");
-    doc.write("@media print{");
-    doc.write(".no-print{display:none !important;}");
-    doc.write("html,body{background:#fff;color:#000;margin:0;padding:0;}");
-    doc.write("header.doc-title{display:none;}");
-    doc.write("pre{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;}");
-    doc.write("}");
-    doc.write("</style></head><body>");
-    doc.write("<div class=\"toolbar no-print\">");
-    doc.write("<button type=\"button\" id=\"btnSaveTxt\">Save text</button>");
-    doc.write("<button type=\"button\" id=\"btnPdf\">Save as PDF (A4 landscape)</button>");
-    doc.write("</div>");
-    doc.write("<header class=\"doc-title\">");
-    doc.write(title);
-    doc.write("</header><pre></pre></body></html>");
-    doc.close();
-    doc.querySelector("pre").textContent = text;
-    doc.getElementById("btnSaveTxt").onclick = function () {
-      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = doc.createElement("a");
-      a.href = url;
-      a.download = saveName;
-      doc.body.appendChild(a);
-      a.click();
-      doc.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 0);
-    };
-    doc.getElementById("btnPdf").onclick = function () {
-      doc.title = pdfName;
-      w.print();
-    };
+    w.__stbTextDocumentReady = true;
+    init();
   });
+}
+
+function initTextDocumentWindow(w, text, title, pdfName, saveName) {
+  const doc = w.document;
+  w.__stbTextDocContent = text;
+  w.__stbTextDocSaveName = saveName;
+  w.__stbTextDocPdfName = pdfName;
+  if (w.__stbTextDocumentReady && doc.getElementById("btnSaveTxt")) {
+    doc.title = title;
+    const titleEl = doc.querySelector("header.doc-title");
+    if (titleEl) titleEl.textContent = title;
+    const pre = doc.querySelector("pre");
+    if (pre) pre.textContent = text;
+    return;
+  }
+  doc.open();
+  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+  doc.write(stbIconHeadHtml(w));
+  doc.write("<title>");
+  doc.write(title);
+  doc.write("</title><style>");
+  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
+  doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
+  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
+  doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+  doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
+  doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
+  doc.write("@page{size:A4 landscape;margin:10mm;}");
+  doc.write("@media print{");
+  doc.write(".no-print{display:none !important;}");
+  doc.write("html,body{background:#fff;color:#000;margin:0;padding:0;}");
+  doc.write("header.doc-title{display:none;}");
+  doc.write("pre{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;}");
+  doc.write("}");
+  doc.write("</style></head><body>");
+  doc.write("<div class=\"toolbar no-print\">");
+  doc.write("<button type=\"button\" id=\"btnSaveTxt\">Save text</button>");
+  doc.write("<button type=\"button\" id=\"btnPdf\">Save as PDF (A4 landscape)</button>");
+  doc.write("</div>");
+  doc.write("<header class=\"doc-title\">");
+  doc.write(title);
+  doc.write("</header><pre></pre></body></html>");
+  doc.close();
+  doc.querySelector("pre").textContent = text;
+  doc.getElementById("btnSaveTxt").onclick = function () {
+    const blob = new Blob([w.__stbTextDocContent], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = doc.createElement("a");
+    a.href = url;
+    a.download = w.__stbTextDocSaveName;
+    doc.body.appendChild(a);
+    a.click();
+    doc.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  };
+  doc.getElementById("btnPdf").onclick = function () {
+    doc.title = w.__stbTextDocPdfName;
+    w.print();
+  };
 }
 
 function showResultsWindow(text, path) {
@@ -6834,6 +7626,11 @@ async function fetchInputText(path, targetWindow) {
 
 function normalizeInputText(text) {
   return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+async function inputTextMatchesDisk(path, text, targetWindow) {
+  const onDisk = await fetchInputText(path, targetWindow);
+  return normalizeInputText(text) === normalizeInputText(onDisk);
 }
 
 async function saveInputText(path, text, targetWindow) {
@@ -6865,66 +7662,105 @@ function getInputEditorText(path) {
 }
 
 function showInputEditorWindow(text, path) {
-  const w = openStbPopup("width=980,height=760,scrollbars=yes,resizable=yes");
+  const w = openNamedChildPopup("input", "width=980,height=760,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
+  const init = () => initInputEditorWindow(w, text, path);
+  if (w.__stbInputEditorReady) {
+    init();
+    return;
+  }
   runWhenPopupReady(w, () => {
-    const doc = w.document;
-    doc.open();
-    doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
-    doc.write(stbIconHeadHtml(w));
-    doc.write("<title>");
-    doc.write(path);
-    doc.write("</title><style>");
-    doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
-    doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;}");
-    doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
-    doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
-    doc.write(".status{margin-left:auto;color:#aaa;font-size:12px;}");
-    doc.write("textarea{width:100%;height:calc(100vh - 52px);box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:12px;line-height:1.25;resize:none;}");
-    doc.write("</style></head><body>");
-    doc.write("<div class=\"toolbar\"><button id=\"btnSave\">Save</button><button id=\"btnReload\" class=\"secondary\">Reload</button><span id=\"status\" class=\"status\">ready</span></div>");
-    doc.write("<textarea id=\"txt\"></textarea>");
-    doc.write("</body></html>");
-    doc.close();
+    w.__stbInputEditorReady = true;
+    init();
+  });
+}
 
-    const textarea = doc.getElementById("txt");
+function initInputEditorWindow(w, text, path) {
+  primeStbPopupOrigin(w);
+  w.__stbEditorPath = path;
+  const doc = w.document;
+  if (w.__stbInputEditorReady && doc.getElementById("txt")) {
+    doc.title = path;
+    doc.getElementById("txt").value = text;
+    registerInputEditor(path, w, () => doc.getElementById("txt").value);
     const statusEl = doc.getElementById("status");
-    textarea.value = text;
-    registerInputEditor(path, w, () => textarea.value);
+    if (statusEl) statusEl.textContent = "ready";
+    return;
+  }
+  doc.open();
+  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+  doc.write(stbIconHeadHtml(w));
+  doc.write("<title>");
+  doc.write(path);
+  doc.write("</title><style>");
+  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
+  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;}");
+  doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+  doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
+  doc.write(".status{margin-left:auto;color:#aaa;font-size:12px;}");
+  doc.write("textarea{width:100%;height:calc(100vh - 52px);box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:'Liberation Mono','DejaVu Sans Mono',monospace;font-size:12px;line-height:1.25;resize:none;}");
+  doc.write("</style></head><body>");
+  doc.write("<div class=\"toolbar\"><button id=\"btnSave\">Save</button><button id=\"btnReload\" class=\"secondary\">Reload</button><span id=\"status\" class=\"status\">ready</span></div>");
+  doc.write("<textarea id=\"txt\"></textarea>");
+  doc.write("</body></html>");
+  doc.close();
 
-    function setWinStatus(msg) {
-      if (statusEl) statusEl.textContent = msg;
+  const textarea = doc.getElementById("txt");
+  const statusEl = doc.getElementById("status");
+  textarea.value = text;
+  registerInputEditor(path, w, () => textarea.value);
+
+  function setWinStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
+  }
+
+  doc.getElementById("btnSave").addEventListener("click", async () => {
+    const editorPath = w.__stbEditorPath;
+    try {
+      setWinStatus("saving...");
+      if (await inputTextMatchesDisk(editorPath, textarea.value, w)) {
+        setWinStatus("no changes");
+        setStatus(editorPath + " — no changes to save");
+        return;
+      }
+      const result = await saveInputText(editorPath, textarea.value, w);
+      if (result && result.changed === false) {
+        setWinStatus("no changes");
+        setStatus(editorPath + " — no changes to save");
+        return;
+      }
+      resetEditHistory();
+      setWinStatus("saved");
+      setStatus(editorPath + " — input file saved (undo history cleared)");
+      if (getCurrentModelPath() === editorPath) await loadSelectedModel(false);
+    } catch (ex) {
+      setWinStatus("save failed");
+      setStatus("Error: " + ex.message);
+      alert("Save failed: " + ex.message);
     }
+  });
 
-    doc.getElementById("btnSave").addEventListener("click", async () => {
-      try {
-        setWinStatus("saving...");
-        await saveInputText(path, textarea.value, w);
-        resetEditHistory();
-        setWinStatus("saved");
-        setStatus(path + " — input file saved (undo history cleared)");
-        if (getCurrentModelPath() === path) await loadSelectedModel(false);
-      } catch (ex) {
-        setWinStatus("save failed");
-        setStatus("Error: " + ex.message);
-        alert("Save failed: " + ex.message);
-      }
-    });
+  doc.getElementById("btnReload").addEventListener("click", async () => {
+    const editorPath = w.__stbEditorPath;
+    try {
+      setWinStatus("reloading...");
+      const latest = await fetchInputText(editorPath, w);
+      textarea.value = latest;
+      setWinStatus("reloaded");
+    } catch (ex) {
+      setWinStatus("reload failed");
+      alert("Reload failed: " + ex.message);
+    }
+  });
 
-    doc.getElementById("btnReload").addEventListener("click", async () => {
-      try {
-        setWinStatus("reloading...");
-        const latest = await fetchInputText(path, w);
-        textarea.value = latest;
-        setWinStatus("reloaded");
-      } catch (ex) {
-        setWinStatus("reload failed");
-        alert("Reload failed: " + ex.message);
-      }
-    });
+  doc.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "S")) {
+      ev.preventDefault();
+      doc.getElementById("btnSave").click();
+    }
   });
 }
 
@@ -6938,7 +7774,15 @@ async function saveCurrentModel() {
   try {
     const edited = getInputEditorText(path);
     const text = edited != null ? edited : await fetchInputText(path);
-    await saveInputText(path, text);
+    if (await inputTextMatchesDisk(path, text)) {
+      setStatus(path + " — no changes to save");
+      return;
+    }
+    const result = await saveInputText(path, text);
+    if (result && result.changed === false) {
+      setStatus(path + " — no changes to save");
+      return;
+    }
     resetEditHistory();
     if (getCurrentModelPath() === path) await loadSelectedModel(false);
     setStatus(path + " — saved");
@@ -7087,6 +7931,7 @@ async function initGuiLifecycle() {
 
 async function closeApplication() {
   setStatus("Closing…");
+  closeAllChildWindows();
   requestServerShutdown();
   window.close();
 }
@@ -7132,12 +7977,12 @@ async function loadSelectedModel(solve, options) {
     setForceControlsEnabled(complete);
     setReactionControlsEnabled(complete);
     setDispContourControlsEnabled(complete);
-    if (!complete) el.chkDeformed.checked = false;
-    if (!complete && el.chkDispContour) el.chkDispContour.checked = false;
-    await loadWindVisualForCurrentModel();
-    if (solve && complete) {
-      el.chkReactions.checked = true;
+    applyDisplayPrefsToUi();
+    if (!complete) {
+      el.chkDeformed.checked = false;
+      if (el.chkDispContour) el.chkDispContour.checked = false;
     }
+    await loadWindVisualForCurrentModel();
     buildModelScene(currentModel);
     if (!solve || !complete) {
       fitCamera(currentModel);
@@ -7151,6 +7996,7 @@ async function loadSelectedModel(solve, options) {
 async function bootstrap() {
   loadPickWrwCreateModel();
   initThree();
+  initDisplayPrefs();
   initViewerOptions();
   initSelectionInteraction();
   initDistanceInteraction();
@@ -7213,6 +8059,12 @@ if (el.openFileInput) {
 el.btnReload.addEventListener("click", () => loadSelectedModel(false));
 el.btnSolve.addEventListener("click", () => loadSelectedModel(true));
 
+function isViewerTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === "TEXTAREA" || target.isContentEditable;
+}
+
 function isViewerTextInputTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
@@ -7220,6 +8072,13 @@ function isViewerTextInputTarget(target) {
 }
 
 document.addEventListener("keydown", (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "S")) {
+    if (isViewerTypingTarget(ev.target)) return;
+    ev.preventDefault();
+    saveCurrentModel();
+    return;
+  }
+
   if (isViewerTextInputTarget(ev.target)) return;
 
   if (ev.key === "F5" || ev.code === "F5") {
@@ -7244,6 +8103,8 @@ document.addEventListener("keydown", (ev) => {
 
 el.btnToggleAxes.addEventListener("click", () => {
   showWorldAxes = !showWorldAxes;
+  displayPrefs.showWorldAxes = showWorldAxes;
+  saveDisplayPrefs();
   el.btnToggleAxes.classList.toggle("active", showWorldAxes);
   if (currentModel) {
     updateWorldAxes(currentModel);
@@ -7274,8 +8135,10 @@ el.btnLoads.addEventListener("click", () => openLoadsVerifyWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
+  onResultsDisplayChanged();
   if (windVisualData && el.chkWindLoads && el.chkWindLoads.checked) {
     selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+    onResultsDisplayChanged();
     populateWindCaseSelect();
   }
   if (currentModel) rebuildScene();
@@ -7283,24 +8146,29 @@ el.lcSelect.addEventListener("change", () => {
 });
 el.defFactor.addEventListener("change", () => {
   dispContourScaleKey = null;
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkDeformed.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkDispContour.addEventListener("change", () => {
   if (currentModel && el.chkDispContour.checked) {
     dispContourScaleKey = null;
   }
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 if (el.dispContourMin) {
   el.dispContourMin.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 if (el.dispContourMax) {
   el.dispContourMax.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
@@ -7308,21 +8176,26 @@ if (el.btnDispContourAuto) {
   el.btnDispContourAuto.addEventListener("click", () => applyDispContourAutoRange());
 }
 el.chkSupports.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 if (el.chkEJnt) {
   el.chkEJnt.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 el.chkLoads.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkLoadValues.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 if (el.chkWindLoads) {
   el.chkWindLoads.addEventListener("change", () => {
+    onResultsDisplayChanged();
     populateWindCaseSelect();
     updateWindControlsAvailability();
     if (el.chkWindLoads.checked && windVisualData) {
@@ -7336,6 +8209,7 @@ if (el.windCaseSelect) {
   el.windCaseSelect.addEventListener("change", () => {
     const raw = el.windCaseSelect.value;
     selectedWindCaseId = raw ? Number(raw) : null;
+    onResultsDisplayChanged();
     if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
       const wc = windCaseById(windVisualData, selectedWindCaseId);
       syncLcToWindCase(wc);
@@ -7344,64 +8218,215 @@ if (el.windCaseSelect) {
   });
 }
 el.chkReactions.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkReactionValues.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkLabels.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkElemLabels.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkMaterial.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkSection.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 if (el.chkMembrane) {
   el.chkMembrane.addEventListener("change", () => {
+    onResultsDisplayChanged();
     syncRegionEdgeCheckboxes();
     if (currentModel) rebuildScene();
   });
 }
 if (el.chkMembraneEdge) {
   el.chkMembraneEdge.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 if (el.chkWoodWall) {
   el.chkWoodWall.addEventListener("change", () => {
+    onResultsDisplayChanged();
     syncRegionEdgeCheckboxes();
     if (currentModel) rebuildScene();
   });
 }
 if (el.chkWoodWallEdge) {
   el.chkWoodWallEdge.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 syncRegionEdgeCheckboxes();
 el.forceSelect.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.frcDiv.addEventListener("input", () => {
   el.frcDivVal.textContent = el.frcDiv.value;
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.frcFactor.addEventListener("input", () => {
   el.frcFactorVal.textContent = el.frcFactor.value;
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkForceValues.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
+
+function readDisplayPrefsFromUi() {
+  displayPrefs.defFactor = parseFloat(el.defFactor.value);
+  if (!isFinite(displayPrefs.defFactor)) displayPrefs.defFactor = RESULTS_DISPLAY_DEFAULTS.defFactor;
+  displayPrefs.deformed = !!(el.chkDeformed && el.chkDeformed.checked);
+  displayPrefs.dispContour = !!(el.chkDispContour && el.chkDispContour.checked);
+  displayPrefs.supports = !el.chkSupports || el.chkSupports.checked;
+  displayPrefs.ejnt = !!(el.chkEJnt && el.chkEJnt.checked);
+  displayPrefs.loads = !!(el.chkLoads && el.chkLoads.checked);
+  displayPrefs.loadValues = !!(el.chkLoadValues && el.chkLoadValues.checked);
+  displayPrefs.windLoads = !!(el.chkWindLoads && el.chkWindLoads.checked);
+  displayPrefs.reactions = !!(el.chkReactions && el.chkReactions.checked);
+  displayPrefs.reactionValues = !!(el.chkReactionValues && el.chkReactionValues.checked);
+  displayPrefs.nodeLabels = !!(el.chkLabels && el.chkLabels.checked);
+  displayPrefs.elemLabels = !!(el.chkElemLabels && el.chkElemLabels.checked);
+  displayPrefs.material = !!(el.chkMaterial && el.chkMaterial.checked);
+  displayPrefs.section = !!(el.chkSection && el.chkSection.checked);
+  displayPrefs.membrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  displayPrefs.membraneEdge = !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
+  displayPrefs.woodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
+  displayPrefs.woodWallEdge = !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
+  displayPrefs.forceComponent = parseInt(el.forceSelect.value, 10) || 0;
+  displayPrefs.forceDiv = parseInt(el.frcDiv.value, 10) || RESULTS_DISPLAY_DEFAULTS.forceDiv;
+  displayPrefs.forceFactor = parseFloat(el.frcFactor.value) || RESULTS_DISPLAY_DEFAULTS.forceFactor;
+  displayPrefs.forceValues = !!(el.chkForceValues && el.chkForceValues.checked);
+  displayPrefs.loadCase = el.lcSelect && el.lcSelect.value ? String(el.lcSelect.value) : null;
+  displayPrefs.windCaseId = selectedWindCaseId;
+  if (el.dispContourMin) displayPrefs.dispContourMin = String(el.dispContourMin.value || "");
+  if (el.dispContourMax) displayPrefs.dispContourMax = String(el.dispContourMax.value || "");
+  displayPrefs.showWorldAxes = showWorldAxes;
+}
+
+function applyDisplayPrefsToUi() {
+  el.defFactor.value = String(displayPrefs.defFactor);
+  if (el.chkDeformed && !el.chkDeformed.disabled) el.chkDeformed.checked = !!displayPrefs.deformed;
+  if (el.chkDispContour && !el.chkDispContour.disabled) {
+    el.chkDispContour.checked = !!displayPrefs.dispContour;
+  }
+  if (el.chkSupports) el.chkSupports.checked = !!displayPrefs.supports;
+  if (el.chkEJnt) el.chkEJnt.checked = !!displayPrefs.ejnt;
+  if (el.chkLoads) el.chkLoads.checked = !!displayPrefs.loads;
+  if (el.chkLoadValues) el.chkLoadValues.checked = !!displayPrefs.loadValues;
+  if (el.chkWindLoads && !el.chkWindLoads.disabled) el.chkWindLoads.checked = !!displayPrefs.windLoads;
+  if (el.chkReactions && !el.chkReactions.disabled) el.chkReactions.checked = !!displayPrefs.reactions;
+  if (el.chkReactionValues && !el.chkReactionValues.disabled) {
+    el.chkReactionValues.checked = !!displayPrefs.reactionValues;
+  }
+  if (el.chkLabels) el.chkLabels.checked = !!displayPrefs.nodeLabels;
+  if (el.chkElemLabels) el.chkElemLabels.checked = !!displayPrefs.elemLabels;
+  if (el.chkMaterial) el.chkMaterial.checked = !!displayPrefs.material;
+  if (el.chkSection) el.chkSection.checked = !!displayPrefs.section;
+  if (el.chkMembrane) el.chkMembrane.checked = !!displayPrefs.membrane;
+  if (el.chkMembraneEdge) el.chkMembraneEdge.checked = !!displayPrefs.membraneEdge;
+  if (el.chkWoodWall) el.chkWoodWall.checked = !!displayPrefs.woodWall;
+  if (el.chkWoodWallEdge) el.chkWoodWallEdge.checked = !!displayPrefs.woodWallEdge;
+  if (!el.forceSelect.disabled) el.forceSelect.value = String(displayPrefs.forceComponent);
+  if (!el.frcDiv.disabled) {
+    el.frcDiv.value = String(displayPrefs.forceDiv);
+    el.frcDivVal.textContent = String(displayPrefs.forceDiv);
+  }
+  if (!el.frcFactor.disabled) {
+    el.frcFactor.value = String(displayPrefs.forceFactor);
+    el.frcFactorVal.textContent = String(displayPrefs.forceFactor);
+  }
+  if (!el.chkForceValues.disabled) el.chkForceValues.checked = !!displayPrefs.forceValues;
+  if (displayPrefs.loadCase && el.lcSelect) {
+    const hasLc = Array.from(el.lcSelect.options).some(function (o) {
+      return o.value === displayPrefs.loadCase;
+    });
+    if (hasLc) el.lcSelect.value = displayPrefs.loadCase;
+  }
+  if (displayPrefs.windCaseId != null && windVisualData) {
+    if (windCaseById(windVisualData, displayPrefs.windCaseId)) {
+      selectedWindCaseId = displayPrefs.windCaseId;
+    }
+  }
+  if (el.dispContourMin) el.dispContourMin.value = displayPrefs.dispContourMin || "";
+  if (el.dispContourMax) el.dispContourMax.value = displayPrefs.dispContourMax || "";
+  syncRegionEdgeCheckboxes();
+}
+
+function saveDisplayPrefs() {
+  try {
+    localStorage.setItem(RESULTS_DISPLAY_STORAGE_KEY, JSON.stringify(displayPrefs));
+  } catch (e) { /* ignore */ }
+}
+
+function loadDisplayPrefs() {
+  try {
+    const raw = localStorage.getItem(RESULTS_DISPLAY_STORAGE_KEY);
+    if (!raw) return;
+    const st = JSON.parse(raw);
+    if (typeof st.defFactor === "number" && isFinite(st.defFactor)) displayPrefs.defFactor = st.defFactor;
+    if (typeof st.deformed === "boolean") displayPrefs.deformed = st.deformed;
+    if (typeof st.dispContour === "boolean") displayPrefs.dispContour = st.dispContour;
+    if (typeof st.supports === "boolean") displayPrefs.supports = st.supports;
+    if (typeof st.ejnt === "boolean") displayPrefs.ejnt = st.ejnt;
+    if (typeof st.loads === "boolean") displayPrefs.loads = st.loads;
+    if (typeof st.loadValues === "boolean") displayPrefs.loadValues = st.loadValues;
+    if (typeof st.windLoads === "boolean") displayPrefs.windLoads = st.windLoads;
+    if (typeof st.reactions === "boolean") displayPrefs.reactions = st.reactions;
+    if (typeof st.reactionValues === "boolean") displayPrefs.reactionValues = st.reactionValues;
+    if (typeof st.nodeLabels === "boolean") displayPrefs.nodeLabels = st.nodeLabels;
+    if (typeof st.elemLabels === "boolean") displayPrefs.elemLabels = st.elemLabels;
+    if (typeof st.material === "boolean") displayPrefs.material = st.material;
+    if (typeof st.section === "boolean") displayPrefs.section = st.section;
+    if (typeof st.membrane === "boolean") displayPrefs.membrane = st.membrane;
+    if (typeof st.membraneEdge === "boolean") displayPrefs.membraneEdge = st.membraneEdge;
+    if (typeof st.woodWall === "boolean") displayPrefs.woodWall = st.woodWall;
+    if (typeof st.woodWallEdge === "boolean") displayPrefs.woodWallEdge = st.woodWallEdge;
+    if (typeof st.forceComponent === "number") displayPrefs.forceComponent = st.forceComponent;
+    if (typeof st.forceDiv === "number") displayPrefs.forceDiv = st.forceDiv;
+    if (typeof st.forceFactor === "number") displayPrefs.forceFactor = st.forceFactor;
+    if (typeof st.forceValues === "boolean") displayPrefs.forceValues = st.forceValues;
+    if (typeof st.loadCase === "string" || st.loadCase === null) displayPrefs.loadCase = st.loadCase;
+    if (typeof st.windCaseId === "number" || st.windCaseId === null) displayPrefs.windCaseId = st.windCaseId;
+    if (typeof st.dispContourMin === "string") displayPrefs.dispContourMin = st.dispContourMin;
+    if (typeof st.dispContourMax === "string") displayPrefs.dispContourMax = st.dispContourMax;
+    if (typeof st.showWorldAxes === "boolean") displayPrefs.showWorldAxes = st.showWorldAxes;
+  } catch (e) { /* ignore */ }
+}
+
+function onResultsDisplayChanged() {
+  readDisplayPrefsFromUi();
+  saveDisplayPrefs();
+}
+
+function initDisplayPrefs() {
+  loadDisplayPrefs();
+  applyDisplayPrefsToUi();
+  showWorldAxes = !!displayPrefs.showWorldAxes;
+  if (el.btnToggleAxes) {
+    el.btnToggleAxes.classList.toggle("active", showWorldAxes);
+  }
+}
 
 function readOptionsFromUi() {
   viewerOptions.loadArrowSize = clampViewerOption(
     "loadArrowSize", parseFloat(el.optLoadArrow.value) || OPTIONS_DEFAULTS.loadArrowSize);
+  viewerOptions.reactionArrowSize = clampViewerOption(
+    "reactionArrowSize", parseFloat(el.optReactionArrow.value) || OPTIONS_DEFAULTS.reactionArrowSize);
   viewerOptions.supportGizmoSize = clampViewerOption(
     "supportGizmoSize", parseInt(el.optSupportGizmo.value, 10) || OPTIONS_DEFAULTS.supportGizmoSize);
   viewerOptions.supportLineWidth = clampViewerOption(
@@ -7412,6 +8437,8 @@ function readOptionsFromUi() {
     "elementLineWidth", parseFloat(el.optElementLineWidth.value) || OPTIONS_DEFAULTS.elementLineWidth);
   viewerOptions.loadLineWidth = clampViewerOption(
     "loadLineWidth", parseFloat(el.optLoadLineWidth.value) || OPTIONS_DEFAULTS.loadLineWidth);
+  viewerOptions.reactionLineWidth = clampViewerOption(
+    "reactionLineWidth", parseFloat(el.optReactionLineWidth.value) || OPTIONS_DEFAULTS.reactionLineWidth);
   viewerOptions.forceLineWidth = clampViewerOption(
     "forceLineWidth", parseFloat(el.optForceLineWidth.value) || OPTIONS_DEFAULTS.forceLineWidth);
   viewerOptions.nodeLabelSize = clampViewerOption(
@@ -7436,12 +8463,17 @@ function readOptionsFromUi() {
 function applyOptionsToUi() {
   el.optLoadArrow.value = String(viewerOptions.loadArrowSize);
   el.optLoadArrowVal.textContent = Number(viewerOptions.loadArrowSize).toFixed(1);
+  if (el.optReactionArrow) {
+    el.optReactionArrow.value = String(viewerOptions.reactionArrowSize);
+    el.optReactionArrowVal.textContent = Number(viewerOptions.reactionArrowSize).toFixed(1);
+  }
   el.optSupportGizmo.value = String(viewerOptions.supportGizmoSize);
   el.optSupportGizmoVal.textContent = String(viewerOptions.supportGizmoSize);
   el.optSupportLineWidth.value = String(viewerOptions.supportLineWidth);
   el.optDispContourLineWidth.value = String(viewerOptions.dispContourLineWidth);
   if (el.optElementLineWidth) el.optElementLineWidth.value = String(viewerOptions.elementLineWidth);
   if (el.optLoadLineWidth) el.optLoadLineWidth.value = String(viewerOptions.loadLineWidth);
+  if (el.optReactionLineWidth) el.optReactionLineWidth.value = String(viewerOptions.reactionLineWidth);
   if (el.optForceLineWidth) el.optForceLineWidth.value = String(viewerOptions.forceLineWidth);
   el.optNodeLabel.value = String(viewerOptions.nodeLabelSize);
   el.optNodeLabelVal.textContent = String(viewerOptions.nodeLabelSize);
@@ -7474,11 +8506,13 @@ function loadViewerOptions() {
     if (!raw) return;
     const st = JSON.parse(raw);
     if (typeof st.loadArrowSize === "number") viewerOptions.loadArrowSize = st.loadArrowSize;
+    if (typeof st.reactionArrowSize === "number") viewerOptions.reactionArrowSize = st.reactionArrowSize;
     if (typeof st.supportGizmoSize === "number") viewerOptions.supportGizmoSize = st.supportGizmoSize;
     if (typeof st.supportLineWidth === "number") viewerOptions.supportLineWidth = st.supportLineWidth;
     if (typeof st.dispContourLineWidth === "number") viewerOptions.dispContourLineWidth = st.dispContourLineWidth;
     if (typeof st.elementLineWidth === "number") viewerOptions.elementLineWidth = st.elementLineWidth;
     if (typeof st.loadLineWidth === "number") viewerOptions.loadLineWidth = st.loadLineWidth;
+    if (typeof st.reactionLineWidth === "number") viewerOptions.reactionLineWidth = st.reactionLineWidth;
     if (typeof st.forceLineWidth === "number") viewerOptions.forceLineWidth = st.forceLineWidth;
     if (typeof st.nodeLabelSize === "number") viewerOptions.nodeLabelSize = st.nodeLabelSize;
     if (typeof st.elemLabelSize === "number") viewerOptions.elemLabelSize = st.elemLabelSize;
@@ -7505,6 +8539,12 @@ function initViewerOptions() {
     el.optLoadArrowVal.textContent = Number(el.optLoadArrow.value).toFixed(1);
     onOptionsChanged();
   });
+  if (el.optReactionArrow) {
+    el.optReactionArrow.addEventListener("input", () => {
+      el.optReactionArrowVal.textContent = Number(el.optReactionArrow.value).toFixed(1);
+      onOptionsChanged();
+    });
+  }
   el.optSupportGizmo.addEventListener("input", () => {
     el.optSupportGizmoVal.textContent = el.optSupportGizmo.value;
     onOptionsChanged();
@@ -7520,6 +8560,10 @@ function initViewerOptions() {
   if (el.optLoadLineWidth) {
     el.optLoadLineWidth.addEventListener("input", onOptionsChanged);
     el.optLoadLineWidth.addEventListener("change", onOptionsChanged);
+  }
+  if (el.optReactionLineWidth) {
+    el.optReactionLineWidth.addEventListener("input", onOptionsChanged);
+    el.optReactionLineWidth.addEventListener("change", onOptionsChanged);
   }
   if (el.optForceLineWidth) {
     el.optForceLineWidth.addEventListener("input", onOptionsChanged);

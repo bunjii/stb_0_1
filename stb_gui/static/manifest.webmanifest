@@ -5,8 +5,8 @@
   "description": "Structural analysis model viewer and editor",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
+  "background_color": "#1a1a22",
+  "theme_color": "#e1dee4",
   "icons": [
     {
       "src": "/static/icons/st-icon-512.png",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -43,6 +44,59 @@ def _spawn(cmd: Sequence[str]) -> bool:
 
 
 STB_APP_ID = "structural-toolbox.stb.gui"
+STB_WM_CLASS = "StructuralToolbox"
+
+
+def _chromium_profile_dir() -> str:
+    override = os.environ.get("STB_CHROMIUM_USER_DATA_DIR", "").strip()
+    if override:
+        return override
+    if platform.system() == "Windows":
+        base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+        return os.path.join(base, "StructuralToolbox", "ChromiumProfile")
+    return os.path.join(os.path.expanduser("~"), ".config", "structural-toolbox-gui")
+
+
+def _chromium_common_args() -> List[str]:
+    return [
+        "--user-data-dir=" + _chromium_profile_dir(),
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+
+
+def _linux_chromium_extra_args() -> List[str]:
+    """Extra Chromium flags on Linux (Wayland / GNOME title bar integration).
+
+    Fedora/GNOME Wayland draws PWA titles in the desktop accent colour (often blue)
+    when Chromium uses native Wayland or GTK client-side decorations. Default to
+    XWayland (``--ozone-platform=x11``) for GNOME server-side decorations and dark
+    title text. Use a dedicated profile so flags are not dropped by an already
+    running browser instance.
+
+    Override with environment variables:
+    - STB_CHROMIUM_OZONE_PLATFORM=wayland|x11
+    - STB_CHROMIUM_USER_DATA_DIR=…
+    - STB_CHROMIUM_EXTRA_ARGS='…'
+    """
+    args: List[str] = ["--class=" + STB_WM_CLASS]
+
+    ozone = os.environ.get("STB_CHROMIUM_OZONE_PLATFORM", "").strip().lower()
+    if ozone == "wayland":
+        args.extend([
+            "--ozone-platform=wayland",
+            "--ozone-platform-hint=auto",
+            "--enable-features=WaylandWindowDecorations",
+        ])
+    elif ozone == "x11":
+        args.append("--ozone-platform=x11")
+    elif os.environ.get("WAYLAND_DISPLAY"):
+        args.append("--ozone-platform=x11")
+
+    extra = os.environ.get("STB_CHROMIUM_EXTRA_ARGS", "").strip()
+    if extra:
+        args.extend(shlex.split(extra))
+    return args
 
 
 def _browser_launch_cmd(path: str, kind: str, url: str) -> List[str]:
@@ -52,7 +106,11 @@ def _browser_launch_cmd(path: str, kind: str, url: str) -> List[str]:
         # Firefox has no stable cross-platform app-mode flag; use a separate window.
         return [path, "-new-window", url]
     # Chromium-based browsers (Chrome, Edge, Brave, Opera, …): application mode.
-    return [path, "--app=" + url, "--app-id=" + STB_APP_ID]
+    cmd = [path, "--app=" + url, "--app-id=" + STB_APP_ID]
+    cmd.extend(_chromium_common_args())
+    if platform.system() == "Linux":
+        cmd.extend(_linux_chromium_extra_args())
+    return cmd
 
 
 def _windows_launch_gui(url: str) -> bool:

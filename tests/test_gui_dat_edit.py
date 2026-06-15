@@ -383,6 +383,28 @@ class TestGuiEditApi(unittest.TestCase):
         finally:
             os.remove(full)
 
+    def test_api_input_save_unchanged_reports_not_changed(self):
+        if self.client is None:
+            self.skipTest("fastapi not installed")
+        import os
+        import tempfile
+
+        original = "# sample\n\nMATE, 0, A, 1, 1, 1, 0, 1\n"
+        fd, full = tempfile.mkstemp(suffix=".dat", dir=os.path.join(_STB_ROOT, "examples"))
+        os.close(fd)
+        rel = os.path.relpath(full, _STB_ROOT).replace("\\", "/")
+        try:
+            write_dat_text(full, original)
+            r = self.client.put(
+                "/api/input",
+                params={"path": rel},
+                json={"text": original},
+            )
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertFalse(r.json().get("changed"))
+        finally:
+            os.remove(full)
+
     def test_api_model_edit_set_section(self):
         if self.client is None:
             self.skipTest("fastapi not installed")
