@@ -29,6 +29,7 @@
     <button id="btnLoads" type="button" class="btn-secondary" title="Load and external-force verification">Loads…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
+    <button id="btnTheme" type="button" class="btn-secondary" title="Switch light/dark theme">Theme: Dark</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
     <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P)">Pick mode</button>
     <button id="btnToggleDistance" type="button" class="btn-secondary" title="Distance (D)">Distance</button>
@@ -236,6 +237,9 @@
         <label class="panel-check">
           <input type="checkbox" id="chkSection"> Section
         </label>
+        <label class="panel-check">
+          <input type="checkbox" id="chkSectionSolids"> Section solids
+        </label>
         <div class="panel-check-row">
           <label class="panel-check panel-check-compact">
             <input type="checkbox" id="chkMembrane" checked> Diaphragm members
@@ -425,6 +429,16 @@
           <span>Force value</span>
           <input type="range" id="optForceLabel" min="0.1" max="2.5" step="0.1" value="1.5">
           <span class="range-val" id="optForceLabelVal">1.5</span>
+        </label>
+        <label class="panel-row">
+          <span>Section color</span>
+          <input type="color" id="optSectionSolidColor" value="#c9cdd3">
+          <span class="range-val"></span>
+        </label>
+        <label class="panel-row">
+          <span>Section alpha</span>
+          <input type="range" id="optSectionSolidOpacity" min="0.1" max="1" step="0.05" value="1.0">
+          <span class="range-val" id="optSectionSolidOpacityVal">1.0</span>
         </label>
       </section>
     </div>

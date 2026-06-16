@@ -11,7 +11,7 @@ const COLORS = {
   supportTrans: 0xBF3434,
   supportRot: 0x618FCD,
   supportAnchor: 0x374151,
-  load: 0xc00000,
+  load: 0xd45087,
   reaction: 0x0d9488,
   reactionMoment: 0x9333ea,
   ejnt: 0xff8c00,
@@ -56,9 +56,8 @@ const ALPHA = {
   dlodEnvelopeEdge: 1.0,
 };
 
-const LOAD_VALUE_LABEL_FG = "#c00000";
-
 const OPTIONS_STORAGE_KEY = "stb_gui_options";
+const THEME_STORAGE_KEY = "stb_gui_theme";
 const RESULTS_DISPLAY_STORAGE_KEY = "stb_gui_results_display";
 const MODEL_STORAGE_KEY = "stb_gui_last_model";
 const WRW_CREATE_MODEL_KEY = "stb_gui_wwll_create_model";
@@ -89,6 +88,8 @@ const OPTIONS_DEFAULTS = {
   loadLabelSize: 1.0,
   reactionLabelSize: 1.0,
   forceLabelSize: 1.5,
+  sectionSolidOpacity: 1.0,
+  sectionSolidColor: "#c9cdd3",
 };
 
 const OPTIONS_LIMITS = {
@@ -108,6 +109,7 @@ const OPTIONS_LIMITS = {
   loadLabelSize: { min: 0.1, max: 2.0 },
   reactionLabelSize: { min: 0.1, max: 2.0 },
   forceLabelSize: { min: 0.1, max: 2.5 },
+  sectionSolidOpacity: { min: 0.1, max: 1.0 },
 };
 
 const RESULTS_DISPLAY_DEFAULTS = {
@@ -125,6 +127,7 @@ const RESULTS_DISPLAY_DEFAULTS = {
   elemLabels: false,
   material: false,
   section: false,
+  sectionSolids: false,
   membrane: true,
   membraneEdge: true,
   woodWall: true,
@@ -196,6 +199,7 @@ const el = {
   chkElemLabels: document.getElementById("chkElemLabels"),
   chkMaterial: document.getElementById("chkMaterial"),
   chkSection: document.getElementById("chkSection"),
+  chkSectionSolids: document.getElementById("chkSectionSolids"),
   chkMembrane: document.getElementById("chkMembrane"),
   chkMembraneEdge: document.getElementById("chkMembraneEdge"),
   chkWoodWall: document.getElementById("chkWoodWall"),
@@ -215,6 +219,7 @@ const el = {
   optionsPanelHeader: document.getElementById("optionsPanelHeader"),
   btnOptionsCollapse: document.getElementById("btnOptionsCollapse"),
   btnToggleOptions: document.getElementById("btnToggleOptions"),
+  btnTheme: document.getElementById("btnTheme"),
   btnToggleAxes: document.getElementById("btnToggleAxes"),
   btnToggleSelect: document.getElementById("btnToggleSelect"),
   btnToggleDistance: document.getElementById("btnToggleDistance"),
@@ -303,12 +308,16 @@ const el = {
   optReactionLabelVal: document.getElementById("optReactionLabelVal"),
   optForceLabel: document.getElementById("optForceLabel"),
   optForceLabelVal: document.getElementById("optForceLabelVal"),
+  optSectionSolidColor: document.getElementById("optSectionSolidColor"),
+  optSectionSolidOpacity: document.getElementById("optSectionSolidOpacity"),
+  optSectionSolidOpacityVal: document.getElementById("optSectionSolidOpacityVal"),
   status: document.getElementById("status"),
 };
 
 let scene, camera, renderer, controls;
 let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
 let windGroup, windLabelGroup;
+let uiTheme = "dark";
 let currentModel = null;
 let selectionModeActive = false;
 let distanceModeActive = false;
@@ -355,6 +364,31 @@ let currentModelPath = null;
 const inputEditors = new Map();
 let showWorldAxes = RESULTS_DISPLAY_DEFAULTS.showWorldAxes;
 const _supportDiscTexCache = new Map();
+const _sectionProfileCache = new Map();
+const _sectionSolidGeometryCache = new Map();
+const SECTION_SOLID_SEGMENTS = 24;
+const SECTION_SOLID_MAX_ELEMENTS = 2500;
+
+const THEME_RENDER_COLORS = {
+  light: {
+    background: 0xe1dee4,
+    element: 0x333333,
+    node: 0x333333,
+    membraneEdge: 0x616161,
+    woodWallEdge: 0x525252,
+    nodeLabel: 0x000000,
+    supportOutline: "#000000",
+  },
+  dark: {
+    background: 0x262b34,
+    element: 0xc9cdd3,
+    node: 0xe5e7eb,
+    membraneEdge: 0xcdd5df,
+    woodWallEdge: 0xd5dde7,
+    nodeLabel: 0xe5e7eb,
+    supportOutline: "#cbd5e1",
+  },
+};
 let _nodePointTexture = null;
 let windVisualData = null;
 let selectedWindCaseId = null;
@@ -3373,6 +3407,189 @@ function clearGroup(g) {
   }
 }
 
+function modelSectionMap(model) {
+  const out = {};
+  for (const s of model.sections || []) out[s.id] = s;
+  return out;
+}
+
+function sectionDimsMeters(section) {
+  if (!section || !Array.isArray(section.dims) || section.dims.length === 0) return null;
+  const dims = [];
+  for (const d of section.dims) {
+    const v = Number(d) * 1e-3; // mm -> m
+    if (!isFinite(v) || v <= 0) return null;
+    dims.push(v);
+  }
+  return dims;
+}
+
+function sanitizeHexColor(value, fallback) {
+  const fb = fallback || "#c9cdd3";
+  const s = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : fb;
+}
+
+function sectionProfileKey(type, dims) {
+  const ds = dims.map(function (v) { return v.toFixed(6); }).join(",");
+  return String(type) + ":" + ds;
+}
+
+function makeRectShape(width, height) {
+  const hw = width * 0.5;
+  const hh = height * 0.5;
+  const shape = new THREE.Shape();
+  shape.moveTo(-hw, -hh);
+  shape.lineTo(hw, -hh);
+  shape.lineTo(hw, hh);
+  shape.lineTo(-hw, hh);
+  shape.lineTo(-hw, -hh);
+  return shape;
+}
+
+function makeSectionShape(type, dims) {
+  if (type === 0) {
+    if (dims.length < 2) return null;
+    return makeRectShape(dims[0], dims[1]);
+  }
+  if (type === 1) {
+    if (dims.length < 1) return null;
+    const r = dims[0] * 0.5;
+    if (r <= 0) return null;
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, r, 0, Math.PI * 2, false);
+    return shape;
+  }
+  if (type === 2) {
+    if (dims.length < 4) return null;
+    const h = dims[0], w = dims[1], tw = dims[2], tf = dims[3];
+    if (h <= 0 || w <= 0 || tw <= 0 || tf <= 0) return null;
+    if (tw >= w || tf * 2 >= h) return null;
+    const shape = makeRectShape(w, h);
+    const hw = w * 0.5;
+    const hh = h * 0.5;
+    const webHalf = tw * 0.5;
+    const clearH = h - 2 * tf;
+    const holeLeft = new THREE.Path();
+    holeLeft.moveTo(-hw, -clearH * 0.5);
+    holeLeft.lineTo(-webHalf, -clearH * 0.5);
+    holeLeft.lineTo(-webHalf, clearH * 0.5);
+    holeLeft.lineTo(-hw, clearH * 0.5);
+    holeLeft.lineTo(-hw, -clearH * 0.5);
+    const holeRight = new THREE.Path();
+    holeRight.moveTo(webHalf, -clearH * 0.5);
+    holeRight.lineTo(hw, -clearH * 0.5);
+    holeRight.lineTo(hw, clearH * 0.5);
+    holeRight.lineTo(webHalf, clearH * 0.5);
+    holeRight.lineTo(webHalf, -clearH * 0.5);
+    shape.holes.push(holeLeft, holeRight);
+    return shape;
+  }
+  if (type === 3) {
+    if (dims.length < 2) return null;
+    const d = dims[0], t = dims[1];
+    const ro = d * 0.5;
+    const ri = ro - t;
+    if (ro <= 0 || ri <= 1e-6) return null;
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, ro, 0, Math.PI * 2, false);
+    const hole = new THREE.Path();
+    hole.absarc(0, 0, ri, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+    return shape;
+  }
+  if (type === 4) {
+    if (dims.length < 4) return null;
+    const h = dims[0], w = dims[1], tw = dims[2], tf = dims[3];
+    if (h <= 0 || w <= 0 || tw <= 0 || tf <= 0) return null;
+    const innerW = w - 2 * tw;
+    const innerH = h - 2 * tf;
+    if (innerW <= 1e-6 || innerH <= 1e-6) return null;
+    const shape = makeRectShape(w, h);
+    const hole = makeRectShape(innerW, innerH);
+    shape.holes.push(hole);
+    return shape;
+  }
+  return null;
+}
+
+function sectionProfile(type, dims) {
+  const key = sectionProfileKey(type, dims);
+  if (_sectionProfileCache.has(key)) return _sectionProfileCache.get(key);
+  const shape = makeSectionShape(type, dims);
+  _sectionProfileCache.set(key, shape || null);
+  return shape || null;
+}
+
+function sectionSolidGeometry(type, dims) {
+  const key = sectionProfileKey(type, dims);
+  if (_sectionSolidGeometryCache.has(key)) return _sectionSolidGeometryCache.get(key);
+  const profile = sectionProfile(type, dims);
+  if (!profile) {
+    _sectionSolidGeometryCache.set(key, null);
+    return null;
+  }
+  const geo = new THREE.ExtrudeGeometry(profile, {
+    steps: 1,
+    depth: 1,
+    bevelEnabled: false,
+    curveSegments: SECTION_SOLID_SEGMENTS,
+  });
+  // Extrude depth(+Z) -> member axis(+X)
+  geo.rotateY(Math.PI * 0.5);
+  // Normalize local member axis to [0, 1] so start/end can be mapped robustly.
+  geo.computeBoundingBox();
+  if (geo.boundingBox) {
+    const minX = geo.boundingBox.min.x;
+    const maxX = geo.boundingBox.max.x;
+    const spanX = maxX - minX;
+    if (spanX > 1e-9) {
+      geo.translate(-minX, 0, 0);
+      geo.scale(1 / spanX, 1, 1);
+    }
+  }
+  geo.computeVertexNormals();
+  _sectionSolidGeometryCache.set(key, geo);
+  return geo;
+}
+
+function sectionSolidEndpointMismatch(p0, p1, basis, length) {
+  const end = p0.clone().addScaledVector(basis.vx, length);
+  const tol = Math.max(length * 1e-4, 1e-6);
+  return end.distanceToSquared(p1) > tol * tol;
+}
+
+function elementBasisVectors(e, p0, p1) {
+  const vx = p1.clone().sub(p0).normalize();
+  if (e && Array.isArray(e.vy) && Array.isArray(e.vz)) {
+    const vyRaw = new THREE.Vector3(e.vy[0], e.vy[1], e.vy[2]);
+    const vzRaw = new THREE.Vector3(e.vz[0], e.vz[1], e.vz[2]);
+    if (vyRaw.lengthSq() > 1e-10 && vzRaw.lengthSq() > 1e-10) {
+      const vyProj = vyRaw.clone().addScaledVector(vx, -vyRaw.dot(vx));
+      if (vyProj.lengthSq() > 1e-10) {
+        const vy = vyProj.normalize();
+        let vz = new THREE.Vector3().crossVectors(vx, vy).normalize();
+        if (vz.dot(vzRaw) < 0) {
+          vy.multiplyScalar(-1);
+          vz = new THREE.Vector3().crossVectors(vx, vy).normalize();
+        }
+        return { vx, vy, vz };
+      }
+    }
+  }
+  let ref = new THREE.Vector3(0, 0, 1);
+  if (Math.abs(vx.dot(ref)) > 0.92) ref = new THREE.Vector3(0, 1, 0);
+  const vy = new THREE.Vector3().crossVectors(ref, vx).normalize();
+  const vz = new THREE.Vector3().crossVectors(vx, vy).normalize();
+  return { vx, vy, vz };
+}
+
+function sectionSolidRenderEnabled(model, showSectionSolids, deformed, showDispContour) {
+  if (!showSectionSolids || deformed || showDispContour) return false;
+  const nElem = model && model.elements ? model.elements.length : 0;
+  return nElem <= SECTION_SOLID_MAX_ELEMENTS;
+}
+
 function fitCamera(model) {
   const b = model.bounds;
   if (!b) return;
@@ -3431,6 +3648,7 @@ function buildModelScene(model) {
   const showElemLabels = el.chkElemLabels.checked;
   const showMaterial = el.chkMaterial.checked;
   const showSection = el.chkSection.checked;
+  const showSectionSolids = !!(el.chkSectionSolids && el.chkSectionSolids.checked);
   const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
   const showMembraneEdge = showMembrane
     && !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
@@ -3439,6 +3657,7 @@ function buildModelScene(model) {
     && !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
   const nm = nodeMap(model);
   const em = elemMap(model);
+  const sectionById = modelSectionMap(model);
   const span = modelSpan(model);
   const nodeLabelScale = nodeLabelScaleFactor();
   const elemLabelScale = elemLabelScaleFactor();
@@ -3447,6 +3666,12 @@ function buildModelScene(model) {
   const loadLabelScale = loadLabelScaleFactor();
   const reactionLabelScale = reactionLabelScaleFactor();
 
+  const useSectionSolids = sectionSolidRenderEnabled(
+    model,
+    showSectionSolids,
+    deformed,
+    showDispContour
+  );
   const linePts = [];
   const linePtsDef = [];
   const contourPts = [];
@@ -3464,68 +3689,127 @@ function buildModelScene(model) {
   }
 
   const defDiv = 16;
-  for (const e of model.elements) {
-    const n0 = nm[e.n0];
-    const n1 = nm[e.n1];
-    if (!n0 || !n1) continue;
-    const p0u = nodePosition(n0, model, lc, defFac, false);
-    const p1u = nodePosition(n1, model, lc, defFac, false);
-    linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+  if (useSectionSolids) {
+    const solidColor = sanitizeHexColor(viewerOptions.sectionSolidColor, colorHex(COLORS.element));
+    const solidOpacity = clampViewerOption("sectionSolidOpacity", Number(viewerOptions.sectionSolidOpacity));
+    const mat = new THREE.MeshStandardMaterial({
+      color: solidColor,
+      roughness: 0.85,
+      metalness: 0.02,
+      transparent: solidOpacity < 0.999,
+      opacity: solidOpacity,
+      side: THREE.DoubleSide,
+    });
+    for (const e of model.elements) {
+      const n0 = nm[e.n0];
+      const n1 = nm[e.n1];
+      if (!n0 || !n1) continue;
+      const sec = sectionById[e.section_id];
+      const dims = sectionDimsMeters(sec);
+      if (!sec || !dims) {
+        const p0u = nodePosition(n0, model, lc, defFac, false);
+        const p1u = nodePosition(n1, model, lc, defFac, false);
+        linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+        continue;
+      }
+      const p0u = nodePosition(n0, model, lc, defFac, false);
+      const p1u = nodePosition(n1, model, lc, defFac, false);
+      const axis = p1u.clone().sub(p0u);
+      const len = axis.length();
+      if (len < 1e-8) continue;
+      const geo = sectionSolidGeometry(sec.type, dims);
+      if (!geo) {
+        linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+        continue;
+      }
+      const basis = elementBasisVectors(e, p0u, p1u);
+      if (sectionSolidEndpointMismatch(p0u, p1u, basis, len)) {
+        linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+        continue;
+      }
+      const rot = new THREE.Matrix4().makeBasis(basis.vx, basis.vy, basis.vz);
+      const q = new THREE.Quaternion().setFromRotationMatrix(rot);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(p0u);
+      mesh.quaternion.copy(q);
+      mesh.scale.set(len, 1, 1);
+      mesh.renderOrder = 2;
+      modelGroup.add(mesh);
+    }
+    if (linePts.length > 0) {
+      addWideLineSegmentsFromPts(
+        linePts,
+        COLORS.element,
+        modelGroup,
+        2,
+        elementLineWidthPx(),
+        ALPHA.opaque
+      );
+    }
+  } else {
+    for (const e of model.elements) {
+      const n0 = nm[e.n0];
+      const n1 = nm[e.n1];
+      if (!n0 || !n1) continue;
+      const p0u = nodePosition(n0, model, lc, defFac, false);
+      const p1u = nodePosition(n1, model, lc, defFac, false);
+      linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
 
-    const needCurve = (deformed && !showDispContour) || (showDispContour && deformed && dispDisplayRange);
-    const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv) : null;
+      const needCurve = (deformed && !showDispContour) || (showDispContour && deformed && dispDisplayRange);
+      const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv) : null;
 
-    if (showDispContour && dispDisplayRange) {
-      if (deformed && curve) {
+      if (showDispContour && dispDisplayRange) {
+        if (deformed && curve) {
+          for (let i = 0; i < curve.pts.length - 1; i++) {
+            const a = curve.pts[i];
+            const b = curve.pts[i + 1];
+            contourPts.push(a.x, a.y, a.z, b.x, b.y, b.z);
+            const ca = dispContourColor(dispContourT(curve.mags[i], dispDisplayRange));
+            const cb = dispContourColor(dispContourT(curve.mags[i + 1], dispDisplayRange));
+            contourColors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b);
+          }
+        } else {
+          contourPts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+          const m0 = nodeDispMagnitude(n0, lc, defFac);
+          const m1 = nodeDispMagnitude(n1, lc, defFac);
+          const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
+          const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
+          contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
+        }
+      }
+
+      if (deformed && !showDispContour && curve) {
         for (let i = 0; i < curve.pts.length - 1; i++) {
           const a = curve.pts[i];
           const b = curve.pts[i + 1];
-          contourPts.push(a.x, a.y, a.z, b.x, b.y, b.z);
-          const ca = dispContourColor(dispContourT(curve.mags[i], dispDisplayRange));
-          const cb = dispContourColor(dispContourT(curve.mags[i + 1], dispDisplayRange));
-          contourColors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b);
+          linePtsDef.push(a.x, a.y, a.z, b.x, b.y, b.z);
         }
-      } else {
-        contourPts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
-        const m0 = nodeDispMagnitude(n0, lc, defFac);
-        const m1 = nodeDispMagnitude(n1, lc, defFac);
-        const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
-        const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
-        contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
       }
     }
 
-    if (deformed && !showDispContour && curve) {
-      for (let i = 0; i < curve.pts.length - 1; i++) {
-        const a = curve.pts[i];
-        const b = curve.pts[i + 1];
-        linePtsDef.push(a.x, a.y, a.z, b.x, b.y, b.z);
-      }
+    if (linePts.length > 0) {
+      addWideLineSegmentsFromPts(
+        linePts,
+        COLORS.element,
+        modelGroup,
+        2,
+        elementLineWidthPx(),
+        (deformed || showDispContour) ? ALPHA.elementGhost : ALPHA.opaque
+      );
     }
-  }
 
-  if (linePts.length > 0) {
-    addWideLineSegmentsFromPts(
-      linePts,
-      COLORS.element,
-      modelGroup,
-      2,
-      elementLineWidthPx(),
-      (deformed || showDispContour) ? ALPHA.elementGhost : ALPHA.opaque
-    );
-  }
-
-  if (showDispContour && contourPts.length > 0) {
-    addDispContourLineSegments(contourPts, contourColors, modelGroup);
-  } else if (deformed && linePtsDef.length > 0) {
-    addWideLineSegmentsFromPts(
-      linePtsDef,
-      COLORS.deform,
-      modelGroup,
-      3,
-      elementLineWidthPx(),
-      ALPHA.opaque
-    );
+    if (showDispContour && contourPts.length > 0) {
+      addDispContourLineSegments(contourPts, contourColors, modelGroup);
+    } else if (deformed && linePtsDef.length > 0) {
+      addWideLineSegmentsFromPts(
+        linePtsDef,
+        COLORS.deform,
+        modelGroup,
+        3,
+        elementLineWidthPx(),
+        ALPHA.opaque
+      );
+    }
   }
 
   const nodePts = [];
@@ -4315,7 +4599,7 @@ function createSupportDiscTexture(fixed) {
     COLORS.supportTrans, COLORS.supportTrans, COLORS.supportTrans,
     COLORS.supportRot, COLORS.supportRot, COLORS.supportRot,
   ];
-  const outline = "#000000";
+  const outline = supportDiscOutlineColor();
 
   ctx.clearRect(0, 0, px, px);
 
@@ -4346,6 +4630,20 @@ function createSupportDiscTexture(fixed) {
   tex.needsUpdate = true;
   _supportDiscTexCache.set(key, tex);
   return tex;
+}
+
+function clearSupportDiscTextureCache() {
+  for (const tex of _supportDiscTexCache.values()) {
+    try {
+      tex.dispose();
+    } catch (e) { /* ignore */ }
+  }
+  _supportDiscTexCache.clear();
+}
+
+function supportDiscOutlineColor() {
+  const palette = THEME_RENDER_COLORS[uiTheme] || THEME_RENDER_COLORS.dark;
+  return palette.supportOutline;
 }
 
 function addSupportDisc(center, fixed, size, group) {
@@ -4506,13 +4804,14 @@ function makeLoadValueLabelSprite(text, span, scaleFactor) {
   const quality = Math.min(20, Math.max(4, labelTextureQualityScale(factor) * 1.75));
   return makeTextSprite(text, span, {
     bg: "transparent",
-    fg: LOAD_VALUE_LABEL_FG,
+    fg: colorHex(COLORS.load),
     pad: 2,
     scaleFactor: factor,
     qualityScale: quality,
+    solidAlpha: true,
+    crispLabel: true,
     transparent: true,
-    alphaTest: 0.01,
-    labelPremultiplied: true,
+    alphaTest: 0.5,
   });
 }
 
@@ -4745,7 +5044,8 @@ function drawWindOverlay(model, visual, windCase, span) {
     COLORS.windFlow,
     loadLineWidthPx() * 1.15,
     1.0,
-    8
+    8,
+    true
   );
   const flowLabel = makeTextSprite(windCase.direction_label || "Wind", span, {
     scaleFactor: loadLabelScaleFactor() * 0.95,
@@ -4779,7 +5079,8 @@ function drawWindOverlay(model, visual, windCase, span) {
       COLORS.windStoryForce,
       loadLineWidthPx(),
       0.85,
-      8
+      8,
+      true
     );
     const labelStory = row.story != null ? row.story : String(row.diaphragm_id || "");
     const label = makeTextSprite(
@@ -5578,11 +5879,16 @@ function orientMeshAxisX(mesh, dir) {
   mesh.setRotationFromMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
 }
 
-function createLabelTexture(canvas, premultiplyOnUpload) {
+function createLabelTexture(canvas, premultiplyOnUpload, crisp) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
+  const filt = crisp ? THREE.NearestFilter : THREE.LinearFilter;
+  tex.minFilter = filt;
+  tex.magFilter = filt;
+  // Keep canvas label colors consistent with line/material colors.
+  if ("colorSpace" in tex && THREE.SRGBColorSpace) {
+    tex.colorSpace = THREE.SRGBColorSpace;
+  }
   tex.premultiplyAlpha = !!premultiplyOnUpload;
   if (renderer && renderer.capabilities) {
     tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
@@ -5643,7 +5949,7 @@ function buildLabelCanvas(text, span, opts) {
   drawLabelCanvasText(ctx, text, padPx, textY, fg, { quality: quality, textOutline: opts.textOutline });
 
   if (opts.solidAlpha) {
-    solidifyCanvasAlpha(canvas);
+    solidifyCanvasForeground(canvas, fg);
   }
 
   const labelPremultiplied = !!(
@@ -5659,7 +5965,7 @@ function buildLabelCanvas(text, span, opts) {
 
 function makeTextPlaneMesh(text, span, opts) {
   const { canvas, labelPremultiplied, worldW, worldH } = buildLabelCanvas(text, span, opts);
-  const tex = createLabelTexture(canvas, labelPremultiplied);
+  const tex = createLabelTexture(canvas, labelPremultiplied, !!opts.crispLabel);
   const mat = new THREE.MeshBasicMaterial({
     map: tex,
     transparent: true,
@@ -6364,13 +6670,29 @@ function premultiplyCanvasAlpha(canvas) {
   ctx.putImageData(img, 0, 0);
 }
 
-function solidifyCanvasAlpha(canvas) {
+function solidifyCanvasForeground(canvas, fg, alphaThreshold) {
+  const h = String(fg || "#ffffff").replace(/^#/, "");
+  let r = 255;
+  let g = 255;
+  let b = 255;
+  if (h.length === 6) {
+    r = parseInt(h.slice(0, 2), 16);
+    g = parseInt(h.slice(2, 4), 16);
+    b = parseInt(h.slice(4, 6), 16);
+  }
+  const thresh = alphaThreshold != null ? alphaThreshold : 8;
   const ctx = canvas.getContext("2d");
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
-    if (d[i + 3] > 8) d[i + 3] = 255;
-    else d[i + 3] = 0;
+    if (d[i + 3] > thresh) {
+      d[i] = r;
+      d[i + 1] = g;
+      d[i + 2] = b;
+      d[i + 3] = 255;
+    } else {
+      d[i + 3] = 0;
+    }
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -6378,7 +6700,7 @@ function solidifyCanvasAlpha(canvas) {
 function makeTextSprite(text, span, opts) {
   opts = opts || {};
   const { canvas, labelPremultiplied, worldW, worldH } = buildLabelCanvas(text, span, opts);
-  const tex = createLabelTexture(canvas, labelPremultiplied);
+  const tex = createLabelTexture(canvas, labelPremultiplied, !!opts.crispLabel);
   const useTransparent = opts.transparent !== false;
   const mat = new THREE.SpriteMaterial({
     map: tex,
@@ -6586,7 +6908,7 @@ function runWhenPopupReady(w, initFn) {
 
 function stbIconHeadHtml(targetWindow) {
   const base = guiApiOrigin(targetWindow) || "";
-  return "<meta name=\"theme-color\" content=\"#e1dee4\">"
+  return "<meta name=\"theme-color\" content=\"" + uiThemeMetaColor(uiTheme) + "\">"
     + "<meta name=\"color-scheme\" content=\"dark light\">"
     + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-32.png\" type=\"image/png\" sizes=\"32x32\">"
     + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-48.png\" type=\"image/png\" sizes=\"48x48\">"
@@ -7995,6 +8317,7 @@ async function loadSelectedModel(solve, options) {
 
 async function bootstrap() {
   loadPickWrwCreateModel();
+  initUiTheme();
   initThree();
   initDisplayPrefs();
   initViewerOptions();
@@ -8125,6 +8448,13 @@ if (el.btnToggleDistance) {
   });
 }
 
+if (el.btnTheme) {
+  el.btnTheme.addEventListener("click", () => {
+    applyUiTheme(uiTheme === "dark" ? "light" : "dark");
+    saveUiTheme();
+  });
+}
+
 if (el.btnClearSelection) {
   el.btnClearSelection.addEventListener("click", () => clearSelection());
 }
@@ -8241,6 +8571,12 @@ el.chkSection.addEventListener("change", () => {
   onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
+if (el.chkSectionSolids) {
+  el.chkSectionSolids.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    if (currentModel) rebuildScene();
+  });
+}
 if (el.chkMembrane) {
   el.chkMembrane.addEventListener("change", () => {
     onResultsDisplayChanged();
@@ -8303,6 +8639,7 @@ function readDisplayPrefsFromUi() {
   displayPrefs.elemLabels = !!(el.chkElemLabels && el.chkElemLabels.checked);
   displayPrefs.material = !!(el.chkMaterial && el.chkMaterial.checked);
   displayPrefs.section = !!(el.chkSection && el.chkSection.checked);
+  displayPrefs.sectionSolids = !!(el.chkSectionSolids && el.chkSectionSolids.checked);
   displayPrefs.membrane = !!(el.chkMembrane && el.chkMembrane.checked);
   displayPrefs.membraneEdge = !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
   displayPrefs.woodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
@@ -8337,6 +8674,7 @@ function applyDisplayPrefsToUi() {
   if (el.chkElemLabels) el.chkElemLabels.checked = !!displayPrefs.elemLabels;
   if (el.chkMaterial) el.chkMaterial.checked = !!displayPrefs.material;
   if (el.chkSection) el.chkSection.checked = !!displayPrefs.section;
+  if (el.chkSectionSolids) el.chkSectionSolids.checked = !!displayPrefs.sectionSolids;
   if (el.chkMembrane) el.chkMembrane.checked = !!displayPrefs.membrane;
   if (el.chkMembraneEdge) el.chkMembraneEdge.checked = !!displayPrefs.membraneEdge;
   if (el.chkWoodWall) el.chkWoodWall.checked = !!displayPrefs.woodWall;
@@ -8392,6 +8730,7 @@ function loadDisplayPrefs() {
     if (typeof st.elemLabels === "boolean") displayPrefs.elemLabels = st.elemLabels;
     if (typeof st.material === "boolean") displayPrefs.material = st.material;
     if (typeof st.section === "boolean") displayPrefs.section = st.section;
+    if (typeof st.sectionSolids === "boolean") displayPrefs.sectionSolids = st.sectionSolids;
     if (typeof st.membrane === "boolean") displayPrefs.membrane = st.membrane;
     if (typeof st.membraneEdge === "boolean") displayPrefs.membraneEdge = st.membraneEdge;
     if (typeof st.woodWall === "boolean") displayPrefs.woodWall = st.woodWall;
@@ -8455,6 +8794,18 @@ function readOptionsFromUi() {
     "reactionLabelSize", parseFloat(el.optReactionLabel.value) || OPTIONS_DEFAULTS.reactionLabelSize);
   viewerOptions.forceLabelSize = clampViewerOption(
     "forceLabelSize", parseFloat(el.optForceLabel.value) || OPTIONS_DEFAULTS.forceLabelSize);
+  if (el.optSectionSolidOpacity) {
+    viewerOptions.sectionSolidOpacity = clampViewerOption(
+      "sectionSolidOpacity",
+      parseFloat(el.optSectionSolidOpacity.value) || OPTIONS_DEFAULTS.sectionSolidOpacity
+    );
+  }
+  if (el.optSectionSolidColor) {
+    viewerOptions.sectionSolidColor = sanitizeHexColor(
+      el.optSectionSolidColor.value,
+      OPTIONS_DEFAULTS.sectionSolidColor
+    );
+  }
   if (el.loadTypeFilter) {
     viewerOptions.inputLoadType = el.loadTypeFilter.value || OPTIONS_DEFAULTS.inputLoadType;
   }
@@ -8489,6 +8840,18 @@ function applyOptionsToUi() {
   el.optReactionLabelVal.textContent = String(viewerOptions.reactionLabelSize);
   el.optForceLabel.value = String(viewerOptions.forceLabelSize);
   el.optForceLabelVal.textContent = String(viewerOptions.forceLabelSize);
+  if (el.optSectionSolidOpacity) {
+    el.optSectionSolidOpacity.value = String(viewerOptions.sectionSolidOpacity);
+    if (el.optSectionSolidOpacityVal) {
+      el.optSectionSolidOpacityVal.textContent = Number(viewerOptions.sectionSolidOpacity).toFixed(2);
+    }
+  }
+  if (el.optSectionSolidColor) {
+    el.optSectionSolidColor.value = sanitizeHexColor(
+      viewerOptions.sectionSolidColor,
+      OPTIONS_DEFAULTS.sectionSolidColor
+    );
+  }
   if (el.loadTypeFilter) {
     el.loadTypeFilter.value = loadTypeFilterValue();
   }
@@ -8498,6 +8861,77 @@ function saveViewerOptions() {
   try {
     localStorage.setItem(OPTIONS_STORAGE_KEY, JSON.stringify(viewerOptions));
   } catch (e) { /* ignore */ }
+}
+
+function normalizeUiTheme(theme) {
+  return theme === "light" ? "light" : "dark";
+}
+
+function uiThemeMetaColor(theme) {
+  return theme === "light" ? "#f4f6fb" : "#1a1a22";
+}
+
+function applyRenderTheme(theme) {
+  const palette = THEME_RENDER_COLORS[theme] || THEME_RENDER_COLORS.dark;
+  COLORS.background = palette.background;
+  COLORS.element = palette.element;
+  COLORS.node = palette.node;
+  COLORS.membraneEdge = palette.membraneEdge;
+  COLORS.woodWallEdge = palette.woodWallEdge;
+  COLORS.nodeLabel = palette.nodeLabel;
+  if (scene) {
+    scene.background = new THREE.Color(COLORS.background);
+  }
+  if (_nodeLabelLeaderMat) {
+    _nodeLabelLeaderMat.color.setHex(COLORS.nodeLabel);
+    _nodeLabelLeaderMat.needsUpdate = true;
+  }
+  clearSupportDiscTextureCache();
+}
+
+function preferredUiTheme() {
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+    return "light";
+  }
+  return "dark";
+}
+
+function loadUiTheme() {
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (!raw) return preferredUiTheme();
+    return normalizeUiTheme(raw);
+  } catch (e) {
+    return preferredUiTheme();
+  }
+}
+
+function saveUiTheme() {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, uiTheme);
+  } catch (e) { /* ignore */ }
+}
+
+function applyUiTheme(theme) {
+  uiTheme = normalizeUiTheme(theme);
+  document.documentElement.setAttribute("data-theme", uiTheme);
+  applyRenderTheme(uiTheme);
+  const meta = document.querySelector("meta[name=\"theme-color\"]");
+  if (meta) {
+    meta.setAttribute("content", uiThemeMetaColor(uiTheme));
+  }
+  if (el.btnTheme) {
+    const isDark = uiTheme === "dark";
+    el.btnTheme.textContent = isDark ? "Theme: Dark" : "Theme: Light";
+    el.btnTheme.title = isDark ? "Switch to light mode" : "Switch to dark mode";
+  }
+  if (currentModel) {
+    rebuildScene();
+  }
+}
+
+function initUiTheme() {
+  applyUiTheme(loadUiTheme());
 }
 
 function loadViewerOptions() {
@@ -8521,6 +8955,12 @@ function loadViewerOptions() {
     if (typeof st.loadLabelSize === "number") viewerOptions.loadLabelSize = st.loadLabelSize;
     if (typeof st.reactionLabelSize === "number") viewerOptions.reactionLabelSize = st.reactionLabelSize;
     if (typeof st.forceLabelSize === "number") viewerOptions.forceLabelSize = st.forceLabelSize;
+    if (typeof st.sectionSolidOpacity === "number") {
+      viewerOptions.sectionSolidOpacity = st.sectionSolidOpacity;
+    }
+    if (typeof st.sectionSolidColor === "string") {
+      viewerOptions.sectionSolidColor = sanitizeHexColor(st.sectionSolidColor, OPTIONS_DEFAULTS.sectionSolidColor);
+    }
     if (typeof st.inputLoadType === "string") viewerOptions.inputLoadType = st.inputLoadType;
     clampAllViewerOptions();
   } catch (e) { /* ignore */ }
@@ -8597,6 +9037,18 @@ function initViewerOptions() {
     el.optForceLabelVal.textContent = el.optForceLabel.value;
     onOptionsChanged();
   });
+  if (el.optSectionSolidOpacity) {
+    el.optSectionSolidOpacity.addEventListener("input", () => {
+      if (el.optSectionSolidOpacityVal) {
+        el.optSectionSolidOpacityVal.textContent = Number(el.optSectionSolidOpacity.value).toFixed(2);
+      }
+      onOptionsChanged();
+    });
+  }
+  if (el.optSectionSolidColor) {
+    el.optSectionSolidColor.addEventListener("input", onOptionsChanged);
+    el.optSectionSolidColor.addEventListener("change", onOptionsChanged);
+  }
   if (el.loadTypeFilter) {
     el.loadTypeFilter.addEventListener("change", onOptionsChanged);
   }
