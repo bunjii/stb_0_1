@@ -55,17 +55,13 @@ ELEM,     10,      6,      4,      3,      0.0
 #   RA,HMAX: optional (blank allowed)
 
 # Timber floor diaphragm: FLOOR_MAG=2.0 (床倍率2倍).
-# Converted internally to equivalent G*t using REFERENCE_DRIFT (default 1/150).
+# DREG is omitted here; outer polygon 1-2-3-4 is auto-derived from DMEM below.
 
 DIAP,     10,    2F_MAIN,    1,    1,      2.0,     1000,      0.0,  0.006666667,     1820
 
 # --- DIAPHRAGM OUTER POLYGON(DREG) ---
 # DREG, DIAP,     N1,     N2,     N3
-#   N4,N5,...: more corner node IDs as needed
-
-#    DIAP ID,  NODE1,  NODE2,  NODE3, ...
-
-DREG,     10,      1,      2,      3,      4
+#   Optional when DMEM is supplied; derived automatically if omitted.
 
 # --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---
 # DMEM,   ID,   DIAP,     N1,     N2,     N3
@@ -100,11 +96,12 @@ CONS,      7,    1,    1,    1,    1,    1,    1
 CONS,      8,    1,    1,    1,    1,    1,    1
 
 # --- LOAD NAME(LNME) ---
-# LNME,   LC,       NAME
+# LNME,   LC, TYPE,     LABEL
+#   TYPE: 1=DL  2=LL  3=LL(E)  4=S  5=W  6=E  7=CUSTOM(label required)
 
-LNME,      1,         DL
-LNME,      2,        EQX
-LNME,      3,        EQY
+LNME,      1,    1
+LNME,      2,    6,  EQX
+LNME,      3,    6,  EQY
 
 # --- POINT LOAD(PLOD) ---
 # PLOD, NODE,   LC,       PX,       PY,       PZ,       MX,       MY,       MZ

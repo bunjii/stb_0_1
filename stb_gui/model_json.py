@@ -277,14 +277,17 @@ def write_model_file(rel_path, text):
     """Write model text to data/ or examples/. Returns normalized relative path."""
 
     rel = normalize_model_relpath(rel_path)
+    if rel is None:
+        raise ValueError("Model path is required")
     if not _model_dir_allowed(rel):
         raise ValueError("Model path must be a .dat file under data/ or examples/")
     full = os.path.join(project_root(), rel.replace("/", os.sep))
     parent = os.path.dirname(full)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(full, "w", encoding="utf-8") as f:
-        f.write(text if text is not None else "")
+    from stb_gui.dat_format_headers import write_dat_text
+
+    write_dat_text(full, text if text is not None else "")
     return rel
 
 
@@ -396,12 +399,12 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
                 reactions.append({
                     "node": c.nid,
                     "lc": lc,
-                    "rx": float(rs[0]) * 1e-3,
-                    "ry": float(rs[1]) * 1e-3,
-                    "rz": float(rs[2]) * 1e-3,
-                    "mx": float(rs[3]) * 1e-3,
-                    "my": float(rs[4]) * 1e-3,
-                    "mz": float(rs[5]) * 1e-3,
+                    "tx": float(rs[0]) * 1e-3,
+                    "ty": float(rs[1]) * 1e-3,
+                    "tz": float(rs[2]) * 1e-3,
+                    "rx": float(rs[3]) * 1e-3,
+                    "ry": float(rs[4]) * 1e-3,
+                    "rz": float(rs[5]) * 1e-3,
                 })
 
     point_loads = []
@@ -578,12 +581,23 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
             "rzj": _ejnt_out(j.rzj),
         })
 
+    load_case_defs = []
+    for lc in getattr(mdl, "lcases", []):
+        load_case_defs.append({
+            "lc": lc.lc,
+            "type": getattr(lc, "load_type", 7),
+            "label": getattr(lc, "label", ""),
+            "name": getattr(lc, "lname", ""),
+        })
+
     return {
         "path": relpath,
         "solved": solved,
         "schema": 2,
+        "input_warnings": list(getattr(mdl, "input_warnings", []) or []),
         "date_analysis": mdl.date_analysis,
         "load_cases": mdl.lcs if mdl.lcs != None else [],
+        "load_case_definitions": load_case_defs,
         "bounds": bounds,
         "nodes": nodes,
         "elements": elements,
@@ -606,24 +620,25 @@ def mdl_to_dict(mdl, relpath=None, solved=False):
 def _load_mdl(path, solve=False, quiet=True):
     """Parse model file; optionally run analysis. Returns Mdl instance."""
 
+    import copy
     import sys
     root = project_root()
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    from stb_engine import parse_input, read_input_file, solve_model
+    from stb_engine import solve_model
     from stb_engine.errors import StbParseError, StbSolveError
+    from stb_gui.model_session import get_parsed_model
+    from stb_loads.equilibrium import seed_solved_model_cache
 
     full = resolve_model_path(path)
-    lines = read_input_file(full)
     try:
-        mdl = parse_input(lines)
+        mdl = get_parsed_model(full)
     except StbParseError as ex:
         raise ValueError(str(ex))
 
-    mdl.filepath = full
-
     if solve:
+        mdl = copy.deepcopy(mdl)
         if quiet:
             old_stdout = sys.stdout
             devnull = open(os.devnull, "w")
@@ -640,6 +655,7 @@ def _load_mdl(path, solve=False, quiet=True):
                 solve_model(mdl)
             except StbSolveError as ex:
                 raise ValueError(str(ex))
+        seed_solved_model_cache(mdl)
 
     return mdl, full
 

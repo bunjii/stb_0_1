@@ -27,7 +27,7 @@ def _read_lines(path):
     if not os.path.isfile(path):
         raise IOError("Input file not found: " + path)
 
-    f = open(path, "r")
+    f = open(path, "r", encoding="utf-8")
     lines = f.read().splitlines()
     f.close()
     return lines
@@ -84,12 +84,27 @@ def cmd_solve(args):
     _ensure_project_root_on_path()
     from stb_engine import parse_input, format_results
     from stb_engine.errors import StbParseError, StbSolveError
+    from stb_project import apply_project_load_combinations_to_dat, load_project_file
 
     try:
-        lines = _read_lines(args.input)
+        input_path = os.path.abspath(args.input)
+        project = None
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(os.path.dirname(input_path), dat_path)
+            apply_project_load_combinations_to_dat(dat_path, project)
+        else:
+            dat_path = input_path
+
+        lines = _read_lines(dat_path)
         mdl = parse_input(lines)
-        mdl.filepath = os.path.abspath(args.input)
+        mdl.filepath = dat_path
     except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except ValueError as ex:
         _stderr(str(ex))
         return EXIT_INPUT
     except StbParseError as ex:
@@ -104,7 +119,10 @@ def cmd_solve(args):
         return EXIT_SOLVE
 
     if args.verbose:
-        print("Solved: " + args.input)
+        print("Solved: " + dat_path)
+        if project is not None and project.load_conditions.load_combinations:
+            print("  project:    " + (project.source_path or "(loaded)"))
+            print("  LCMB->dat:  " + str(len(project.load_conditions.load_combinations)))
         print("  load cases: " + str(mdl.lcs))
         print("  analysis:   " + str(mdl.date_analysis))
 
@@ -120,6 +138,150 @@ def cmd_solve(args):
             print("  written:    " + out_path)
     else:
         sys.stdout.write(txt)
+
+    return EXIT_OK
+
+
+def cmd_loads_seismic(args):
+    _ensure_project_root_on_path()
+    from stb_engine import parse_input
+    from stb_engine.errors import StbParseError
+    from stb_project import load_project_file, load_project_for_dat
+    from stb_loads import (
+        apply_seismic_to_dat,
+        compute_seismic_distribution,
+        generate_dlod_records,
+        render_seismic_markdown,
+    )
+
+    try:
+        input_path = os.path.abspath(args.project)
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            project_dir = os.path.dirname(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(project_dir, dat_path)
+        else:
+            dat_path = input_path
+            project = load_project_for_dat(dat_path, required=True)
+
+        lines = _read_lines(dat_path)
+        mdl = parse_input(lines)
+        mdl.filepath = dat_path
+        result = compute_seismic_distribution(mdl, project)
+        dloads = generate_dlod_records(result)
+        markdown = render_seismic_markdown(result, project, mdl=mdl)
+
+        if args.dry_run or not args.write_dat:
+            sys.stdout.write(markdown)
+            if not markdown.endswith("\n"):
+                sys.stdout.write("\n")
+        if args.write_dat:
+            apply_seismic_to_dat(dat_path, dloads)
+            if args.verbose:
+                print("Updated: " + dat_path)
+                print("  seismic DLOD records: " + str(len(dloads)))
+    except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except StbParseError as ex:
+        _stderr("Parse error: " + str(ex))
+        return EXIT_INPUT
+    except ValueError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+
+    return EXIT_OK
+
+
+def cmd_loads_wind(args):
+    _ensure_project_root_on_path()
+    from stb_engine import parse_input
+    from stb_engine.errors import StbParseError
+    from stb_project import apply_load_combinations_to_model, load_project_file, load_project_for_dat
+    from stb_loads import (
+        apply_wind_to_dat,
+        compute_wind_distribution,
+        generate_wind_dlod_records,
+        render_wind_markdown,
+    )
+
+    try:
+        input_path = os.path.abspath(args.project)
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            project_dir = os.path.dirname(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(project_dir, dat_path)
+        else:
+            dat_path = input_path
+            project = load_project_for_dat(dat_path, required=True)
+
+        lines = _read_lines(dat_path)
+        mdl = parse_input(lines)
+        mdl.filepath = dat_path
+        result = compute_wind_distribution(mdl, project)
+        dloads = generate_wind_dlod_records(result)
+        markdown = render_wind_markdown(result, project, mdl=mdl)
+
+        if args.dry_run or not args.write_dat:
+            sys.stdout.write(markdown)
+            if not markdown.endswith("\n"):
+                sys.stdout.write("\n")
+        if args.write_dat:
+            apply_wind_to_dat(dat_path, dloads)
+            if args.verbose:
+                print("Updated: " + dat_path)
+                print("  wind DLOD records: " + str(len(dloads)))
+    except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except StbParseError as ex:
+        _stderr("Parse error: " + str(ex))
+        return EXIT_INPUT
+    except ValueError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+
+    return EXIT_OK
+
+
+def cmd_loads_combinations(args):
+    _ensure_project_root_on_path()
+    from stb_project import (
+        apply_project_load_combinations_to_dat,
+        build_lcmb_block,
+        load_project_file,
+        load_project_for_dat,
+    )
+
+    try:
+        input_path = os.path.abspath(args.project)
+        if input_path.lower().endswith(".json"):
+            project = load_project_file(input_path)
+            dat_path = project.dat_path
+            if not os.path.isabs(dat_path):
+                dat_path = os.path.join(os.path.dirname(input_path), dat_path)
+        else:
+            dat_path = input_path
+            project = load_project_for_dat(dat_path, required=True)
+
+        combinations = project.load_conditions.load_combinations
+        if args.dry_run or not args.write_dat:
+            sys.stdout.write(build_lcmb_block(combinations))
+        if args.write_dat:
+            count = apply_project_load_combinations_to_dat(dat_path, project)
+            if args.verbose:
+                print("Updated: " + dat_path)
+                print("  LCMB records: " + str(count))
+    except IOError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
+    except ValueError as ex:
+        _stderr(str(ex))
+        return EXIT_INPUT
 
     return EXIT_OK
 
@@ -145,6 +307,7 @@ def cmd_report(args):
         lines = _read_lines(dat_path)
         mdl = parse_input(lines)
         mdl.filepath = dat_path
+        apply_load_combinations_to_model(mdl, project)
         _solve_with_stdout_control(mdl, args.quiet)
         txt = format_results(mdl)
         draft = write_confirmation_draft(
@@ -191,6 +354,7 @@ def cmd_gui(args):
             port=args.port,
             open_browser=(not args.no_browser),
             log_file=getattr(args, "log_file", None),
+            exit_with_browser=not getattr(args, "no_exit_with_browser", False),
         )
     except KeyboardInterrupt:
         return EXIT_OK
@@ -264,6 +428,80 @@ def _build_parser():
     )
     p_rep.set_defaults(func=cmd_report)
 
+    p_loads = sub.add_parser(
+        "loads",
+        parents=[common],
+        help="Load generation utilities",
+    )
+    p_loads_sub = p_loads.add_subparsers(dest="loads_command")
+    p_loads_sub.required = True
+
+    p_seismic = p_loads_sub.add_parser(
+        "seismic",
+        parents=[common],
+        help="Generate seismic DLOD records from Ai distribution",
+    )
+    p_seismic.add_argument(
+        "--project",
+        required=True,
+        help="Project JSON sidecar path",
+    )
+    p_seismic.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print Wi/Ai/Qi table without modifying .dat",
+    )
+    p_seismic.add_argument(
+        "--write-dat",
+        action="store_true",
+        help="Write generated DLOD block into the linked .dat file",
+    )
+    p_seismic.set_defaults(func=cmd_loads_seismic)
+
+    p_wind = p_loads_sub.add_parser(
+        "wind",
+        parents=[common],
+        help="Generate wind DLOD records from wall surfaces",
+    )
+    p_wind.add_argument(
+        "--project",
+        required=True,
+        help="Project JSON sidecar path",
+    )
+    p_wind.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print wind load report without modifying .dat",
+    )
+    p_wind.add_argument(
+        "--write-dat",
+        action="store_true",
+        help="Write generated DLOD block into the linked .dat file",
+    )
+    p_wind.set_defaults(func=cmd_loads_wind)
+
+    p_lcmb = p_loads_sub.add_parser(
+        "combinations",
+        parents=[common],
+        help="Write project load combinations into the linked .dat file",
+    )
+    p_lcmb.add_argument(
+        "--project",
+        required=True,
+        help="Project JSON sidecar path or linked .dat path",
+    )
+    p_lcmb.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print generated LCMB block without modifying .dat",
+    )
+    p_lcmb.add_argument(
+        "--write-dat",
+        action="store_true",
+        help="Write generated LCMB block into the linked .dat file",
+    )
+    p_lcmb.set_defaults(func=cmd_loads_combinations)
+
     p_gui = sub.add_parser(
         "gui",
         parents=[common],
@@ -285,6 +523,11 @@ def _build_parser():
         "--log-file",
         default=None,
         help="Also write server logs to this file (debug)",
+    )
+    p_gui.add_argument(
+        "--no-exit-with-browser",
+        action="store_true",
+        help="Keep the server running after the browser tab closes (default: stop with browser)",
     )
     p_gui.set_defaults(func=cmd_gui)
 

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ST">
+  <rect width="64" height="64" fill="#000000"/>
+  <text x="32" y="43"
+        font-family="'Segoe UI', 'Yu Gothic UI', 'Meiryo', 'Helvetica Neue', Arial, sans-serif"
+        font-size="30"
+        font-weight="700"
+        fill="#ffffff"
+        text-anchor="middle">ST</text>
+</svg>

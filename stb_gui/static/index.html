@@ -4,26 +4,35 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Structural Toolbox</title>
+  <meta name="theme-color" content="#e1dee4">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="/static/icons/st-icon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/static/icons/st-icon-48.png" type="image/png" sizes="48x48">
+  <link rel="icon" href="/static/icons/st-icon-256.png" type="image/png" sizes="256x256">
+  <link rel="icon" href="/static/icons/favicon.ico" sizes="48x48">
+  <link rel="apple-touch-icon" href="/static/icons/st-icon-192.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div id="toolbar">
-    <span class="title">Structural Toolbox</span>
     <button id="btnNew" type="button">New</button>
     <button id="btnOpen" type="button">Open</button>
-    <button id="btnSave" type="button">Save</button>
+    <button id="btnSave" type="button" title="Save (Ctrl+S)">Save</button>
     <button id="btnClose" type="button" class="btn-secondary">Close</button>
     <span id="modelPath" class="model-path" title=""></span>
     <input type="file" id="openFileInput" accept=".dat,text/plain" hidden>
     <button id="btnReload" type="button">Reload</button>
     <button id="btnSolve" type="button" title="Solve (F5)">Solve</button>
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
+    <button id="btnProject" type="button" class="btn-secondary" title="project.json sidecar settings">Project…</button>
+    <button id="btnLoads" type="button" class="btn-secondary" title="Load and external-force verification">Loads…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
+    <button id="btnTheme" type="button" class="btn-secondary" title="Switch light/dark theme">Theme: Dark</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
-    <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P)">Pick mode</button>
+    <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P). Nodes (N) / Elements (E) in panel">Pick mode</button>
     <button id="btnToggleDistance" type="button" class="btn-secondary" title="Distance (D)">Distance</button>
-    <button id="btnToggleSelectionPanel" type="button" class="btn-secondary" title="Show/hide list of picked elements">Picked list</button>
     <span id="status">Loading…</span>
   </div>
   <div id="viewport">
@@ -31,7 +40,71 @@
     <div id="elemContextMenu" class="context-menu" hidden>
       <div id="contextMenuTitle" class="context-menu-title"></div>
       <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
+      <div id="contextMenuNodeSupport" class="context-menu-group">
+        <div class="context-menu-label">Support (CONS)</div>
+        <div class="pick-cons-grid context-menu-cons-grid">
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsTx"> TX</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsTy"> TY</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsTz"> TZ</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsRx"> RX</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsRy"> RY</label>
+          <label class="context-menu-check"><input type="checkbox" id="contextMenuConsRz"> RZ</label>
+        </div>
+        <div class="context-menu-field-row pick-cons-presets">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="cons-preset-fixed">Fixed</button>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="cons-preset-pinned">Pinned</button>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="cons-preset-free">Free</button>
+        </div>
+        <button type="button" class="context-menu-item" data-action="set-cons">Apply support</button>
+      </div>
       <button type="button" id="contextMenuDeleteNodes" class="context-menu-item context-menu-danger" data-action="delete-nodes">Delete nodes…</button>
+      <button type="button" id="contextMenuDeleteDmem" class="context-menu-item context-menu-danger" data-action="delete-dmem">Delete DMEM…</button>
+      <button type="button" id="contextMenuDeleteWrw" class="context-menu-item context-menu-danger" data-action="delete-wrw">Delete WRW…</button>
+      <div id="contextMenuWrwEdits" class="context-menu-group">
+        <div class="context-menu-label">WRW type / multiplier</div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuWrwModel" class="context-menu-input" title="MODEL">
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
+          </select>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="set-wrw-model">Apply</button>
+        </div>
+        <div class="context-menu-field-row">
+          <input type="number" id="contextMenuWrwMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" placeholder="M">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="set-wrw-multiplier">Apply</button>
+        </div>
+      </div>
+      <div id="contextMenuDmemEdits" class="context-menu-group">
+        <div class="context-menu-label">Floor/roof multiplier (DIAP)</div>
+        <div class="context-menu-field-row">
+          <input type="number" id="contextMenuDiapMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" placeholder="MAG">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="set-diap-multiplier">Apply</button>
+        </div>
+        <div id="contextMenuDiapHint" class="context-menu-hint"></div>
+      </div>
+      <div id="contextMenuDmemCreate" class="context-menu-group">
+        <div class="context-menu-label">Create DMEM (3 nodes)</div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuDmemCreateDiap" class="context-menu-input"></select>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="create-dmem">Create</button>
+        </div>
+        <div id="contextMenuDmemCreateHint" class="context-menu-hint"></div>
+      </div>
+      <div id="contextMenuWrwCreate" class="context-menu-group">
+        <div class="context-menu-label">Create WRW (4 nodes)</div>
+        <div class="context-menu-field-row">
+          <input type="number" id="contextMenuWrwCreateMultiplier" class="context-menu-input" step="any" min="0" inputmode="decimal" value="2" placeholder="M">
+          <select id="contextMenuWrwCreateModel" class="context-menu-input" title="MODEL">
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
+          </select>
+        </div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuWrwCreateDiap" class="context-menu-input"></select>
+          <button type="button" class="context-menu-item context-menu-inline" data-action="create-wrw">Create</button>
+        </div>
+        <div id="contextMenuWrwCreateHint" class="context-menu-hint"></div>
+      </div>
       <div id="contextMenuElemEdits" class="context-menu-elem-edits">
       <div class="context-menu-group">
         <div class="context-menu-label">Change section</div>
@@ -66,6 +139,15 @@
     </div>
     <div id="distanceOverlay" class="distance-overlay" hidden></div>
     <div id="viewerInfoOverlay" class="viewer-info-overlay"></div>
+    <div id="windLegendOverlay" class="viewport-wind-legend" hidden>
+      <div id="windLegendTitle" class="viewport-wind-legend-title">Wind loads</div>
+      <div id="windLegendCase" class="viewport-wind-legend-case"></div>
+      <div class="viewport-wind-legend-items">
+        <span class="wind-legend-windward">■ Windward</span>
+        <span class="wind-legend-leeward">■ Leeward</span>
+        <span class="wind-legend-flow">→ Wind dir / F_story</span>
+      </div>
+    </div>
     <div id="ejntEditPanel" class="ejnt-edit-panel" hidden>
       <div class="ejnt-edit-header">
         <span class="ejnt-edit-title">Edit joint (EJNT)</span>
@@ -93,6 +175,7 @@
 
       <section class="panel-section">
         <div class="panel-section-title">Load case &amp; display</div>
+        <p class="panel-hint">Display choices are saved automatically.</p>
         <label class="panel-row">
           <span>LC</span>
           <select id="lcSelect"></select>
@@ -111,7 +194,7 @@
           <input type="checkbox" id="chkSupports" checked> Supports
         </label>
         <label class="panel-check">
-          <input type="checkbox" id="chkEJnt"> EJNT
+          <input type="checkbox" id="chkEJnt"> Element joints
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkLoads" checked> Input loads
@@ -122,11 +205,19 @@
             <option value="all">All</option>
             <option value="area">Area (ALOD)</option>
             <option value="gravity">Gravity (GLOD)</option>
+            <option value="dlod">Diaphragm (DLOD)</option>
             <option value="linepoint">Line + Point</option>
           </select>
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkLoadValues"> Load values
+        </label>
+        <label class="panel-check">
+          <input type="checkbox" id="chkWindLoads"> Wind (surfaces / F_story)
+        </label>
+        <label class="panel-row">
+          <span>Wind case</span>
+          <select id="windCaseSelect" disabled></select>
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkReactions"> Reactions
@@ -146,12 +237,28 @@
         <label class="panel-check">
           <input type="checkbox" id="chkSection"> Section
         </label>
-        <label class="panel-check">
-          <input type="checkbox" id="chkMembrane" checked> DMEM
-        </label>
-        <label class="panel-check">
-          <input type="checkbox" id="chkWoodWall" checked> WRW
-        </label>
+        <div class="panel-check-row">
+          <label class="panel-check panel-check-compact">
+            <input type="checkbox" id="chkSectionSolids"> Section solids
+          </label>
+          <button type="button" id="btnExportSectionSolidsDxf" class="btn-panel-inline" title="Export section solid mesh to DXF (undeformed)">DXF export</button>
+        </div>
+        <div class="panel-check-row">
+          <label class="panel-check panel-check-compact">
+            <input type="checkbox" id="chkMembrane" checked> Diaphragm members
+          </label>
+          <label class="panel-check panel-check-compact panel-check-edge" title="Show diaphragm member edge lines">
+            <input type="checkbox" id="chkMembraneEdge" checked> Edge
+          </label>
+        </div>
+        <div class="panel-check-row">
+          <label class="panel-check panel-check-compact">
+            <input type="checkbox" id="chkWoodWall" checked> Wood walls
+          </label>
+          <label class="panel-check panel-check-compact panel-check-edge" title="Show wood wall edge lines">
+            <input type="checkbox" id="chkWoodWallEdge" checked> Edge
+          </label>
+        </div>
       </section>
 
       <section class="panel-section">
@@ -186,13 +293,58 @@
     </div>
   </div>
 
-  <div id="selectionPanel" class="float-panel float-panel-selection">
+  <div id="selectionPanel" class="float-panel float-panel-selection hidden">
     <div id="selectionPanelHeader" class="float-panel-header">
-      <span class="float-panel-title">Picked elements</span>
+      <span id="selectionPanelTitle" class="float-panel-title">Pick — Nodes</span>
       <button type="button" id="btnSelectionCollapse" class="btn-icon" title="Collapse">−</button>
     </div>
     <div id="selectionPanelBody" class="float-panel-body">
-      <p class="panel-hint">Pick mode: left drag = box pick (nodes + elements), click = nearest, right-click = edit menu. Ctrl+click toggles. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <section class="panel-section pick-mode-section">
+        <div class="panel-section-title">Pick target</div>
+        <div class="pick-mode-toggle" role="radiogroup" aria-label="Pick target">
+          <button type="button" id="pickModeNode" class="pick-mode-btn active" data-pick-mode="node" aria-pressed="true">Nodes</button>
+          <button type="button" id="pickModeElement" class="pick-mode-btn" data-pick-mode="element" aria-pressed="false">Elements</button>
+        </div>
+      </section>
+      <p id="pickModeHint" class="panel-hint">Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <section id="pickWrwCreateOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">New WRW (4 nodes)</div>
+        <label class="panel-row">
+          <span>Type</span>
+          <select id="pickWrwCreateModel">
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
+          </select>
+        </label>
+      </section>
+      <section id="pickWrwEditOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">Selected WRW</div>
+        <label class="panel-row">
+          <span>Type</span>
+          <select id="pickWrwEditModel">
+            <option value="1">Shear panel</option>
+            <option value="0">Brace</option>
+          </select>
+        </label>
+        <button type="button" id="btnPickWrwApplyModel" class="btn-block btn-secondary">Apply type change</button>
+      </section>
+      <section id="pickNodeSupportOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">Node support (CONS)</div>
+        <div class="pick-cons-grid">
+          <label class="panel-check"><input type="checkbox" id="pickConsTx"> TX</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsTy"> TY</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsTz"> TZ</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsRx"> RX</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsRy"> RY</label>
+          <label class="panel-check"><input type="checkbox" id="pickConsRz"> RZ</label>
+        </div>
+        <div class="pick-cons-presets">
+          <button type="button" id="btnPickConsFixed" class="btn-secondary btn-inline">Fixed</button>
+          <button type="button" id="btnPickConsPinned" class="btn-secondary btn-inline">Pinned</button>
+          <button type="button" id="btnPickConsFree" class="btn-secondary btn-inline">Free</button>
+        </div>
+        <button type="button" id="btnPickConsApply" class="btn-block btn-secondary">Apply support</button>
+      </section>
       <div id="selectionSummary" class="selection-summary">Nothing picked</div>
       <ul id="selectionList" class="selection-list"></ul>
       <button id="btnClearSelection" type="button" class="btn-block btn-secondary">Clear picked</button>
@@ -214,9 +366,19 @@
           <span class="range-val" id="optLoadArrowVal">1.0</span>
         </label>
         <label class="panel-row">
-          <span>Support gizmo</span>
-          <input type="range" id="optSupportGizmo" min="25" max="50" value="25">
+          <span>Reaction arrow</span>
+          <input type="range" id="optReactionArrow" min="0.1" max="5" step="0.1" value="1.0">
+          <span class="range-val" id="optReactionArrowVal">1.0</span>
+        </label>
+        <label class="panel-row">
+          <span>Support symbol</span>
+          <input type="range" id="optSupportGizmo" min="20" max="100" value="25">
           <span class="range-val" id="optSupportGizmoVal">25</span>
+        </label>
+        <label class="panel-row">
+          <span>Axes</span>
+          <input type="range" id="optAxesSize" min="20" max="200" value="100">
+          <span class="range-val" id="optAxesSizeVal">100</span>
         </label>
         <label class="panel-row">
           <span>Support line</span>
@@ -236,6 +398,11 @@
         <label class="panel-row">
           <span>Load line</span>
           <input type="number" id="optLoadLineWidth" min="0.5" max="3" step="0.5" value="1.5">
+          <span class="range-val">px</span>
+        </label>
+        <label class="panel-row">
+          <span>Reaction line</span>
+          <input type="number" id="optReactionLineWidth" min="0.5" max="3" step="0.5" value="2">
           <span class="range-val">px</span>
         </label>
         <label class="panel-row">
@@ -277,6 +444,16 @@
           <span>Force value</span>
           <input type="range" id="optForceLabel" min="0.1" max="2.5" step="0.1" value="1.5">
           <span class="range-val" id="optForceLabelVal">1.5</span>
+        </label>
+        <label class="panel-row">
+          <span>Section color</span>
+          <input type="color" id="optSectionSolidColor" value="#c9cdd3">
+          <span class="range-val"></span>
+        </label>
+        <label class="panel-row">
+          <span>Section alpha</span>
+          <input type="range" id="optSectionSolidOpacity" min="0.1" max="1" step="0.05" value="1.0">
+          <span class="range-val" id="optSectionSolidOpacityVal">1.0</span>
         </label>
       </section>
     </div>

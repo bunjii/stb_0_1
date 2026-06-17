@@ -97,9 +97,9 @@ CONS_FMTS = [">6", ">4", ">4", ">4", ">4", ">4", ">4"]
 CONS_NAMES = ["NODE", "TX", "TY", "TZ", "RX", "RY", "RZ"]
 CONS_UNITS = ["", "", "", "", "", "", ""]
 
-LNME_FMTS = [">6", ">10"]
-LNME_NAMES = ["LC", "NAME"]
-LNME_UNITS = ["", ""]
+LNME_FMTS = [">6", ">4", ">10"]
+LNME_NAMES = ["LC", "TYPE", "LABEL"]
+LNME_UNITS = ["", "", ""]
 
 PLOD_FMTS = [">6", ">4", ">8", ">8", ">8", ">8", ">8", ">8"]
 PLOD_NAMES = ["NODE", "LC", "PX", "PY", "PZ", "MX", "MY", "MZ"]
@@ -169,17 +169,24 @@ SECTION_HEADERS: dict[str, list[str]] = {
             "#   SRC:  0=DMAT  1=TIMBER_FLOOR  2=TIMBER_ROOF",
             "#   MAGID: SRC=0 -> DMAT ID; SRC=1/2 -> floor/roof multiplier",
             "#   RA,HMAX: optional (blank allowed)",
+            "#   HMAX: metadata only in current solver",
         ),
     ],
     "DREG": [
         "# --- DIAPHRAGM OUTER POLYGON(DREG) ---",
         header_line("DREG", [">6"] + [">6"] * 3, ["DIAP", "N1", "N2", "N3"]),
-        *_notes("#   N4,N5,...: more corner node IDs as needed"),
+        *_notes(
+            "#   N4,N5,...: more corner node IDs as needed",
+            "#   Optional when DMEM is supplied; derived from DMEM if omitted",
+        ),
     ],
     "DOPN": [
         "# --- DIAPHRAGM OPENING(DOPN) ---",
         header_line("DOPN", [">6"] + [">6"] * 3, ["DIAP", "N1", "N2", "N3"]),
-        *_notes("#   N4,N5,...: opening polygon node IDs"),
+        *_notes(
+            "#   N4,N5,...: opening polygon node IDs",
+            "#   Parsed only; openings are not applied in current solver",
+        ),
     ],
     "DMEM": [
         "# --- DIAPHRAGM MEMBRANE ELEMENT(DMEM) ---",
@@ -193,7 +200,7 @@ SECTION_HEADERS: dict[str, list[str]] = {
             "#   TRGT: 0=AUTO  1=ELEM  2=NODE",
             "#   ID: target element/node ID (blank when TRGT=0)",
             "#   CONN: 0=RIGID in-plane  1=OPEN/disconnected",
-            "#   SPACING: optional metadata (blank allowed)",
+            "#   SPACING: optional metadata (blank allowed; not used by current solver)",
         ),
     ],
     "DLOD": [
@@ -233,6 +240,11 @@ SECTION_HEADERS: dict[str, list[str]] = {
     "LNME": [
         "# --- LOAD NAME(LNME) ---",
         header_line("LNME", LNME_FMTS, LNME_NAMES),
+        *_notes(
+            "#   TYPE: 1=DL  2=LL  3=LL(E)  4=S  5=W  6=E  7=CUSTOM",
+            "#   LABEL: optional for TYPE 1-6; required for TYPE 7",
+            "#   Wi for Ai distribution uses TYPE 1 + TYPE 3",
+        ),
     ],
     "LCMB": [
         "# --- LOAD COMBINATION(LCMB) ---",
@@ -293,7 +305,7 @@ def example_line(key: str) -> str:
         "WWLL": record_line("WWLL", WWLL_FMTS, [1, "W1_X", 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 11, 12, 22, 21, 10, 1]),
         "EJNT": record_line("EJNT", EJNT_FMTS, [0, 0.0, "", "", 0.0]),
         "CONS": record_line("CONS", CONS_FMTS, [0, 1, 1, 1, 1, 1, 1]),
-        "LNME": record_line("LNME", LNME_FMTS, [0, "DL"]),
+        "LNME": record_line("LNME", [">6", ">4"], [1, 1]),
         "LCMB": record_line("LCMB", [">6", ">10", ">6", ">6", ">6", ">6"], [2, "EX(+)", 2.0, 0, 1.0, 1]),
         "PLOD": record_line("PLOD", PLOD_FMTS, [1, 0, 0.0, 0.0, -5.0, 0.0, 0.0, 0.0]),
         "ELOD": record_line("ELOD", ELOD_FMTS, [0, 0, 0, 0.0, 0.0, -10.0, 0.0, 0.0, -10.0]),
@@ -378,6 +390,15 @@ def fmts_for_record(tag: str, values: list) -> list[str] | None:
         if len(values) < 4 or (len(values) - 2) % 2:
             return None
         return [">6", ">10"] + [">6"] * (len(values) - 2)
+    if tag == "LNME":
+        if len(values) < 2:
+            return None
+        fmts = [">6", ">4"]
+        if len(values) >= 3 and values[2] != "":
+            fmts.append(">10")
+        if len(fmts) != len(values):
+            return None
+        return fmts
     if tag == "SECT":
         if len(values) < 4 or len(values) > len(SECT_FMTS):
             return None
@@ -478,7 +499,7 @@ def ensure_section_blank_lines(lines: list[str]) -> bool:
             nxt_key = record_key_from_line(lines[j])
             if SECTION_TITLE_RE.match(nxt) or (nxt_key is not None and nxt_key != key):
                 if lines[last_data + 1].strip():
-                    lines.insert(last_data + 1, "\n")
+                    lines.insert(last_data + 1, "")
                     changed = True
                     end += 1
         i = end
@@ -494,6 +515,25 @@ def reformat_record_line(line: str) -> str:
     if fmts is None:
         return line.rstrip("\n")
     return record_line(tag, fmts, values)
+
+
+def prepare_dat_text_for_write(text: str) -> str:
+    """Normalize .dat text to LF line endings for safe writes on all platforms."""
+
+    if text is None:
+        return "\n"
+    lines = text.splitlines()
+    if not lines:
+        return "\n"
+    return "\n".join(lines) + "\n"
+
+
+def write_dat_text(path: str, text: str) -> None:
+    """Write a .dat file using LF endings (avoids Windows text-mode \\r\\n expansion)."""
+
+    normalized = prepare_dat_text_for_write(text)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(normalized)
 
 
 def new_model_template() -> str:

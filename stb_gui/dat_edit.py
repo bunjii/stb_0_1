@@ -457,19 +457,607 @@ def apply_ejnt_lines_text(
     ]
 
 
+def _node_ids_in_text(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "NODE":
+            out.add(_parse_int(rec[1][1], "node id"))
+    return out
+
+
+def _diap_ids_in_text(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "DIAP":
+            out.add(_parse_int(rec[1][1], "DIAP id"))
+    return out
+
+
+def _existing_dmem_ids(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "DMEM":
+            out.add(_parse_int(rec[1][1], "DMEM id"))
+    return out
+
+
+def _next_dmem_id(lines: list[str]) -> int:
+    ids = _existing_dmem_ids(lines)
+    if not ids:
+        return 1001
+    return max(ids) + 1
+
+
+def _format_dmem_line(dmem_id: int, diap_id: int, n1: int, n2: int, n3: int) -> str:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from dat_format import DMEM_FMTS, record_line
+
+    return record_line("DMEM", DMEM_FMTS, [dmem_id, diap_id, n1, n2, n3])
+
+
+def _insert_dmem_lines(lines: list[str], new_data_lines: list[str]) -> list[str]:
+    from stb_gui.dat_format_headers import SECTION_HEADERS
+
+    out = list(lines)
+    last_dmem = -1
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] == "DMEM":
+            last_dmem = idx
+    if last_dmem >= 0:
+        out[last_dmem + 1:last_dmem + 1] = new_data_lines
+        return out
+
+    insert_at = len(out)
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] in ("DCON", "DLOD", "WWLL", "EJNT", "CONS"):
+            insert_at = idx
+            break
+
+    block = list(SECTION_HEADERS["DMEM"])
+    if insert_at < len(out) and insert_at > 0 and out[insert_at - 1].strip():
+        block = [""] + block
+    block.extend(new_data_lines)
+    out[insert_at:insert_at] = block
+    return out
+
+
+def create_dmem(
+    text: str,
+    diap_id: int,
+    node_ids: list[int],
+    dmem_id: int | None = None,
+) -> tuple[str, list[str]]:
+    if len(node_ids) != 3:
+        raise ValueError("create_dmem requires exactly 3 node ids")
+    nodes = [int(n) for n in node_ids]
+    if len(set(nodes)) != 3:
+        raise ValueError("DMEM nodes must be distinct")
+
+    lines = text.splitlines()
+    known_nodes = _node_ids_in_text(lines)
+    for nid in nodes:
+        if nid not in known_nodes:
+            raise ValueError("Unknown node id: {0}".format(nid))
+
+    diap = int(diap_id)
+    known_diaps = _diap_ids_in_text(lines)
+    if diap not in known_diaps:
+        raise ValueError("Unknown DIAP id: {0}".format(diap))
+
+    new_id = int(dmem_id) if dmem_id is not None else _next_dmem_id(lines)
+    if new_id in _existing_dmem_ids(lines):
+        raise ValueError("DMEM id {0} already exists".format(new_id))
+
+    n1, n2, n3 = nodes
+    new_line = _format_dmem_line(new_id, diap, n1, n2, n3)
+    out = _insert_dmem_lines(lines, [new_line])
+    return _ensure_trailing_newline("\n".join(out)), [
+        "Created DMEM {0} for DIAP {1} (nodes {2}, {3}, {4}).".format(
+            new_id, diap, n1, n2, n3
+        )
+    ]
+
+
+def _node_coords_map(lines: list[str]) -> dict[int, tuple[float, float, float]]:
+    out: dict[int, tuple[float, float, float]] = {}
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "NODE":
+            parts = rec[1]
+            nid = _parse_int(parts[1], "node id")
+            out[nid] = (float(parts[2]), float(parts[3]), float(parts[4]))
+    return out
+
+
+def _order_wwll_corners(
+    coords: dict[int, tuple[float, float, float]], node_ids: list[int]
+) -> tuple[int, int, int, int, int]:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from wood_wall import order_wwll_corner_node_ids
+
+    for nid in node_ids:
+        if int(nid) not in coords:
+            raise ValueError("Unknown node id: {0}".format(nid))
+    return order_wwll_corner_node_ids(node_ids, coords)
+
+
+def _existing_wwll_ids(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "WWLL":
+            out.add(_parse_int(rec[1][1], "WWLL id"))
+    return out
+
+
+def _next_wwll_id(lines: list[str]) -> int:
+    ids = _existing_wwll_ids(lines)
+    if not ids:
+        return 1
+    return max(ids) + 1
+
+
+def _format_wwll_line(
+    wwll_id: int,
+    name: str,
+    model: int,
+    multiplier: float,
+    direction: int,
+    reference_drift: float,
+    n1: int,
+    n2: int,
+    n3: int,
+    n4: int,
+    diap_id: int | None,
+    layo: int,
+) -> str:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from dat_format import WWLL_FMTS, record_line
+
+    values = [
+        wwll_id,
+        name,
+        int(model),
+        float(multiplier),
+        "",
+        "",
+        int(direction),
+        float(reference_drift),
+        n1,
+        n2,
+        n3,
+        n4,
+        "" if diap_id is None else int(diap_id),
+        int(layo),
+    ]
+    return record_line("WWLL", WWLL_FMTS, values)
+
+
+def _insert_wwll_lines(lines: list[str], new_data_lines: list[str]) -> list[str]:
+    from stb_gui.dat_format_headers import SECTION_HEADERS
+
+    out = list(lines)
+    last_wwll = -1
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] == "WWLL":
+            last_wwll = idx
+    if last_wwll >= 0:
+        out[last_wwll + 1:last_wwll + 1] = new_data_lines
+        return out
+
+    insert_at = len(out)
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] in ("EJNT", "CONS", "LNME", "LCMB", "PLOD"):
+            insert_at = idx
+            break
+
+    block = list(SECTION_HEADERS["WWLL"])
+    if insert_at < len(out) and insert_at > 0 and out[insert_at - 1].strip():
+        block = [""] + block
+    block.extend(new_data_lines)
+    out[insert_at:insert_at] = block
+    return out
+
+
+def create_wwll(
+    text: str,
+    node_ids: list[int],
+    multiplier: float = 2.0,
+    model: int = 1,
+    diap_id: int | None = None,
+    layo: int = 1,
+    reference_drift: float = 1.0 / 120.0,
+    wwll_id: int | None = None,
+    name: str | None = None,
+) -> tuple[str, list[str]]:
+    m = float(multiplier)
+    if m <= 0.0:
+        raise ValueError("Wall multiplier must be positive")
+    if int(model) not in (0, 1):
+        raise ValueError("WWLL MODEL must be 0 (brace) or 1 (panel)")
+    if int(layo) not in (0, 1):
+        raise ValueError("WWLL LAYO must be 0 (single) or 1 (X-brace)")
+
+    lines = text.splitlines()
+    coords = _node_coords_map(lines)
+    n1, n2, n3, n4, direction = _order_wwll_corners(coords, node_ids)
+
+    if diap_id is not None:
+        diap = int(diap_id)
+        if diap not in _diap_ids_in_text(lines):
+            raise ValueError("Unknown DIAP id: {0}".format(diap))
+    else:
+        diap = None
+
+    new_id = int(wwll_id) if wwll_id is not None else _next_wwll_id(lines)
+    if new_id in _existing_wwll_ids(lines):
+        raise ValueError("WWLL id {0} already exists".format(new_id))
+
+    wall_name = name if name else "W{0}".format(new_id)
+    new_line = _format_wwll_line(
+        new_id,
+        wall_name,
+        int(model),
+        m,
+        direction,
+        float(reference_drift),
+        n1,
+        n2,
+        n3,
+        n4,
+        diap,
+        int(layo),
+    )
+    out = _insert_wwll_lines(lines, [new_line])
+    dir_label = "X" if direction == 0 else "Y"
+    return _ensure_trailing_newline("\n".join(out)), [
+        "Created WRW {0} ({1}) M={2} DIR={3} (nodes {4}, {5}, {6}, {7}).".format(
+            new_id, wall_name, m, dir_label, n1, n2, n3, n4
+        )
+    ]
+
+
+def delete_dmem(text: str, dmem_ids: list[int]) -> tuple[str, list[str]]:
+    targets = {int(v) for v in dmem_ids}
+    if not targets:
+        raise ValueError("dmem_ids is empty")
+    out: list[str] = []
+    removed = 0
+    for line in text.splitlines():
+        rec = _split_record(line)
+        if rec and rec[0] == "DMEM":
+            rec_id = _parse_int(rec[1][1], "DMEM id")
+            if rec_id in targets:
+                removed += 1
+                continue
+        out.append(line)
+    if removed == 0:
+        raise ValueError("No matching DMEM records found to delete")
+    warnings = [
+        "Deleted {0} DMEM record(s) for id(s) {1}.".format(removed, sorted(targets))
+    ]
+    return _ensure_trailing_newline("\n".join(out)), warnings
+
+
+def delete_wwll(text: str, wwll_ids: list[int]) -> tuple[str, list[str]]:
+    targets = {int(v) for v in wwll_ids}
+    if not targets:
+        raise ValueError("wwll_ids is empty")
+    out: list[str] = []
+    removed = 0
+    for line in text.splitlines():
+        rec = _split_record(line)
+        if rec and rec[0] == "WWLL":
+            rec_id = _parse_int(rec[1][1], "WWLL id")
+            if rec_id in targets:
+                removed += 1
+                continue
+        out.append(line)
+    if removed == 0:
+        raise ValueError("No matching WWLL records found to delete")
+    warnings = [
+        "Deleted {0} WWLL record(s) for id(s) {1}.".format(removed, sorted(targets))
+    ]
+    return _ensure_trailing_newline("\n".join(out)), warnings
+
+
+def set_wwll_multiplier(text: str, wwll_ids: list[int], multiplier: float) -> tuple[str, list[str]]:
+    targets = {int(v) for v in wwll_ids}
+    m = float(multiplier)
+    if not targets:
+        raise ValueError("wwll_ids is empty")
+    if m <= 0.0:
+        raise ValueError("Wall multiplier must be positive")
+
+    out: list[str] = []
+    changed = 0
+    for line in text.splitlines():
+        rec = _split_record(line)
+        if rec and rec[0] == "WWLL":
+            parts = rec[1]
+            rec_id = _parse_int(parts[1], "WWLL id")
+            if rec_id in targets:
+                parts[4] = "{0:.6g}".format(m)
+                line = _join_record(parts)
+                changed += 1
+        out.append(line)
+    if changed == 0:
+        raise ValueError("No matching WWLL records found")
+    return _ensure_trailing_newline("\n".join(out)), [
+        "Changed wall multiplier to {0} for {1} WWLL record(s).".format(m, changed)
+    ]
+
+
+def set_wwll_model(text: str, wwll_ids: list[int], model: int) -> tuple[str, list[str]]:
+    targets = {int(v) for v in wwll_ids}
+    mdl = int(model)
+    if not targets:
+        raise ValueError("wwll_ids is empty")
+    if mdl not in (0, 1):
+        raise ValueError("WWLL MODEL must be 0 (brace) or 1 (panel)")
+
+    out: list[str] = []
+    changed = 0
+    for line in text.splitlines():
+        rec = _split_record(line)
+        if rec and rec[0] == "WWLL":
+            parts = rec[1]
+            rec_id = _parse_int(parts[1], "WWLL id")
+            if rec_id in targets:
+                parts[3] = str(mdl)
+                if mdl == 0 and (len(parts) < 15 or not parts[14].strip()):
+                    while len(parts) < 15:
+                        parts.append("")
+                    parts[14] = "1"
+                line = _join_record(parts)
+                changed += 1
+        out.append(line)
+    if changed == 0:
+        raise ValueError("No matching WWLL records found")
+    label = "brace" if mdl == 0 else "panel"
+    return _ensure_trailing_newline("\n".join(out)), [
+        "Changed wall model to {0} for {1} WWLL record(s).".format(label, changed)
+    ]
+
+
+def _diap_src_is_timber(src_code: int) -> bool:
+    return src_code in (1, 2)
+
+
+def set_diap_timber_multiplier(
+    text: str, diap_ids: list[int], multiplier: float
+) -> tuple[str, list[str]]:
+    targets = {int(v) for v in diap_ids}
+    m = float(multiplier)
+    if not targets:
+        raise ValueError("diap_ids is empty")
+    if m <= 0.0:
+        raise ValueError("Floor/roof multiplier must be positive")
+
+    out: list[str] = []
+    changed = 0
+    skipped: list[int] = []
+    for line in text.splitlines():
+        rec = _split_record(line)
+        if rec and rec[0] == "DIAP":
+            parts = rec[1]
+            if len(parts) < 6:
+                out.append(line)
+                continue
+            rec_id = _parse_int(parts[1], "DIAP id")
+            if rec_id in targets:
+                src = _parse_int(parts[4], "DIAP SRC")
+                if not _diap_src_is_timber(src):
+                    skipped.append(rec_id)
+                    out.append(line)
+                    continue
+                parts[5] = "{0:.6g}".format(m)
+                line = _join_record(parts)
+                changed += 1
+        out.append(line)
+    if changed == 0:
+        if skipped:
+            raise ValueError(
+                "DIAP id(s) {0} are not timber floor/roof (SRC=1/2)".format(sorted(skipped))
+            )
+        raise ValueError("No matching DIAP records found")
+    warnings = [
+        "Changed floor/roof multiplier to {0} for {1} DIAP record(s).".format(m, changed)
+    ]
+    if skipped:
+        warnings.append(
+            "Skipped DIAP id(s) {0}: not timber floor/roof (SRC=1/2).".format(sorted(skipped))
+        )
+    return _ensure_trailing_newline("\n".join(out)), warnings
+
+
+CONS_DOF_LABELS = ("TX", "TY", "TZ", "RX", "RY", "RZ")
+
+
+def _format_cons_line(node_id: int, fixed: list[bool]) -> str:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from dat_format import CONS_FMTS, record_line
+
+    values = [int(node_id)] + [int(bool(v)) for v in fixed]
+    return record_line("CONS", CONS_FMTS, values)
+
+
+def _cons_insert_index(lines: list[str]) -> int:
+    last_cons = -1
+    last_node = -1
+    for idx, line in enumerate(lines):
+        rec = _split_record(line)
+        if not rec:
+            continue
+        if rec[0] == "NODE":
+            last_node = idx
+        elif rec[0] == "CONS":
+            last_cons = idx
+    if last_cons >= 0:
+        return last_cons + 1
+    if last_node >= 0:
+        return last_node + 1
+    return len(lines)
+
+
+def _parse_cons_fixed(values: list[Any]) -> list[bool]:
+    if not isinstance(values, list) or len(values) != 6:
+        raise ValueError("fixed must be a list of 6 booleans (TX..RZ)")
+    out: list[bool] = []
+    for i, raw in enumerate(values):
+        if isinstance(raw, bool):
+            out.append(raw)
+            continue
+        if isinstance(raw, (int, float)) and raw in (0, 1):
+            out.append(bool(int(raw)))
+            continue
+        raise ValueError("Invalid CONS {0} value: {1!r}".format(CONS_DOF_LABELS[i], raw))
+    return out
+
+
+def set_cons_for_nodes(
+    text: str,
+    node_ids: list[int],
+    fixed: list[Any],
+) -> tuple[str, list[str]]:
+    targets = {int(n) for n in node_ids}
+    if not targets:
+        raise ValueError("node_ids is empty")
+
+    flags = _parse_cons_fixed(fixed)
+    lines = text.splitlines()
+    known_nodes = _node_ids_in_text(lines)
+    for nid in targets:
+        if nid not in known_nodes:
+            raise ValueError("Unknown node id: {0}".format(nid))
+
+    existing: dict[int, int] = {}
+    for idx, line in enumerate(lines):
+        rec = _split_record(line)
+        if rec and rec[0] == "CONS":
+            nid = _parse_int(rec[1][1], "node id")
+            existing[nid] = idx
+
+    out = list(lines)
+    removed = 0
+    updated = 0
+    inserted: list[str] = []
+
+    if not any(flags):
+        kept: list[str] = []
+        for line in out:
+            rec = _split_record(line)
+            if rec and rec[0] == "CONS":
+                nid = _parse_int(rec[1][1], "node id")
+                if nid in targets:
+                    removed += 1
+                    continue
+            kept.append(line)
+        out = kept
+    else:
+        new_line = None
+        for nid in sorted(targets):
+            line = _format_cons_line(nid, flags)
+            if nid in existing:
+                out[existing[nid]] = line
+                updated += 1
+            else:
+                inserted.append(line)
+
+        if inserted:
+            insert_at = _cons_insert_index(out)
+            out[insert_at:insert_at] = inserted
+
+    if removed == 0 and updated == 0 and not inserted:
+        raise ValueError("No CONS changes to apply")
+
+    active = [CONS_DOF_LABELS[i] for i, v in enumerate(flags) if v]
+    if not any(flags):
+        summary = "Removed CONS for {0} node(s).".format(removed)
+    else:
+        dof_text = ", ".join(active) if active else "none"
+        parts: list[str] = []
+        if updated:
+            parts.append("updated {0}".format(updated))
+        if inserted:
+            parts.append("added {0}".format(len(inserted)))
+        summary = "Set CONS ({0}) for {1} node(s): {2}.".format(
+            dof_text, len(targets), ", ".join(parts)
+        )
+    return _ensure_trailing_newline("\n".join(out)), [summary]
+
+
 def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]]:
     op = action.get("action")
     element_ids = action.get("element_ids") or []
     node_ids = action.get("node_ids") or []
+    dmem_ids = action.get("dmem_ids") or []
+    wwll_ids = action.get("wwll_ids") or []
+    diap_ids = action.get("diap_ids") or []
     if not isinstance(element_ids, list):
         raise ValueError("element_ids must be a list")
     if not isinstance(node_ids, list):
         raise ValueError("node_ids must be a list")
+    if not isinstance(dmem_ids, list):
+        raise ValueError("dmem_ids must be a list")
+    if not isinstance(wwll_ids, list):
+        raise ValueError("wwll_ids must be a list")
+    if not isinstance(diap_ids, list):
+        raise ValueError("diap_ids must be a list")
 
     if op == "delete":
         return delete_elements(text, element_ids)
     if op == "delete_nodes":
         return delete_nodes(text, node_ids)
+    if op == "create_dmem":
+        return create_dmem(text, action["diap_id"], node_ids, action.get("dmem_id"))
+    if op == "create_wwll":
+        diap_raw = action.get("diap_id")
+        return create_wwll(
+            text,
+            node_ids,
+            multiplier=action["multiplier"],
+            model=action.get("model", 1),
+            diap_id=None if diap_raw in (None, "") else int(diap_raw),
+            layo=action.get("layo", 1),
+        )
+    if op == "delete_dmem":
+        return delete_dmem(text, dmem_ids)
+    if op == "delete_wwll":
+        return delete_wwll(text, wwll_ids)
+    if op == "set_wwll_multiplier":
+        return set_wwll_multiplier(text, wwll_ids, action["multiplier"])
+    if op == "set_wwll_model":
+        return set_wwll_model(text, wwll_ids, action["model"])
+    if op == "set_diap_timber_multiplier":
+        return set_diap_timber_multiplier(text, diap_ids, action["multiplier"])
     if op == "set_section":
         return set_element_section(text, element_ids, action["section_id"])
     if op == "set_material":
@@ -488,6 +1076,8 @@ def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]
         if lines_text is None:
             raise ValueError("lines_text is required")
         return apply_ejnt_lines_text(text, element_ids, str(lines_text))
+    if op == "set_cons":
+        return set_cons_for_nodes(text, node_ids, action.get("fixed") or [])
     raise ValueError("Unknown action: {0!r}".format(op))
 
 
@@ -510,3 +1100,4 @@ def _ensure_trailing_newline(text: str) -> str:
     if not text.endswith("\n"):
         return text + "\n"
     return text
+

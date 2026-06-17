@@ -59,5 +59,5 @@ Full specification: **[docs/input_format.md](../docs/input_format.md)**
 Result files use the same text format as the GUI results window, for example:
 
 - `NDSP` — nodal displacements
-- `REAC` — reaction forces
+- `REAC` — support reactions (Tx, Ty, Tz in kN; Rx, Ry, Rz in kNm)
 - `EFRC` — element end forces

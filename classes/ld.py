@@ -3,28 +3,40 @@ import math
 
 import numpy as np
 
+from load_case_types import (
+    LC_TYPE_CUSTOM,
+    canonical_name,
+    parse_lnme_fields,
+)
+
+
 class Lcase:
-    def __init__(self, _lc, _lname):
-        self.lc = _lc
-        self.lname = _lname
+    def __init__(self, _lc, _load_type, _label=""):
+        self.lc = int(_lc)
+        self.load_type = int(_load_type)
+        self.label = str(_label or "").strip()
+
+    @property
+    def lname(self):
+        return canonical_name(self.load_type, self.label)
 
     def OutputLnameInfo(self):
+        from dat_format import record_line
 
-        props = ["LNME",
-                 "{0: >4}".format(self.lc), 
-                 "{0: >8}".format(self.lname), 
-        ]
-
-        lns = ', '.join(props) + "\n"
-
-        return lns
+        values: list[int | str] = [self.lc, self.load_type]
+        fmts = [">6", ">4"]
+        if self.load_type == LC_TYPE_CUSTOM or self.label:
+            values.append(self.label)
+            fmts.append(">10")
+        return record_line("LNME", fmts, values) + "\n"
 
 class Lcmb:
-    def __init__(self, _lc, _name, _fcs, _lcs):
-        self.lc  = _lc
-        self.name = _name
-        self.fcs = _fcs # factors
-        self.lcs = _lcs # lcases
+    def __init__(self, _lc, _name, _fcs, _lcs, _duration="LONG_TERM"):
+        self.lc = int(_lc)
+        self.name = str(_name)
+        self.fcs = [float(f) for f in _fcs] # factors
+        self.lcs = [int(lc) for lc in _lcs] # lcases
+        self.duration = str(_duration or "LONG_TERM").strip().upper()
 
     def OutputLcmbInfo(self):
 

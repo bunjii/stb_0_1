@@ -1,8 +1,8 @@
 import numpy as np
 import math
+from numpy.typing import NDArray
 
 import common
-
 from nd   import Nd
 from mat  import Mat
 from sec  import Sec
@@ -16,7 +16,7 @@ class Elm1D:
                  _n1, 
                  _sec, 
                  _theta,
-                 _bucklen: float = None):
+                 _bucklen: float | None = None):
         
         self.id      = _id
         self.n0      = _n0 # node class instance
@@ -24,10 +24,12 @@ class Elm1D:
         self.sec     = _sec
         self.theta   = _theta # in degree
         self.jnt     =  None
+        self.auto_generated = False
+        self.generated_from: str | None = None
+        self.generated_from_id: int | None = None
         
         # self.vecz    =  Elm1D.CalcVecZ(_vecz)
-        self.bucklen = _bucklen
-
+        self.bucklen: float | None = _bucklen
         self.pln     =  None
         self.len     =  self.CalcLen()
         self.weight  =  self.CalcWeight()
@@ -125,8 +127,7 @@ class Elm1D:
         return beta
     
     @staticmethod
-    def CalcAngle(_v1: np.array, _v2: np.array):
-        
+    def CalcAngle(_v1: NDArray[np.float64], _v2: NDArray[np.float64]):        
         dp = np.dot(_v1, _v2) / ( np.linalg.norm(_v1) * np.linalg.norm(_v2)) 
         a  = np.arccos(dp)                            # in radian
 
@@ -253,6 +254,9 @@ class Elm1D:
     def ElmStiffMX(self):
 
         esm  = np.zeros((12, 12), dtype = np.float64)
+        jnt = self.jnt
+        if jnt is None:
+            raise RuntimeError("Element {0} has no joint definition".format(self.id))
 
         L    = self.len                     #         # m
         EA   = self.sec.mat.E * self.sec.A  #         # N/mm2 * mm2 = N 
@@ -266,11 +270,10 @@ class Elm1D:
         PHIz = 12.0 * self.sec.mat.E * self.sec.Iy / (self.sec.mat.G * self.sec.Asz * L ** 2) #* 1e-6 
 
         # according to Fujii, Matsumoto Excel-Fem (2021)
-        lyi = self.jnt.Ryi / EIy # lambda_yi
-        lzi = self.jnt.Rzi / EIz # lambda_zi
-        lyj = self.jnt.Ryj / EIy # lambda_yj
-        lzj = self.jnt.Rzj / EIz # lambda_zj
-
+        lyi = jnt.Ryi / EIy # lambda_yi
+        lzi = jnt.Rzi / EIz # lambda_zi
+        lyj = jnt.Ryj / EIy # lambda_yj
+        lzj = jnt.Rzj / EIz # lambda_zj
         lz1 = 1.0 + lzi + lzj
         ly1 = 1.0 + lyi + lyj
 
@@ -357,6 +360,9 @@ class Elm1D:
     def SS_ElmStiffMX(self):
 
         # based on Aoyama and Takemura
+        jnt = self.jnt
+        if jnt is None:
+            raise RuntimeError("Element {0} has no joint definition".format(self.id))
 
         E    = self.sec.mat.E
         G    = self.sec.mat.G
@@ -384,20 +390,19 @@ class Elm1D:
         H    = np.zeros(( 6,  6), dtype = np.float64) # equilibrium matrix
         Fm   = np.zeros(( 6,  6), dtype = np.float64) 
 
-        Ci[0, 0] = self.jnt.Txi
-        Ci[1, 1] = self.jnt.Tyi
-        Ci[2, 2] = self.jnt.Tzi
-        Ci[3, 3] = self.jnt.Rxi
-        Ci[4, 4] = self.jnt.Ryi
-        Ci[5, 5] = self.jnt.Rzi 
+        Ci[0, 0] = jnt.Txi
+        Ci[1, 1] = jnt.Tyi
+        Ci[2, 2] = jnt.Tzi
+        Ci[3, 3] = jnt.Rxi
+        Ci[4, 4] = jnt.Ryi
+        Ci[5, 5] = jnt.Rzi 
 
-        Cj[0, 0] = self.jnt.Txj
-        Cj[1, 1] = self.jnt.Tyj
-        Cj[2, 2] = self.jnt.Tzj
-        Cj[3, 3] = self.jnt.Rxj
-        Cj[4, 4] = self.jnt.Ryj
-        Cj[5, 5] = self.jnt.Rzj
-
+        Cj[0, 0] = jnt.Txj
+        Cj[1, 1] = jnt.Tyj
+        Cj[2, 2] = jnt.Tzj
+        Cj[3, 3] = jnt.Rxj
+        Cj[4, 4] = jnt.Ryj
+        Cj[5, 5] = jnt.Rzj
         H[ 0, 0] =  1
         H[ 1, 1] =  1
         H[ 2, 2] =  1
@@ -457,6 +462,11 @@ class Elm1D:
         e    = self
         clc  = _mdl.lcs.index(_lc)
         elds = _mdl.elds
+        tm = e.tm
+        pln = e.pln
+        forces = e.forces
+        if tm is None or pln is None or forces is None:
+            return [[], []]
 
         els = list(filter(lambda el: (el.clc == clc) and (el.eid == e.id), elds))
         
@@ -465,15 +475,14 @@ class Elm1D:
         for el in els: 
 
             el_lds = np.array(el.lds).reshape(6, 1)
-            if el.isGlobal == True: el_lds = e.tm[0:6, 0:6] @ el_lds
+            if el.isGlobal == True: el_lds = tm[0:6, 0:6] @ el_lds
             for i in range(6): lds[i] += el_lds[i, 0]
         
-        if e.glds is not None: lds += e.glds[:, self.clc]
+        if e.glds is not None: lds += e.glds[:, clc]
 
-        if e.alds is not None: lds += e.alds[:, self.clc]
+        if e.alds is not None: lds += e.alds[:, clc]
 
-        vz = e.pln.vz.v # drawing direction of the element
-
+        vz = pln.vz.v # drawing direction of the element
         if e.isVxZ: vz = -1 * vz
         
         p0 = np.array([e.n0.x, e.n0.y, e.n0.z])
@@ -482,10 +491,9 @@ class Elm1D:
         wzi = lds[2]
         wzj = lds[5]
         
-        qzi = e.forces[2][self.clc]
-        myi = e.forces[4][self.clc]
-        myj = e.forces[10][self.clc]
-
+        qzi = forces[2][clc]
+        myi = forces[4][clc]
+        myj = forces[10][clc]
         w_xc= wzi + (wzj - wzi) * 0.5
         m_xc= myi + qzi * 0.5 * e.len + 1.0 / 6.0 * (wzi + 2.0 * w_xc) * (0.5*e.len)**2 
         mp = 0.5 * p0 + 0.5 * p1 - (disp_fac * m_xc) * vz

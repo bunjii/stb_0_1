@@ -18,7 +18,7 @@ from stb_engine.errors import StbParseError, StbSolveError
 def read_input_file(path):
     """Read an input file and return a list of text lines."""
 
-    f = open(path, "r")
+    f = open(path, "r", encoding="utf-8")
     lines = f.read().splitlines()
     f.close()
     return lines

@@ -91,7 +91,7 @@ def render_confirmation_draft_markdown(
     practice = build_practice_summary(mdl, project)
     wood = build_wood_check_summary(mdl, project) if project.design_checks.wood.enabled else None
     analysis = _analysis_summary(mdl, analysis_text)
-    warnings = _collect_warnings_from_summaries(practice, wood, project)
+    warnings = _collect_warnings_from_summaries(practice, wood, project, mdl=mdl)
 
     lines = []
     lines.append("# " + _report_title(project))
@@ -183,7 +183,10 @@ def render_confirmation_draft_markdown(
     ))
     lines.append("")
 
-    lines.append("## 4. 解析結果サマリ")
+    lines.extend(_render_load_condition_section(mdl, project))
+    lines.append("")
+
+    lines.append("## 5. 解析結果サマリ")
     lines.append("")
     lines.extend(_table([
         ("最大節点変位 m", _fmt(analysis["max_displacement"])),
@@ -195,7 +198,7 @@ def render_confirmation_draft_markdown(
     ]))
     lines.append("")
 
-    lines.append("## 5. 重心・剛心・偏心率")
+    lines.append("## 6. 重心・剛心・偏心率")
     lines.append("")
     if practice.center_of_mass is None:
         lines.append("- 重心: 算定不可")
@@ -235,7 +238,7 @@ def render_confirmation_draft_markdown(
     ))
     lines.append("")
 
-    lines.append("## 6. 木造梁・柱・筋かいの基本検定")
+    lines.append("## 7. 木造梁・柱・筋かいの基本検定")
     lines.append("")
     if wood is None:
         lines.append("木造検定は project.design_checks.wood.enabled が false のため未実施です。")
@@ -316,7 +319,7 @@ def render_confirmation_draft_markdown(
         ))
     lines.append("")
 
-    lines.append("## 7. 照合メモ")
+    lines.append("## 8. 照合メモ")
     lines.append("")
     lines.append("手計算・既存表計算との照合では、次の値を優先して確認してください。")
     lines.append("")
@@ -385,11 +388,12 @@ def _report_title(project):
 def _collect_warnings(mdl, project):
     practice = build_practice_summary(mdl, project)
     wood = build_wood_check_summary(mdl, project) if project.design_checks.wood.enabled else None
-    return _collect_warnings_from_summaries(practice, wood, project)
+    return _collect_warnings_from_summaries(practice, wood, project, mdl=mdl)
 
 
-def _collect_warnings_from_summaries(practice, wood, project):
-    warnings = list(practice.warnings)
+def _collect_warnings_from_summaries(practice, wood, project, mdl=None):
+    warnings = list(getattr(mdl, "input_warnings", []) or []) if mdl is not None else []
+    warnings.extend(practice.warnings)
     if wood is not None:
         warnings.extend(wood.warnings)
     if project.report.mode != "practice":
@@ -426,6 +430,37 @@ def _max_reaction(mdl):
         for i in range(reacts.shape[0]):
             values.append(math.sqrt(float(reacts[i, 0]) ** 2 + float(reacts[i, 1]) ** 2 + float(reacts[i, 2]) ** 2))
     return max(values + [0.0])
+
+
+def _render_load_condition_section(mdl, project: ProjectDefinition):
+    seismic = project.load_conditions.seismic
+    try:
+        from stb_project import resolve_seismic_c0_z
+        resolve_seismic_c0_z(seismic)
+    except ValueError:
+        return [
+            "## 4. 荷重条件",
+            "",
+            "- 地震力 Ai 分布: project.load_conditions.seismic が未設定のため省略",
+        ]
+
+    from stb_loads import compute_seismic_distribution
+    from stb_loads.format import render_seismic_markdown
+
+    try:
+        result = compute_seismic_distribution(mdl, project)
+    except ValueError as ex:
+        return [
+            "## 4. 荷重条件",
+            "",
+            "- 地震力 Ai 分布: " + str(ex),
+        ]
+
+    lines = ["## 4. 荷重条件", ""]
+    report_body = render_seismic_markdown(result, project).splitlines()
+    for line in report_body[2:]:
+        lines.append(line)
+    return lines
 
 
 def _max_element_force(mdl):

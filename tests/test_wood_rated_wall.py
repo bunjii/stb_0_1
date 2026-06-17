@@ -9,6 +9,8 @@ if _STB_ROOT not in sys.path:
 if _CLASSES_DIR not in sys.path:
     sys.path.insert(0, _CLASSES_DIR)
 
+from classes.nd import Nd
+from classes.wood_wall import order_wwll_corner_node_ids, wwll_length_height_from_nodes
 from stb_checks import build_wood_check_summary
 from stb_engine import parse_input, run_from_lines
 from stb_engine.errors import StbParseError
@@ -56,6 +58,89 @@ class TestWoodRatedWall(unittest.TestCase):
         self.assertEqual(len(w.generated_shear_panel_ids), 1)
         self.assertEqual(len(mdl.wshears), 1)
         self.assertTrue(mdl.wshears[0].k > 0.0)
+
+    def test_order_wwll_corner_node_ids_ccw_rectangle(self):
+        by_id = {n.id: n for n in [
+            Nd(1, 0.0, 0.0, 0.0),
+            Nd(2, 1.82, 0.0, 0.0),
+            Nd(3, 1.82, 0.0, 2.73),
+            Nd(4, 0.0, 0.0, 2.73),
+        ]}
+        n1, n2, n3, n4, direction = order_wwll_corner_node_ids([4, 3, 2, 1], by_id)
+        self.assertEqual((n1, n2, n3, n4), (1, 2, 3, 4))
+        self.assertEqual(direction, 0)
+
+    def test_swapped_top_corners_normalized_on_parse_for_brace(self):
+        lines = self._base_lines() + [
+            "WWLL, 1, W1, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 1, 2, 4, 3, , 1",
+        ]
+        mdl = parse_input(lines)
+        w = mdl.wwalls[0]
+        self.assertEqual((w.n1, w.n2, w.n3, w.n4), (1, 2, 3, 4))
+        generated = [e for e in mdl.elms if getattr(e, "generated_from", "") == "WOOD_RATED_WALL"]
+        self.assertEqual(len(generated), 2)
+        pairs = {(e.n0.id, e.n1.id) for e in generated}
+        self.assertIn((1, 3), pairs)
+        self.assertIn((2, 4), pairs)
+
+    def test_length_height_from_nodes_supports_diagonal_corner_order(self):
+        # UK-style ordering: N1/N2 left edge, N3/N4 right edge.
+        n0 = Nd(0, 0.0, 7.795, 0.3)
+        n1 = Nd(1, 0.0, 7.795, 3.035)
+        n2 = Nd(2, 0.0, 6.885, 0.3)
+        n3 = Nd(3, 0.0, 6.885, 3.035)
+        length, height = wwll_length_height_from_nodes(n0, n1, n3, n2)
+        self.assertAlmostEqual(length, 0.91, places=6)
+        self.assertAlmostEqual(height, 2.735, places=6)
+
+    def test_omitted_length_height_derived_from_nodes(self):
+        lines = self._base_lines() + [
+            "WWLL, 1, W1, 0, 2.0, , , 0, 0.0083333333, 1, 2, 3, 4, , 1",
+        ]
+        mdl = parse_input(lines)
+        w = mdl.wwalls[0]
+        self.assertAlmostEqual(w.length, 1.82, places=6)
+        self.assertAlmostEqual(w.height, 2.73, places=6)
+        self.assertAlmostEqual(w.length_from_nodes, 1.82, places=6)
+        self.assertAlmostEqual(w.height_from_nodes, 2.73, places=6)
+        self.assertEqual(mdl.input_warnings, [])
+
+    def test_explicit_length_height_matching_nodes_has_no_warning(self):
+        lines = self._base_lines() + [
+            "WWLL, 1, W1, 0, 2.0, 1.82, 2.73, 0, 0.0083333333, 1, 2, 3, 4, , 1",
+        ]
+        mdl = parse_input(lines)
+        self.assertEqual(mdl.input_warnings, [])
+
+    def test_explicit_length_height_mismatch_emits_warning(self):
+        lines = self._base_lines() + [
+            "WWLL, 1, W1, 0, 2.0, 2.00, 2.73, 0, 0.0083333333, 1, 2, 3, 4, , 1",
+        ]
+        mdl = parse_input(lines)
+        w = mdl.wwalls[0]
+        self.assertAlmostEqual(w.length, 2.00, places=6)
+        self.assertAlmostEqual(w.height, 2.73, places=6)
+        self.assertEqual(len(mdl.input_warnings), 1)
+        self.assertIn("input L=", mdl.input_warnings[0])
+        self.assertIn("using input value", mdl.input_warnings[0])
+
+    def test_partial_omit_height_derived_from_nodes(self):
+        lines = self._base_lines() + [
+            "WWLL, 1, W1, 0, 2.0, 1.82, , 0, 0.0083333333, 1, 2, 3, 4, , 1",
+        ]
+        mdl = parse_input(lines)
+        w = mdl.wwalls[0]
+        self.assertAlmostEqual(w.length, 1.82, places=6)
+        self.assertAlmostEqual(w.height, 2.73, places=6)
+        self.assertEqual(mdl.input_warnings, [])
+
+    def test_omitted_length_height_without_nodes_raises(self):
+        lines = [
+            "MATE, 1, SUGI, 9500, 633, 5.0, 3.0e-06, 20",
+            "WWLL, 1, W1, 0, 2.0, , , 0, 0.0083333333, , , , , , 1",
+        ]
+        with self.assertRaises(StbParseError):
+            parse_input(lines)
 
     def test_membrane_wall_is_reserved(self):
         lines = self._base_lines() + [

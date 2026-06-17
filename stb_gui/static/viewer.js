@@ -19,12 +19,17 @@ const COLORS = {
   selectedNode: 0xe85d5d,
   distance: 0x2563eb,
   deform: 0x4E8AC6,
-  membraneFill: 0x6b8f71,
-  membraneEdge: 0x2f5d3a,
-  woodWallFill: 0xc9a86c,
-  woodWallEdge: 0x8b6914,
+  membraneFill: 0x9e9e9e,
+  membraneEdge: 0x616161,
+  woodWallFill: 0x8e8e8e,
+  woodWallEdge: 0x525252,
   nodeLabel: 0x000000,
   force: 0x4D829E,
+  windWindward: 0xe08040,
+  windLeeward: 0x4080c0,
+  windFlow: 0x5a48a8,
+  windStoryForce: 0x8fd4a0,
+  windFootprint: 0x5a5a68,
 };
 
 const PRES_ZERO = 1e-10;
@@ -40,16 +45,22 @@ const ALPHA = {
   labelReactionMoment: 1.0,
   labelDefaultBg: 1.0,
   forceValueBg: 1.0,
-  elementGhost: 1.0,
+  elementGhost: 0.18,
   membraneFill: 0.32,
   membraneEdge: 0.9,
   woodWallFill: 0.35,
   woodWallEdge: 0.9,
   opaque: 1.0,
+  windWall: 0.38,
+  windFootprint: 0.2,
+  dlodEnvelopeEdge: 1.0,
 };
 
 const OPTIONS_STORAGE_KEY = "stb_gui_options";
+const THEME_STORAGE_KEY = "stb_gui_theme";
+const RESULTS_DISPLAY_STORAGE_KEY = "stb_gui_results_display";
 const MODEL_STORAGE_KEY = "stb_gui_last_model";
+const WRW_CREATE_MODEL_KEY = "stb_gui_wwll_create_model";
 const LABEL_BG = {
   elem: "rgba(47, 75, 124, 1.0)",
   material: "rgba(150, 95, 35, " + ALPHA.labelMaterial + ")",
@@ -61,12 +72,15 @@ const LABEL_BG = {
 
 const OPTIONS_DEFAULTS = {
   loadArrowSize: 1.0,
+  reactionArrowSize: 1.0,
   inputLoadType: "all",
   supportGizmoSize: 25,
+  axesSize: 100,
   supportLineWidth: 2,
   dispContourLineWidth: 2.5,
   elementLineWidth: 2.0,
   loadLineWidth: 2.0,
+  reactionLineWidth: 2.0,
   forceLineWidth: 1.0,
   nodeLabelSize: 1.0,
   elemLabelSize: 1.0,
@@ -75,15 +89,20 @@ const OPTIONS_DEFAULTS = {
   loadLabelSize: 1.0,
   reactionLabelSize: 1.0,
   forceLabelSize: 1.5,
+  sectionSolidOpacity: 1.0,
+  sectionSolidColor: "#c9cdd3",
 };
 
 const OPTIONS_LIMITS = {
   loadArrowSize: { min: 0.1, max: 5.0 },
-  supportGizmoSize: { min: 25, max: 50 },
+  reactionArrowSize: { min: 0.1, max: 5.0 },
+  supportGizmoSize: { min: 20, max: 100 },
+  axesSize: { min: 20, max: 200 },
   supportLineWidth: { min: 0.5, max: 3 },
   dispContourLineWidth: { min: 0.5, max: 3 },
   elementLineWidth: { min: 0.5, max: 3 },
   loadLineWidth: { min: 0.5, max: 3 },
+  reactionLineWidth: { min: 0.5, max: 3 },
   forceLineWidth: { min: 0.5, max: 3 },
   nodeLabelSize: { min: 0.1, max: 2.0 },
   elemLabelSize: { min: 0.1, max: 2.0 },
@@ -92,6 +111,38 @@ const OPTIONS_LIMITS = {
   loadLabelSize: { min: 0.1, max: 2.0 },
   reactionLabelSize: { min: 0.1, max: 2.0 },
   forceLabelSize: { min: 0.1, max: 2.5 },
+  sectionSolidOpacity: { min: 0.1, max: 1.0 },
+};
+
+const RESULTS_DISPLAY_DEFAULTS = {
+  defFactor: 50,
+  deformed: false,
+  dispContour: false,
+  supports: true,
+  ejnt: false,
+  loads: true,
+  loadValues: false,
+  windLoads: false,
+  reactions: false,
+  reactionValues: false,
+  nodeLabels: false,
+  elemLabels: false,
+  material: false,
+  section: false,
+  sectionSolids: false,
+  membrane: true,
+  membraneEdge: true,
+  woodWall: true,
+  woodWallEdge: true,
+  forceComponent: 0,
+  forceDiv: 8,
+  forceFactor: 10,
+  forceValues: true,
+  loadCase: null,
+  windCaseId: null,
+  dispContourMin: "",
+  dispContourMax: "",
+  showWorldAxes: true,
 };
 
 function clampViewerOption(key, value) {
@@ -119,6 +170,8 @@ const el = {
   btnReload: document.getElementById("btnReload"),
   btnSolve: document.getElementById("btnSolve"),
   btnInput: document.getElementById("btnInput"),
+  btnProject: document.getElementById("btnProject"),
+  btnLoads: document.getElementById("btnLoads"),
   btnOutput: document.getElementById("btnOutput"),
   lcSelect: document.getElementById("lcSelect"),
   defFactor: document.getElementById("defFactor"),
@@ -138,14 +191,22 @@ const el = {
   chkLoads: document.getElementById("chkLoads"),
   loadTypeFilter: document.getElementById("loadTypeFilter"),
   chkLoadValues: document.getElementById("chkLoadValues"),
+  chkWindLoads: document.getElementById("chkWindLoads"),
+  windCaseSelect: document.getElementById("windCaseSelect"),
+  windLegendOverlay: document.getElementById("windLegendOverlay"),
+  windLegendCase: document.getElementById("windLegendCase"),
   chkReactions: document.getElementById("chkReactions"),
   chkReactionValues: document.getElementById("chkReactionValues"),
   chkLabels: document.getElementById("chkLabels"),
   chkElemLabels: document.getElementById("chkElemLabels"),
   chkMaterial: document.getElementById("chkMaterial"),
   chkSection: document.getElementById("chkSection"),
+  chkSectionSolids: document.getElementById("chkSectionSolids"),
+  btnExportSectionSolidsDxf: document.getElementById("btnExportSectionSolidsDxf"),
   chkMembrane: document.getElementById("chkMembrane"),
+  chkMembraneEdge: document.getElementById("chkMembraneEdge"),
   chkWoodWall: document.getElementById("chkWoodWall"),
+  chkWoodWallEdge: document.getElementById("chkWoodWallEdge"),
   chkForceValues: document.getElementById("chkForceValues"),
   forceSelect: document.getElementById("forceSelect"),
   frcDiv: document.getElementById("frcDiv"),
@@ -161,24 +222,67 @@ const el = {
   optionsPanelHeader: document.getElementById("optionsPanelHeader"),
   btnOptionsCollapse: document.getElementById("btnOptionsCollapse"),
   btnToggleOptions: document.getElementById("btnToggleOptions"),
+  btnTheme: document.getElementById("btnTheme"),
   btnToggleAxes: document.getElementById("btnToggleAxes"),
   btnToggleSelect: document.getElementById("btnToggleSelect"),
   btnToggleDistance: document.getElementById("btnToggleDistance"),
-  btnToggleSelectionPanel: document.getElementById("btnToggleSelectionPanel"),
   distanceOverlay: document.getElementById("distanceOverlay"),
   selectionMarquee: document.getElementById("selectionMarquee"),
   selectionPanel: document.getElementById("selectionPanel"),
   selectionPanelHeader: document.getElementById("selectionPanelHeader"),
+  selectionPanelTitle: document.getElementById("selectionPanelTitle"),
   btnSelectionCollapse: document.getElementById("btnSelectionCollapse"),
+  pickModeNode: document.getElementById("pickModeNode"),
+  pickModeElement: document.getElementById("pickModeElement"),
+  pickModeHint: document.getElementById("pickModeHint"),
   selectionSummary: document.getElementById("selectionSummary"),
   selectionList: document.getElementById("selectionList"),
   btnClearSelection: document.getElementById("btnClearSelection"),
+  pickWrwCreateOptions: document.getElementById("pickWrwCreateOptions"),
+  pickWrwCreateModel: document.getElementById("pickWrwCreateModel"),
+  pickWrwEditOptions: document.getElementById("pickWrwEditOptions"),
+  pickWrwEditModel: document.getElementById("pickWrwEditModel"),
+  pickNodeSupportOptions: document.getElementById("pickNodeSupportOptions"),
+  pickConsTx: document.getElementById("pickConsTx"),
+  pickConsTy: document.getElementById("pickConsTy"),
+  pickConsTz: document.getElementById("pickConsTz"),
+  pickConsRx: document.getElementById("pickConsRx"),
+  pickConsRy: document.getElementById("pickConsRy"),
+  pickConsRz: document.getElementById("pickConsRz"),
+  btnPickConsFixed: document.getElementById("btnPickConsFixed"),
+  btnPickConsPinned: document.getElementById("btnPickConsPinned"),
+  btnPickConsFree: document.getElementById("btnPickConsFree"),
+  btnPickConsApply: document.getElementById("btnPickConsApply"),
+  contextMenuNodeSupport: document.getElementById("contextMenuNodeSupport"),
+  contextMenuConsTx: document.getElementById("contextMenuConsTx"),
+  contextMenuConsTy: document.getElementById("contextMenuConsTy"),
+  contextMenuConsTz: document.getElementById("contextMenuConsTz"),
+  contextMenuConsRx: document.getElementById("contextMenuConsRx"),
+  contextMenuConsRy: document.getElementById("contextMenuConsRy"),
+  contextMenuConsRz: document.getElementById("contextMenuConsRz"),
+  btnPickWrwApplyModel: document.getElementById("btnPickWrwApplyModel"),
   elemContextMenu: document.getElementById("elemContextMenu"),
   contextMenuTitle: document.getElementById("contextMenuTitle"),
   contextMenuSections: document.getElementById("contextMenuSections"),
   contextMenuMaterials: document.getElementById("contextMenuMaterials"),
   contextMenuDeleteElems: document.getElementById("contextMenuDeleteElems"),
   contextMenuDeleteNodes: document.getElementById("contextMenuDeleteNodes"),
+  contextMenuDeleteDmem: document.getElementById("contextMenuDeleteDmem"),
+  contextMenuDeleteWrw: document.getElementById("contextMenuDeleteWrw"),
+  contextMenuWrwEdits: document.getElementById("contextMenuWrwEdits"),
+  contextMenuDmemEdits: document.getElementById("contextMenuDmemEdits"),
+  contextMenuDmemCreate: document.getElementById("contextMenuDmemCreate"),
+  contextMenuDmemCreateDiap: document.getElementById("contextMenuDmemCreateDiap"),
+  contextMenuDmemCreateHint: document.getElementById("contextMenuDmemCreateHint"),
+  contextMenuWrwCreate: document.getElementById("contextMenuWrwCreate"),
+  contextMenuWrwCreateMultiplier: document.getElementById("contextMenuWrwCreateMultiplier"),
+  contextMenuWrwCreateModel: document.getElementById("contextMenuWrwCreateModel"),
+  contextMenuWrwCreateDiap: document.getElementById("contextMenuWrwCreateDiap"),
+  contextMenuWrwCreateHint: document.getElementById("contextMenuWrwCreateHint"),
+  contextMenuWrwModel: document.getElementById("contextMenuWrwModel"),
+  contextMenuWrwMultiplier: document.getElementById("contextMenuWrwMultiplier"),
+  contextMenuDiapMultiplier: document.getElementById("contextMenuDiapMultiplier"),
+  contextMenuDiapHint: document.getElementById("contextMenuDiapHint"),
   contextMenuElemEdits: document.getElementById("contextMenuElemEdits"),
   ejntEditPanel: document.getElementById("ejntEditPanel"),
   ejntEditText: document.getElementById("ejntEditText"),
@@ -187,12 +291,17 @@ const el = {
   btnEjntEditClose: document.getElementById("btnEjntEditClose"),
   optLoadArrow: document.getElementById("optLoadArrow"),
   optLoadArrowVal: document.getElementById("optLoadArrowVal"),
+  optReactionArrow: document.getElementById("optReactionArrow"),
+  optReactionArrowVal: document.getElementById("optReactionArrowVal"),
   optSupportGizmo: document.getElementById("optSupportGizmo"),
   optSupportGizmoVal: document.getElementById("optSupportGizmoVal"),
+  optAxesSize: document.getElementById("optAxesSize"),
+  optAxesSizeVal: document.getElementById("optAxesSizeVal"),
   optSupportLineWidth: document.getElementById("optSupportLineWidth"),
   optDispContourLineWidth: document.getElementById("optDispContourLineWidth"),
   optElementLineWidth: document.getElementById("optElementLineWidth"),
   optLoadLineWidth: document.getElementById("optLoadLineWidth"),
+  optReactionLineWidth: document.getElementById("optReactionLineWidth"),
   optForceLineWidth: document.getElementById("optForceLineWidth"),
   optNodeLabel: document.getElementById("optNodeLabel"),
   optNodeLabelVal: document.getElementById("optNodeLabelVal"),
@@ -208,45 +317,105 @@ const el = {
   optReactionLabelVal: document.getElementById("optReactionLabelVal"),
   optForceLabel: document.getElementById("optForceLabel"),
   optForceLabelVal: document.getElementById("optForceLabelVal"),
+  optSectionSolidColor: document.getElementById("optSectionSolidColor"),
+  optSectionSolidOpacity: document.getElementById("optSectionSolidOpacity"),
+  optSectionSolidOpacityVal: document.getElementById("optSectionSolidOpacityVal"),
   status: document.getElementById("status"),
 };
 
 let scene, camera, renderer, controls;
 let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
+let windGroup, windLabelGroup;
+let uiTheme = "dark";
 let currentModel = null;
 let selectionModeActive = false;
+let pickSubMode = "node";
+const PICK_SUB_MODE_STORAGE_KEY = "stb_gui_pick_sub_mode";
 let distanceModeActive = false;
 let distanceNodeIds = [];
 let distanceMeters = null;
 let selectedElementIds = new Set();
 let selectedNodeIds = new Set();
+let selectedDmemIds = new Set();
+let selectedWrwIds = new Set();
 let selectionDrag = null;
 const _worldProj = new THREE.Vector3();
 const _ndcScratch = new THREE.Vector3();
+const _ndcP0 = new THREE.Vector3();
+const _ndcP1 = new THREE.Vector3();
 const _viewPosScratch = new THREE.Vector3();
+const _gizmoCenterScratch = new THREE.Vector3();
+const _screenDirScratch = new THREE.Vector3();
+const _viewToCenterScratch = new THREE.Vector3();
+const REACTION_TRANS_COLORS = [0xff0000, 0x00ff00, 0x0000ff];
+const REACTION_TRANS_AXES = [
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(0, 1, 0),
+  new THREE.Vector3(0, 0, 1),
+];
 const _leaderStart = new THREE.Vector3();
 const _leaderEnd = new THREE.Vector3();
+const _leaderDir = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
 const _labelNdc = new THREE.Vector3();
 const SELECTION_PICK_PX = 10;
 const SELECTION_NODE_PICK_PX = 14;
 const SELECTION_DRAG_MIN_PX = 4;
 const SELECTION_LIST_LIMIT = 80;
 const MAX_EDIT_UNDO = 50;
+const WIND_FLOW_SURFACE_GAP_RATIO = 0.06;
+const WIND_FLOW_ARROW_LEN_RATIO = 0.12;
+const WIND_FLOW_LABEL_PAD_RATIO = 0.035;
+const WIND_FLOW_MIN_SURFACE_GAP_M = 0.35;
+const WIND_FLOW_MIN_ARROW_LEN_M = 0.22;
+const WIND_FLOW_MIN_LABEL_PAD_M = 0.1;
 let editUndoStack = [];
 let editRedoStack = [];
 let editHistoryBusy = false;
 let currentResultsText = null;
 let viewerOptions = Object.assign({}, OPTIONS_DEFAULTS);
+let displayPrefs = Object.assign({}, RESULTS_DISPLAY_DEFAULTS);
 let wideLineMaterials = new Set();
 let dispContourScaleKey = null;
 let supportGizmoEntries = [];
+let reactionForceEntries = [];
 let nodeLabelEntries = [];
+let elemLabelEntries = [];
+let forceLabelEntries = [];
 let _nodeLabelLeaderMat = null;
 let currentModelPath = null;
 const inputEditors = new Map();
-let showWorldAxes = true;
+let showWorldAxes = RESULTS_DISPLAY_DEFAULTS.showWorldAxes;
 const _supportDiscTexCache = new Map();
+const _sectionProfileCache = new Map();
+const _sectionSolidGeometryCache = new Map();
+const SECTION_SOLID_SEGMENTS = 24;
+const SECTION_SOLID_MAX_ELEMENTS = 2500;
+
+const THEME_RENDER_COLORS = {
+  light: {
+    background: 0xf4f5f7,
+    element: 0x333333,
+    node: 0x333333,
+    membraneEdge: 0x616161,
+    woodWallEdge: 0x525252,
+    nodeLabel: 0x000000,
+    supportOutline: "#000000",
+  },
+  dark: {
+    background: 0x262b34,
+    element: 0xc9cdd3,
+    node: 0xe5e7eb,
+    membraneEdge: 0xcdd5df,
+    woodWallEdge: 0xd5dde7,
+    nodeLabel: 0xe5e7eb,
+    supportOutline: "#cbd5e1",
+  },
+};
 let _nodePointTexture = null;
+let windVisualData = null;
+let selectedWindCaseId = null;
 
 function saveLastModelPath(path) {
   setCurrentModelPath(path);
@@ -360,6 +529,18 @@ function parseReactionsFromResultsText(text) {
   return out;
 }
 
+function reactionRecordToArray(r) {
+  if (r == null) return null;
+  if (Array.isArray(r)) return r;
+  if ("mx" in r || "my" in r || "mz" in r) {
+    return [r.rx || 0, r.ry || 0, r.rz || 0, r.mx || 0, r.my || 0, r.mz || 0];
+  }
+  if ("tx" in r || "ty" in r || "tz" in r) {
+    return [r.tx || 0, r.ty || 0, r.tz || 0, r.rx || 0, r.ry || 0, r.rz || 0];
+  }
+  return [r.rx || 0, r.ry || 0, r.rz || 0, 0, 0, 0];
+}
+
 function enrichModelReactions(model) {
   if (!model) return model;
   if (!model.supports) model.supports = [];
@@ -373,7 +554,7 @@ function enrichModelReactions(model) {
     if (!s.reacts) s.reacts = {};
     const lcKey = String(r.lc);
     if (!s.reacts[lcKey]) {
-      s.reacts[lcKey] = [r.rx, r.ry, r.rz, r.mx, r.my, r.mz];
+      s.reacts[lcKey] = reactionRecordToArray(r);
     }
   }
 
@@ -435,8 +616,83 @@ function setSelectionMode(active) {
     el.btnToggleSelect.classList.toggle("active", selectionModeActive);
   }
   applyViewerInteractionControls();
-  if (selectionModeActive && el.selectionPanel) {
-    el.selectionPanel.classList.remove("hidden");
+  updatePickModeUI();
+  updateSelectionPanelVisibility();
+}
+
+function loadPickSubMode() {
+  try {
+    const stored = localStorage.getItem(PICK_SUB_MODE_STORAGE_KEY);
+    if (stored === "node" || stored === "element") {
+      pickSubMode = stored;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function savePickSubMode() {
+  try {
+    localStorage.setItem(PICK_SUB_MODE_STORAGE_KEY, pickSubMode);
+  } catch (e) { /* ignore */ }
+}
+
+function clearSelectionForOtherPickSubMode(mode) {
+  if (mode === "node") {
+    selectedElementIds.clear();
+    selectedDmemIds.clear();
+    selectedWrwIds.clear();
+  } else {
+    selectedNodeIds.clear();
+    selectedDmemIds.clear();
+    selectedWrwIds.clear();
+  }
+}
+
+function setPickSubMode(mode, opts) {
+  const next = mode === "element" ? "element" : "node";
+  const clearOther = !(opts && opts.keepSelection);
+  if (pickSubMode === next) {
+    updatePickModeUI();
+    return;
+  }
+  pickSubMode = next;
+  if (clearOther) {
+    clearSelectionForOtherPickSubMode(next);
+    updateSelectionHighlight();
+    updateSelectionPanel();
+  }
+  savePickSubMode();
+  updatePickModeUI();
+}
+
+function updatePickModeUI() {
+  const isNode = pickSubMode === "node";
+  if (el.pickModeNode) {
+    el.pickModeNode.classList.toggle("active", isNode);
+    el.pickModeNode.setAttribute("aria-pressed", isNode ? "true" : "false");
+  }
+  if (el.pickModeElement) {
+    el.pickModeElement.classList.toggle("active", !isNode);
+    el.pickModeElement.setAttribute("aria-pressed", !isNode ? "true" : "false");
+  }
+  if (el.selectionPanelTitle) {
+    el.selectionPanelTitle.textContent = isNode ? "Pick — Nodes" : "Pick — Elements";
+  }
+  if (el.pickModeHint) {
+    el.pickModeHint.textContent = isNode
+      ? "Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears."
+      : "Element mode: click or drag to pick elements. Ctrl+click toggles. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.";
+  }
+  if (el.pickWrwCreateOptions) {
+    el.pickWrwCreateOptions.hidden = !isNode;
+  }
+  if (el.pickNodeSupportOptions && !isNode) {
+    el.pickNodeSupportOptions.hidden = true;
+  }
+  if (el.pickWrwEditOptions && !isNode) {
+    el.pickWrwEditOptions.hidden = true;
+  }
+  if (isNode) {
+    updatePickWrwOptions();
   }
 }
 
@@ -581,13 +837,46 @@ function updateDistanceVisual() {
 }
 
 function hasPickSelection() {
-  return selectedElementIds.size > 0 || selectedNodeIds.size > 0;
+  return selectedElementIds.size > 0 || selectedNodeIds.size > 0
+    || selectedDmemIds.size > 0 || selectedWrwIds.size > 0;
 }
 
 function clearSelection() {
   if (!hasPickSelection()) return;
   selectedElementIds = new Set();
   selectedNodeIds = new Set();
+  selectedDmemIds = new Set();
+  selectedWrwIds = new Set();
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function setSelectedWrwIds(ids, mode) {
+  const next = mode === "replace" ? new Set() : new Set(selectedWrwIds);
+  for (const id of ids) {
+    if (mode === "toggle") {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      next.add(id);
+    }
+  }
+  selectedWrwIds = next;
+  updateSelectionHighlight();
+  updateSelectionPanel();
+}
+
+function setSelectedDmemIds(ids, mode) {
+  const next = mode === "replace" ? new Set() : new Set(selectedDmemIds);
+  for (const id of ids) {
+    if (mode === "toggle") {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      next.add(id);
+    }
+  }
+  selectedDmemIds = next;
   updateSelectionHighlight();
   updateSelectionPanel();
 }
@@ -622,14 +911,18 @@ function setSelectedNodeIds(ids, mode) {
   updateSelectionPanel();
 }
 
-function replacePickSelection(nodeIds, elemIds) {
+function replacePickSelection(nodeIds, elemIds, dmemIds, wrwIds) {
   setSelectedNodeIds(nodeIds, "replace");
   setSelectedElementIds(elemIds, "replace");
+  setSelectedDmemIds(dmemIds == null ? [] : dmemIds, "replace");
+  setSelectedWrwIds(wrwIds == null ? [] : wrwIds, "replace");
 }
 
-function addPickSelection(nodeIds, elemIds) {
+function addPickSelection(nodeIds, elemIds, dmemIds, wrwIds) {
   setSelectedNodeIds(nodeIds, "add");
   setSelectedElementIds(elemIds, "add");
+  setSelectedDmemIds(dmemIds == null ? [] : dmemIds, "add");
+  setSelectedWrwIds(wrwIds == null ? [] : wrwIds, "add");
 }
 
 function viewportMousePoint(ev) {
@@ -710,6 +1003,137 @@ function segmentIntersectsRect(ax, ay, bx, by, x0, y0, x1, y1) {
   return false;
 }
 
+function pointInTriangle2d(px, py, ax, ay, bx, by, cx, cy) {
+  function sign(p1x, p1y, p2x, p2y, p3x, p3y) {
+    return (p1x - p3x) * (p2y - p3y) - (p2x - p3x) * (p1y - p3y);
+  }
+  const d1 = sign(px, py, ax, ay, bx, by);
+  const d2 = sign(px, py, bx, by, cx, cy);
+  const d3 = sign(px, py, cx, cy, ax, ay);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
+
+function distToPolygonEdges2d(px, py, verts) {
+  let best = Infinity;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    const d = distPointToSegment2d(px, py, a.x, a.y, b.x, b.y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function polygonIntersectsRect(verts, x0, y0, x1, y1) {
+  for (const v of verts) {
+    if (pointInRect(v.x, v.y, x0, y0, x1, y1)) return true;
+  }
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    if (segmentIntersectsRect(a.x, a.y, b.x, b.y, x0, y0, x1, y1)) return true;
+  }
+  return false;
+}
+
+function membraneScreenVerts(mem, nm, display) {
+  const ids = mem.nodes;
+  if (!ids || ids.length !== 3) return null;
+  const verts = [];
+  for (let i = 0; i < 3; i++) {
+    const n = nm[ids[i]];
+    if (!n) return null;
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    verts.push(worldToScreenPoint(p));
+  }
+  return verts;
+}
+
+function woodWallScreenVerts(wall, nm, display) {
+  const ids = wall.nodes;
+  if (!ids || ids.length !== 4) return null;
+  const verts = [];
+  for (let i = 0; i < 4; i++) {
+    const n = nm[ids[i]];
+    if (!n) return null;
+    const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+    verts.push(worldToScreenPoint(p));
+  }
+  return verts;
+}
+
+function pickMembraneAtScreen(px, py, thresholdPx) {
+  if (!currentModel || !(el.chkMembrane && el.chkMembrane.checked)) return null;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  let bestId = null;
+  let bestScore = thresholdPx;
+  for (const mem of currentModel.membrane_elements || []) {
+    const verts = membraneScreenVerts(mem, nm, display);
+    if (!verts) continue;
+    const inside = pointInTriangle2d(
+      px, py,
+      verts[0].x, verts[0].y,
+      verts[1].x, verts[1].y,
+      verts[2].x, verts[2].y
+    );
+    const edgeDist = distToPolygonEdges2d(px, py, verts);
+    const score = inside ? 0 : edgeDist;
+    if (score < bestScore) {
+      bestScore = score;
+      bestId = mem.id;
+    }
+  }
+  return bestId == null ? null : { id: bestId, score: bestScore };
+}
+
+function pickWoodWallAtScreen(px, py, thresholdPx) {
+  if (!currentModel || !(el.chkWoodWall && el.chkWoodWall.checked)) return null;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  let bestId = null;
+  let bestScore = thresholdPx;
+  for (const wall of currentModel.wood_rated_walls || []) {
+    const verts = woodWallScreenVerts(wall, nm, display);
+    if (!verts) continue;
+    const inside = pointInTriangle2d(px, py, verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y)
+      || pointInTriangle2d(px, py, verts[0].x, verts[0].y, verts[2].x, verts[2].y, verts[3].x, verts[3].y);
+    const edgeDist = distToPolygonEdges2d(px, py, verts);
+    const score = inside ? 0 : edgeDist;
+    if (score < bestScore) {
+      bestScore = score;
+      bestId = wall.id;
+    }
+  }
+  return bestId == null ? null : { id: bestId, score: bestScore };
+}
+
+function membranesInScreenRect(x0, y0, x1, y1) {
+  const ids = [];
+  if (!currentModel || !(el.chkMembrane && el.chkMembrane.checked)) return ids;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  for (const mem of currentModel.membrane_elements || []) {
+    const verts = membraneScreenVerts(mem, nm, display);
+    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(mem.id);
+  }
+  return ids;
+}
+
+function woodWallsInScreenRect(x0, y0, x1, y1) {
+  const ids = [];
+  if (!currentModel || !(el.chkWoodWall && el.chkWoodWall.checked)) return ids;
+  const display = getSceneDisplayState();
+  const nm = nodeMap(currentModel);
+  for (const wall of currentModel.wood_rated_walls || []) {
+    const verts = woodWallScreenVerts(wall, nm, display);
+    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(wall.id);
+  }
+  return ids;
+}
+
 function elementScreenSegment(elem, nm, display) {
   const n0 = nm[elem.n0];
   const n1 = nm[elem.n1];
@@ -736,7 +1160,7 @@ function pickElementAtScreen(px, py, thresholdPx) {
       bestId = e.id;
     }
   }
-  return bestId;
+  return bestId == null ? null : { id: bestId, score: bestDist };
 }
 
 function elementsInScreenRect(x0, y0, x1, y1) {
@@ -790,6 +1214,16 @@ function pickNodeAtScreen(px, py, thresholdPx) {
   return bestNode;
 }
 
+function pickTargetForMode(px, py) {
+  if (pickSubMode === "node") {
+    const nodeId = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
+    return nodeId == null ? null : { kind: "node", id: nodeId };
+  }
+  const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestElem != null) return Object.assign({ kind: "elem" }, bestElem);
+  return null;
+}
+
 function pickTargetAtScreen(px, py) {
   if (!currentModel) return null;
   const bestNode = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
@@ -804,15 +1238,29 @@ function pickTargetAtScreen(px, py) {
       bestNodeDist = Math.hypot(px - s.x, py - s.y);
     }
   }
+
+  const candidates = [];
+  const bestDmem = pickMembraneAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestDmem != null) candidates.push(Object.assign({ kind: "dmem" }, bestDmem));
+  const bestWrw = pickWoodWallAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestWrw != null) candidates.push(Object.assign({ kind: "wrw" }, bestWrw));
   const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestNode != null && bestElem == null) return { kind: "node", id: bestNode };
-  if (bestElem != null && bestNode == null) return { kind: "elem", id: bestElem };
-  if (bestNode != null && bestElem != null) {
-    if (bestNodeDist <= SELECTION_PICK_PX) {
+  if (bestElem != null) candidates.push(Object.assign({ kind: "elem" }, bestElem));
+
+  if (bestNode != null && bestNodeDist <= SELECTION_NODE_PICK_PX) {
+    if (candidates.length === 0 || bestNodeDist <= SELECTION_PICK_PX * 0.75) {
       return { kind: "node", id: bestNode };
     }
-    return { kind: "elem", id: bestElem };
   }
+  if (candidates.length > 0) {
+    const kindPriority = { dmem: 0, wrw: 1, elem: 2 };
+    candidates.sort(function (a, b) {
+      if (a.score !== b.score) return a.score - b.score;
+      return (kindPriority[a.kind] || 9) - (kindPriority[b.kind] || 9);
+    });
+    return candidates[0];
+  }
+  if (bestNode != null) return { kind: "node", id: bestNode };
   return null;
 }
 
@@ -894,6 +1342,77 @@ function updateSelectionHighlight() {
       selectionGroup.add(points);
     }
   }
+
+  const selFillPos = [];
+  const selEdgePts = [];
+  for (const mem of currentModel.membrane_elements || []) {
+    if (!selectedDmemIds.has(mem.id)) continue;
+    const ids = mem.nodes;
+    if (!ids || ids.length !== 3) continue;
+    const p0 = nodePosition(nm[ids[0]], currentModel, display.lc, display.defFac, display.deformed);
+    const p1 = nodePosition(nm[ids[1]], currentModel, display.lc, display.defFac, display.deformed);
+    const p2 = nodePosition(nm[ids[2]], currentModel, display.lc, display.defFac, display.deformed);
+    if (!p0 || !p1 || !p2) continue;
+    selFillPos.push(
+      p0.x, p0.y, p0.z,
+      p1.x, p1.y, p1.z,
+      p2.x, p2.y, p2.z
+    );
+    selEdgePts.push(
+      p0.x, p0.y, p0.z, p1.x, p1.y, p1.z,
+      p1.x, p1.y, p1.z, p2.x, p2.y, p2.z,
+      p2.x, p2.y, p2.z, p0.x, p0.y, p0.z
+    );
+  }
+  for (const wall of currentModel.wood_rated_walls || []) {
+    if (!selectedWrwIds.has(wall.id)) continue;
+    const ids = wall.nodes;
+    if (!ids || ids.length !== 4) continue;
+    const pts = ids.map(function (nid) {
+      const n = nm[nid];
+      return n ? nodePosition(n, currentModel, display.lc, display.defFac, display.deformed) : null;
+    });
+    if (pts.some(function (p) { return !p; })) continue;
+    selFillPos.push(
+      pts[0].x, pts[0].y, pts[0].z,
+      pts[1].x, pts[1].y, pts[1].z,
+      pts[2].x, pts[2].y, pts[2].z,
+      pts[0].x, pts[0].y, pts[0].z,
+      pts[2].x, pts[2].y, pts[2].z,
+      pts[3].x, pts[3].y, pts[3].z
+    );
+    selEdgePts.push(
+      pts[0].x, pts[0].y, pts[0].z, pts[1].x, pts[1].y, pts[1].z,
+      pts[1].x, pts[1].y, pts[1].z, pts[2].x, pts[2].y, pts[2].z,
+      pts[2].x, pts[2].y, pts[2].z, pts[3].x, pts[3].y, pts[3].z,
+      pts[3].x, pts[3].y, pts[3].z, pts[0].x, pts[0].y, pts[0].z
+    );
+  }
+  if (selFillPos.length > 0) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(selFillPos, 3));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshBasicMaterial({
+      color: COLORS.selected,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 20;
+    selectionGroup.add(mesh);
+  }
+  if (selEdgePts.length > 0) {
+    addWideLineSegmentsFromPts(
+      selEdgePts,
+      COLORS.selected,
+      selectionGroup,
+      22,
+      elementLineWidthPx() + 2.5,
+      ALPHA.opaque
+    );
+  }
 }
 
 function elementSummaryText(elem) {
@@ -973,13 +1492,23 @@ function elementEfrcOutBlock(model, elemId, lcKey) {
   return EFRC_OUT_HEADER.join("\n") + "\n" + formatEfrcOutLine(lcKey, elemId, forces);
 }
 
+function updateSelectionPanelVisibility() {
+  if (!el.selectionPanel) return;
+  const show = selectionModeActive;
+  el.selectionPanel.classList.toggle("hidden", !show);
+}
+
 function updateSelectionPanel() {
   if (!el.selectionSummary || !el.selectionList) return;
   const elemCount = selectedElementIds.size;
   const nodeCount = selectedNodeIds.size;
+  const dmemCount = selectedDmemIds.size;
+  const wrwCount = selectedWrwIds.size;
   if (!hasPickSelection()) {
     el.selectionSummary.textContent = "Nothing picked";
     el.selectionList.innerHTML = "";
+    updatePickWrwOptions();
+    updateSelectionPanelVisibility();
     return;
   }
   const parts = [];
@@ -988,6 +1517,12 @@ function updateSelectionPanel() {
   }
   if (nodeCount > 0) {
     parts.push(nodeCount + " node" + (nodeCount === 1 ? "" : "s"));
+  }
+  if (dmemCount > 0) {
+    parts.push(dmemCount + " DMEM");
+  }
+  if (wrwCount > 0) {
+    parts.push(wrwCount + " WRW");
   }
   let summary = parts.join(", ") + " picked";
   if (elemCount > 0 && currentModel) {
@@ -1016,6 +1551,12 @@ function updateSelectionPanel() {
   for (const id of Array.from(selectedNodeIds).sort((a, b) => a - b)) {
     rows.push({ kind: "node", id: id });
   }
+  for (const id of Array.from(selectedDmemIds).sort((a, b) => a - b)) {
+    rows.push({ kind: "dmem", id: id });
+  }
+  for (const id of Array.from(selectedWrwIds).sort((a, b) => a - b)) {
+    rows.push({ kind: "wrw", id: id });
+  }
   for (const id of Array.from(selectedElementIds).sort((a, b) => a - b)) {
     rows.push({ kind: "elem", id: id });
   }
@@ -1026,6 +1567,18 @@ function updateSelectionPanel() {
   const byNode = {};
   for (const n of currentModel ? currentModel.nodes : []) {
     byNode[n.id] = n;
+  }
+  const byDmem = {};
+  for (const m of currentModel ? currentModel.membrane_elements || [] : []) {
+    byDmem[m.id] = m;
+  }
+  const byWrw = {};
+  for (const w of currentModel ? currentModel.wood_rated_walls || [] : []) {
+    byWrw[w.id] = w;
+  }
+  const byDiap = {};
+  for (const d of currentModel ? currentModel.diaphragms || [] : []) {
+    byDiap[d.id] = d;
   }
   const solved = currentModel && analysisComplete(currentModel);
   const lcKey = String(el.lcSelect ? el.lcSelect.value : "");
@@ -1051,7 +1604,35 @@ function updateSelectionPanel() {
         li.appendChild(outLine);
       }
       li.addEventListener("click", function () {
-        replacePickSelection([row.id], []);
+        replacePickSelection([row.id], [], [], []);
+      });
+    } else if (row.kind === "dmem") {
+      const m = byDmem[row.id];
+      const diap = m ? byDiap[m.diaphragm_id] : null;
+      const title = document.createElement("div");
+      title.className = "selection-row-title";
+      let label = "DMEM " + row.id;
+      if (m) label += " — DIAP " + m.diaphragm_id;
+      if (diap && diap.timber_multiplier != null) {
+        label += " (MAG " + diap.timber_multiplier + ")";
+      }
+      title.textContent = label;
+      li.appendChild(title);
+      li.addEventListener("click", function () {
+        replacePickSelection([], [], [row.id], []);
+      });
+    } else if (row.kind === "wrw") {
+      const w = byWrw[row.id];
+      const title = document.createElement("div");
+      title.className = "selection-row-title";
+      let label = "WRW " + row.id;
+      if (w) {
+        label += " — " + (w.name || "?") + " (" + wwllModelLabelFromWall(w) + ", M " + w.multiplier + ")";
+      }
+      title.textContent = label;
+      li.appendChild(title);
+      li.addEventListener("click", function () {
+        replacePickSelection([], [], [], [row.id]);
       });
     } else {
       const e = byElem[row.id];
@@ -1069,7 +1650,7 @@ function updateSelectionPanel() {
         li.appendChild(outLine);
       }
       li.addEventListener("click", function () {
-        replacePickSelection([], [row.id]);
+        replacePickSelection([], [row.id], [], []);
       });
     }
     el.selectionList.appendChild(li);
@@ -1080,6 +1661,8 @@ function updateSelectionPanel() {
     li.textContent = "... and " + (rows.length - SELECTION_LIST_LIMIT) + " more";
     el.selectionList.appendChild(li);
   }
+  updatePickWrwOptions();
+  updateSelectionPanelVisibility();
 }
 
 function updateSelectionMarquee(x0, y0, x1, y1) {
@@ -1102,6 +1685,22 @@ function hideSelectionMarquee() {
   el.selectionMarquee.style.height = "0";
 }
 
+function applyPickedTarget(picked, extend) {
+  if (picked == null) return false;
+  if (extend) {
+    if (picked.kind === "node") setSelectedNodeIds([picked.id], "toggle");
+    else if (picked.kind === "elem") setSelectedElementIds([picked.id], "toggle");
+    else if (picked.kind === "dmem") setSelectedDmemIds([picked.id], "toggle");
+    else if (picked.kind === "wrw") setSelectedWrwIds([picked.id], "toggle");
+    return true;
+  }
+  if (picked.kind === "node") replacePickSelection([picked.id], [], [], []);
+  else if (picked.kind === "elem") replacePickSelection([], [picked.id], [], []);
+  else if (picked.kind === "dmem") replacePickSelection([], [], [picked.id], []);
+  else if (picked.kind === "wrw") replacePickSelection([], [], [], [picked.id]);
+  return true;
+}
+
 function finishSelectionDrag(ev) {
   if (!selectionDrag) return;
   const drag = selectionDrag;
@@ -1115,28 +1714,33 @@ function finishSelectionDrag(ev) {
   const extend = !!(ev.ctrlKey || ev.metaKey);
 
   if (Math.hypot(dx, dy) < SELECTION_DRAG_MIN_PX) {
-    const picked = pickTargetAtScreen(end.x, end.y);
+    const picked = pickTargetForMode(end.x, end.y);
     if (picked == null) {
       if (!extend) clearSelection();
-    } else if (extend) {
-      if (picked.kind === "node") setSelectedNodeIds([picked.id], "toggle");
-      else setSelectedElementIds([picked.id], "toggle");
-    } else if (picked.kind === "node") {
-      replacePickSelection([picked.id], []);
     } else {
-      replacePickSelection([], [picked.id]);
+      applyPickedTarget(picked, extend);
     }
     return;
   }
 
+  if (pickSubMode === "node") {
+    const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    if (nodeIds.length === 0) {
+      if (!extend) clearSelection();
+      return;
+    }
+    if (extend) addPickSelection(nodeIds, [], [], []);
+    else replacePickSelection(nodeIds, [], [], []);
+    return;
+  }
+
   const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  if (elemIds.length === 0 && nodeIds.length === 0) {
+  if (elemIds.length === 0) {
     if (!extend) clearSelection();
     return;
   }
-  if (extend) addPickSelection(nodeIds, elemIds);
-  else replacePickSelection(nodeIds, elemIds);
+  if (extend) addPickSelection([], elemIds, [], []);
+  else replacePickSelection([], elemIds, [], []);
 }
 
 function initSelectionInteraction() {
@@ -1206,6 +1810,323 @@ function selectedElementIdList() {
 
 function selectedNodeIdList() {
   return Array.from(selectedNodeIds).sort(function (a, b) { return a - b; });
+}
+
+function selectedDmemIdList() {
+  return Array.from(selectedDmemIds).sort(function (a, b) { return a - b; });
+}
+
+function selectedWrwIdList() {
+  return Array.from(selectedWrwIds).sort(function (a, b) { return a - b; });
+}
+
+function isTimberDiaphragm(diap) {
+  if (!diap) return false;
+  const src = String(diap.source || "").toUpperCase();
+  return src === "TIMBER_FLOOR" || src === "TIMBER_ROOF";
+}
+
+function findDmemIdByNodes(diapId, nodeIds) {
+  if (!currentModel) return null;
+  const sorted = nodeIds.slice().sort(function (a, b) { return a - b; });
+  for (const m of currentModel.membrane_elements || []) {
+    if (m.diaphragm_id !== diapId) continue;
+    const mn = (m.nodes || []).slice().sort(function (a, b) { return a - b; });
+    if (mn.length !== 3) continue;
+    if (mn[0] === sorted[0] && mn[1] === sorted[1] && mn[2] === sorted[2]) {
+      return m.id;
+    }
+  }
+  return null;
+}
+
+function findWrwIdByNodes(nodeIds) {
+  if (!currentModel) return null;
+  const sorted = nodeIds.slice().sort(function (a, b) { return a - b; });
+  for (const w of currentModel.wood_rated_walls || []) {
+    const wn = (w.nodes || []).slice().sort(function (a, b) { return a - b; });
+    if (wn.length !== 4) continue;
+    if (wn[0] === sorted[0] && wn[1] === sorted[1]
+      && wn[2] === sorted[2] && wn[3] === sorted[3]) {
+      return w.id;
+    }
+  }
+  return null;
+}
+
+function populateWrwCreateDiapSelect() {
+  if (!el.contextMenuWrwCreateDiap || !currentModel) return;
+  const sel = el.contextMenuWrwCreateDiap;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "No DIAP";
+  sel.appendChild(none);
+  for (const d of currentModel.diaphragms || []) {
+    const opt = document.createElement("option");
+    opt.value = String(d.id);
+    let label = "DIAP " + d.id;
+    if (d.name) label += " — " + d.name;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+    sel.value = prev;
+  }
+}
+
+function populateDmemCreateDiapSelect() {
+  if (!el.contextMenuDmemCreateDiap || !currentModel) return;
+  const sel = el.contextMenuDmemCreateDiap;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const diaps = currentModel.diaphragms || [];
+  for (const d of diaps) {
+    const opt = document.createElement("option");
+    opt.value = String(d.id);
+    let label = "DIAP " + d.id;
+    if (d.name) label += " — " + d.name;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+    sel.value = prev;
+  }
+}
+
+function timberDiapIdsFromSelectedDmem() {
+  if (!currentModel) return [];
+  const byDiap = {};
+  for (const d of currentModel.diaphragms || []) byDiap[d.id] = d;
+  const byDmem = {};
+  for (const m of currentModel.membrane_elements || []) byDmem[m.id] = m;
+  const ids = new Set();
+  for (const dmemId of selectedDmemIds) {
+    const mem = byDmem[dmemId];
+    if (!mem) continue;
+    const diap = byDiap[mem.diaphragm_id];
+    if (isTimberDiaphragm(diap)) ids.add(diap.id);
+  }
+  return Array.from(ids).sort(function (a, b) { return a - b; });
+}
+
+function commonNumericValue(values) {
+  if (!values.length) return null;
+  const first = values[0];
+  for (let i = 1; i < values.length; i++) {
+    if (Math.abs(values[i] - first) > 1e-9) return null;
+  }
+  return first;
+}
+
+function commonWrwMultiplier() {
+  if (!currentModel) return null;
+  const byWrw = {};
+  for (const w of currentModel.wood_rated_walls || []) byWrw[w.id] = w;
+  const vals = [];
+  for (const id of selectedWrwIds) {
+    const w = byWrw[id];
+    if (w && w.multiplier != null) vals.push(Number(w.multiplier));
+  }
+  return commonNumericValue(vals);
+}
+
+function wwllModelCodeFromWall(w) {
+  if (!w) return null;
+  const m = w.model_requested;
+  if (m === "EQUIVALENT_BRACE") return 0;
+  if (m === "SHEAR_PANEL") return 1;
+  if (m === 0 || m === "0") return 0;
+  if (m === 1 || m === "1") return 1;
+  return null;
+}
+
+function wwllModelLabelFromWall(w) {
+  const code = wwllModelCodeFromWall(w);
+  if (code === 0) return "Brace";
+  if (code === 1) return "Shear panel";
+  return "?";
+}
+
+function wwllModelLabelFromCode(model) {
+  return parseInt(model, 10) === 0 ? "Brace" : "Shear panel";
+}
+
+function commonWrwModel() {
+  if (!currentModel) return null;
+  const byWrw = {};
+  for (const w of currentModel.wood_rated_walls || []) byWrw[w.id] = w;
+  const vals = [];
+  for (const id of selectedWrwIds) {
+    const code = wwllModelCodeFromWall(byWrw[id]);
+    if (code != null) vals.push(code);
+  }
+  return commonNumericValue(vals);
+}
+
+function getPickWrwCreateModel() {
+  const sel = el.pickWrwCreateModel || el.contextMenuWrwCreateModel;
+  const raw = sel ? sel.value : "1";
+  return parseInt(raw, 10) === 0 ? 0 : 1;
+}
+
+function setPickWrwCreateModelValue(model) {
+  const v = parseInt(model, 10) === 0 ? "0" : "1";
+  if (el.pickWrwCreateModel) el.pickWrwCreateModel.value = v;
+  if (el.contextMenuWrwCreateModel) el.contextMenuWrwCreateModel.value = v;
+  try {
+    localStorage.setItem(WRW_CREATE_MODEL_KEY, v);
+  } catch (e) { /* ignore */ }
+}
+
+function loadPickWrwCreateModel() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(WRW_CREATE_MODEL_KEY);
+  } catch (e) { /* ignore */ }
+  if (saved === "0" || saved === "1") {
+    setPickWrwCreateModelValue(parseInt(saved, 10));
+  }
+}
+
+const CONS_DOF_KEYS = ["tx", "ty", "tz", "rx", "ry", "rz"];
+const CONS_PRESET_FIXED = [true, true, true, true, true, true];
+const CONS_PRESET_PINNED = [true, true, true, false, false, false];
+const CONS_PRESET_FREE = [false, false, false, false, false, false];
+
+function consCheckboxElements(prefix) {
+  const cap = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  return CONS_DOF_KEYS.map(function (key) {
+    const id = key.charAt(0).toUpperCase() + key.slice(1);
+    return el[prefix + "Cons" + id] || el["contextMenuCons" + id];
+  });
+}
+
+function readConsFixedFromCheckboxes(boxes) {
+  return boxes.map(function (input) { return !!(input && input.checked); });
+}
+
+function writeConsFixedToCheckboxes(boxes, fixed, indeterminate) {
+  for (let i = 0; i < boxes.length; i++) {
+    const input = boxes[i];
+    if (!input) continue;
+    if (indeterminate || fixed == null) {
+      input.checked = false;
+      input.indeterminate = true;
+      continue;
+    }
+    input.indeterminate = false;
+    input.checked = !!fixed[i];
+  }
+}
+
+function syncConsCheckboxGroups(fixed, indeterminate) {
+  writeConsFixedToCheckboxes(consCheckboxElements("pick"), fixed, indeterminate);
+  writeConsFixedToCheckboxes(consCheckboxElements("contextMenu"), fixed, indeterminate);
+}
+
+function commonNodeSupportFixed() {
+  if (!currentModel || selectedNodeIds.size === 0) return null;
+  const byNode = {};
+  for (const s of currentModel.supports || []) byNode[s.node] = s.fixed;
+  let ref = null;
+  for (const id of selectedNodeIds) {
+    const raw = byNode[id];
+    const fixed = raw && raw.length === 6
+      ? raw.map(function (v) { return !!v; })
+      : CONS_PRESET_FREE.slice();
+    if (ref == null) {
+      ref = fixed;
+      continue;
+    }
+    for (let i = 0; i < 6; i++) {
+      if (fixed[i] !== ref[i]) return null;
+    }
+  }
+  return ref;
+}
+
+function consFixedSummary(fixed) {
+  const labels = ["TX", "TY", "TZ", "RX", "RY", "RZ"];
+  const active = [];
+  for (let i = 0; i < labels.length; i++) {
+    if (fixed[i]) active.push(labels[i]);
+  }
+  return active.length ? active.join(", ") : "free (no CONS)";
+}
+
+function applyConsPreset(preset) {
+  syncConsCheckboxGroups(preset, false);
+}
+
+function applyConsChange(fixed) {
+  if (selectedNodeIds.size === 0) return;
+  const count = selectedNodeIds.size;
+  const summary = consFixedSummary(fixed);
+  const ok = window.confirm(
+    "Set support (" + summary + ") for " + count + " node" + (count === 1 ? "" : "s") + "?"
+  );
+  if (!ok) return;
+  applyModelEdit({ action: "set_cons", fixed: fixed });
+}
+
+function updatePickWrwOptions() {
+  const nodePickMode = pickSubMode === "node";
+  if (el.pickWrwCreateOptions) {
+    const showCreate = nodePickMode && selectedNodeIds.size === 4
+      && selectedElementIds.size === 0 && selectedDmemIds.size === 0
+      && selectedWrwIds.size === 0;
+    el.pickWrwCreateOptions.hidden = !showCreate;
+  }
+  if (el.pickWrwEditOptions) {
+    const showEdit = nodePickMode && selectedWrwIds.size > 0
+      && selectedNodeIds.size === 0 && selectedElementIds.size === 0
+      && selectedDmemIds.size === 0;
+    el.pickWrwEditOptions.hidden = !showEdit;
+    if (showEdit && el.pickWrwEditModel) {
+      const m = commonWrwModel();
+      el.pickWrwEditModel.value = m == null ? "1" : String(m);
+    }
+  }
+  if (el.pickNodeSupportOptions) {
+    const showSupport = nodePickMode && selectedNodeIds.size > 0
+      && selectedElementIds.size === 0 && selectedDmemIds.size === 0
+      && selectedWrwIds.size === 0;
+    el.pickNodeSupportOptions.hidden = !showSupport;
+    if (showSupport) {
+      const fixed = commonNodeSupportFixed();
+      syncConsCheckboxGroups(fixed, fixed == null);
+    }
+  }
+}
+
+function applyWrwModelChange(model) {
+  const m = parseInt(model, 10);
+  if (m !== 0 && m !== 1) {
+    window.alert("WRW type must be shear panel or brace.");
+    return;
+  }
+  if (selectedWrwIds.size === 0) return;
+  const label = wwllModelLabelFromCode(m);
+  const count = selectedWrwIds.size;
+  const ok = window.confirm(
+    "Change " + count + " WRW record" + (count === 1 ? "" : "s") + " to " + label + "?"
+  );
+  if (!ok) return;
+  applyModelEdit({ action: "set_wwll_model", model: m });
+}
+
+function commonDiapTimberMultiplier() {
+  if (!currentModel) return null;
+  const byDiap = {};
+  for (const d of currentModel.diaphragms || []) byDiap[d.id] = d;
+  const vals = [];
+  for (const id of timberDiapIdsFromSelectedDmem()) {
+    const d = byDiap[id];
+    if (d && d.timber_multiplier != null) vals.push(Number(d.timber_multiplier));
+  }
+  return commonNumericValue(vals);
 }
 
 function hideEjntEditor() {
@@ -1305,14 +2226,94 @@ function showContextMenu(clientX, clientY) {
   if (selectedElementIds.size > 0) populateContextMenuCatalog();
   const elemCount = selectedElementIds.size;
   const nodeCount = selectedNodeIds.size;
+  const dmemCount = selectedDmemIds.size;
+  const wrwCount = selectedWrwIds.size;
   if (el.contextMenuDeleteElems) {
     el.contextMenuDeleteElems.hidden = elemCount === 0;
   }
   if (el.contextMenuDeleteNodes) {
     el.contextMenuDeleteNodes.hidden = nodeCount === 0;
   }
+  if (el.contextMenuNodeSupport) {
+    const showSupport = nodeCount > 0 && elemCount === 0 && dmemCount === 0 && wrwCount === 0;
+    el.contextMenuNodeSupport.hidden = !showSupport;
+    if (showSupport) {
+      const fixed = commonNodeSupportFixed();
+      syncConsCheckboxGroups(fixed, fixed == null);
+    }
+  }
+  if (el.contextMenuDeleteDmem) {
+    el.contextMenuDeleteDmem.hidden = dmemCount === 0;
+  }
+  if (el.contextMenuDeleteWrw) {
+    el.contextMenuDeleteWrw.hidden = wrwCount === 0;
+  }
   if (el.contextMenuElemEdits) {
     el.contextMenuElemEdits.hidden = elemCount === 0;
+  }
+  if (el.contextMenuWrwEdits) {
+    el.contextMenuWrwEdits.hidden = wrwCount === 0;
+    if (wrwCount > 0) {
+      if (el.contextMenuWrwMultiplier) {
+        const m = commonWrwMultiplier();
+        el.contextMenuWrwMultiplier.value = m == null ? "" : String(m);
+      }
+      if (el.contextMenuWrwModel) {
+        const model = commonWrwModel();
+        el.contextMenuWrwModel.value = model == null ? "1" : String(model);
+      }
+    }
+  }
+  if (el.contextMenuDmemCreate) {
+    const diaps = currentModel ? (currentModel.diaphragms || []) : [];
+    const canCreate = nodeCount === 3 && elemCount === 0 && dmemCount === 0
+      && wrwCount === 0 && diaps.length > 0;
+    el.contextMenuDmemCreate.hidden = !canCreate;
+    if (canCreate) {
+      populateDmemCreateDiapSelect();
+      if (el.contextMenuDmemCreateHint) {
+        const ids = selectedNodeIdList();
+        el.contextMenuDmemCreateHint.textContent =
+          "Nodes " + ids.join(", ") + " → triangle";
+      }
+    } else if (el.contextMenuDmemCreateHint) {
+      el.contextMenuDmemCreateHint.textContent = "";
+    }
+  }
+  if (el.contextMenuWrwCreate) {
+    const canCreateWrw = nodeCount === 4 && elemCount === 0 && dmemCount === 0
+      && wrwCount === 0;
+    el.contextMenuWrwCreate.hidden = !canCreateWrw;
+    if (canCreateWrw) {
+      if (el.contextMenuWrwCreateModel && el.pickWrwCreateModel) {
+        el.contextMenuWrwCreateModel.value = el.pickWrwCreateModel.value;
+      }
+      populateWrwCreateDiapSelect();
+      if (el.contextMenuWrwCreateHint) {
+        const ids = selectedNodeIdList();
+        el.contextMenuWrwCreateHint.textContent =
+          "Nodes " + ids.join(", ") + " → wall rectangle";
+      }
+    } else if (el.contextMenuWrwCreateHint) {
+      el.contextMenuWrwCreateHint.textContent = "";
+    }
+  }
+  const timberDiapIds = timberDiapIdsFromSelectedDmem();
+  if (el.contextMenuDmemEdits) {
+    el.contextMenuDmemEdits.hidden = dmemCount === 0 || timberDiapIds.length === 0;
+    if (dmemCount > 0 && timberDiapIds.length > 0 && el.contextMenuDiapMultiplier) {
+      const m = commonDiapTimberMultiplier();
+      el.contextMenuDiapMultiplier.value = m == null ? "" : String(m);
+    }
+    if (el.contextMenuDiapHint) {
+      if (dmemCount > 0 && timberDiapIds.length === 0) {
+        el.contextMenuDiapHint.textContent = "Selected DMEM uses explicit DMAT (SRC=0); multiplier edit unavailable.";
+      } else if (timberDiapIds.length > 0) {
+        el.contextMenuDiapHint.textContent = "Updates DIAP id(s): " + timberDiapIds.join(", ");
+      } else {
+        el.contextMenuDiapHint.textContent = "";
+      }
+    }
   }
   if (el.contextMenuTitle) {
     const titleParts = [];
@@ -1321,6 +2322,12 @@ function showContextMenu(clientX, clientY) {
     }
     if (nodeCount > 0) {
       titleParts.push(nodeCount + " node" + (nodeCount === 1 ? "" : "s"));
+    }
+    if (dmemCount > 0) {
+      titleParts.push(dmemCount + " DMEM");
+    }
+    if (wrwCount > 0) {
+      titleParts.push(wrwCount + " WRW");
     }
     el.contextMenuTitle.textContent = titleParts.join(", ") + " picked";
   }
@@ -1357,11 +2364,19 @@ function pruneSelectionToModel() {
   if (!currentModel) return;
   const validElems = new Set(currentModel.elements.map(function (e) { return e.id; }));
   const validNodes = new Set(currentModel.nodes.map(function (n) { return n.id; }));
+  const validDmem = new Set((currentModel.membrane_elements || []).map(function (m) { return m.id; }));
+  const validWrw = new Set((currentModel.wood_rated_walls || []).map(function (w) { return w.id; }));
   selectedElementIds = new Set(
     Array.from(selectedElementIds).filter(function (id) { return validElems.has(id); })
   );
   selectedNodeIds = new Set(
     Array.from(selectedNodeIds).filter(function (id) { return validNodes.has(id); })
+  );
+  selectedDmemIds = new Set(
+    Array.from(selectedDmemIds).filter(function (id) { return validDmem.has(id); })
+  );
+  selectedWrwIds = new Set(
+    Array.from(selectedWrwIds).filter(function (id) { return validWrw.has(id); })
   );
   updateSelectionHighlight();
   updateSelectionPanel();
@@ -1380,7 +2395,7 @@ async function restoreEditHistoryEntry(snapshot, redoTarget) {
     const current = await fetchInputText(path);
     redoTarget.push({ path: path, text: current });
     await saveInputText(path, snapshot.text);
-    await loadSelectedModel(false, { keepSelection: true });
+    await loadSelectedModel(false, { keepSelection: true, keepCamera: true });
     pruneSelectionToModel();
     return true;
   } catch (ex) {
@@ -1450,6 +2465,77 @@ async function applyModelEdit(extra) {
       action: "delete_nodes",
       node_ids: selectedNodeIdList(),
     };
+  } else if (extra.action === "create_dmem") {
+    if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
+      || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
+    const diapId = parseInt(extra.diap_id, 10);
+    if (!isFinite(diapId)) return;
+    payload = {
+      action: "create_dmem",
+      node_ids: selectedNodeIdList(),
+      diap_id: diapId,
+    };
+  } else if (extra.action === "create_wwll") {
+    if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
+      || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
+    const multiplier = parseFloat(extra.multiplier);
+    if (!isFinite(multiplier) || multiplier <= 0) return;
+    payload = {
+      action: "create_wwll",
+      node_ids: selectedNodeIdList(),
+      multiplier: multiplier,
+      model: extra.model,
+      layo: extra.layo,
+    };
+    if (extra.diap_id !== "" && extra.diap_id != null) {
+      const diapId = parseInt(extra.diap_id, 10);
+      if (isFinite(diapId)) payload.diap_id = diapId;
+    }
+  } else if (extra.action === "delete_dmem") {
+    if (selectedDmemIds.size === 0) return;
+    payload = {
+      action: "delete_dmem",
+      dmem_ids: selectedDmemIdList(),
+    };
+  } else if (extra.action === "delete_wwll") {
+    if (selectedWrwIds.size === 0) return;
+    payload = {
+      action: "delete_wwll",
+      wwll_ids: selectedWrwIdList(),
+    };
+  } else if (extra.action === "set_wwll_multiplier") {
+    if (selectedWrwIds.size === 0) return;
+    payload = {
+      action: "set_wwll_multiplier",
+      wwll_ids: selectedWrwIdList(),
+      multiplier: extra.multiplier,
+    };
+  } else if (extra.action === "set_wwll_model") {
+    if (selectedWrwIds.size === 0) return;
+    const model = parseInt(extra.model, 10);
+    if (model !== 0 && model !== 1) return;
+    payload = {
+      action: "set_wwll_model",
+      wwll_ids: selectedWrwIdList(),
+      model: model,
+    };
+  } else if (extra.action === "set_diap_timber_multiplier") {
+    const diapIds = timberDiapIdsFromSelectedDmem();
+    if (diapIds.length === 0) return;
+    payload = {
+      action: "set_diap_timber_multiplier",
+      diap_ids: diapIds,
+      multiplier: extra.multiplier,
+    };
+  } else if (extra.action === "set_cons") {
+    if (selectedNodeIds.size === 0) return;
+    const fixed = extra.fixed;
+    if (!fixed || fixed.length !== 6) return;
+    payload = {
+      action: "set_cons",
+      node_ids: selectedNodeIdList(),
+      fixed: fixed.map(function (v) { return !!v; }),
+    };
   } else {
     if (selectedElementIds.size === 0) return;
     payload = Object.assign({ element_ids: selectedElementIdList() }, extra);
@@ -1472,13 +2558,37 @@ async function applyModelEdit(extra) {
       throw new Error(err.detail || res.statusText);
     }
     const body = await res.json();
-    const destructive = payload.action === "delete" || payload.action === "delete_nodes";
+    const destructive = payload.action === "delete" || payload.action === "delete_nodes"
+      || payload.action === "delete_dmem" || payload.action === "delete_wwll";
+    const createdDmem = payload.action === "create_dmem";
+    const createdWrw = payload.action === "create_wwll";
     const prevElems = new Set(selectedElementIds);
     const prevNodes = new Set(selectedNodeIds);
-    await loadSelectedModel(false, { keepSelection: !destructive });
-    if (!destructive) {
+    const prevDmem = new Set(selectedDmemIds);
+    const prevWrw = new Set(selectedWrwIds);
+    await loadSelectedModel(false, {
+      keepSelection: !destructive && !createdDmem && !createdWrw,
+      keepCamera: true,
+    });
+    if (createdDmem) {
+      const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
+      if (newId != null) {
+        replacePickSelection([], [], [newId], []);
+      } else {
+        clearSelection();
+      }
+    } else if (createdWrw) {
+      const newId = findWrwIdByNodes(payload.node_ids);
+      if (newId != null) {
+        replacePickSelection([], [], [], [newId]);
+      } else {
+        clearSelection();
+      }
+    } else if (!destructive) {
       selectedElementIds = prevElems;
       selectedNodeIds = prevNodes;
+      selectedDmemIds = prevDmem;
+      selectedWrwIds = prevWrw;
       pruneSelectionToModel();
     }
     let msg = path + " — edit saved";
@@ -1529,8 +2639,115 @@ function initContextMenu() {
       applyModelEdit({ action: "delete_nodes" });
       return;
     }
+    if (action === "delete-dmem") {
+      const count = selectedDmemIds.size;
+      const ok = window.confirm("Delete " + count + " DMEM record" + (count === 1 ? "" : "s") + "?");
+      if (!ok) return;
+      applyModelEdit({ action: "delete_dmem" });
+      return;
+    }
+    if (action === "delete-wrw") {
+      const count = selectedWrwIds.size;
+      const ok = window.confirm("Delete " + count + " WRW record" + (count === 1 ? "" : "s") + "?");
+      if (!ok) return;
+      applyModelEdit({ action: "delete_wwll" });
+      return;
+    }
+    if (action === "set-wrw-model") {
+      const raw = el.contextMenuWrwModel ? el.contextMenuWrwModel.value : "1";
+      applyWrwModelChange(raw);
+      return;
+    }
+    if (action === "set-wrw-multiplier") {
+      const raw = el.contextMenuWrwMultiplier ? el.contextMenuWrwMultiplier.value.trim() : "";
+      const m = parseFloat(raw);
+      if (!isFinite(m) || m <= 0) {
+        window.alert("Enter a positive wall multiplier.");
+        return;
+      }
+      applyModelEdit({ action: "set_wwll_multiplier", multiplier: m });
+      return;
+    }
+    if (action === "set-diap-multiplier") {
+      const raw = el.contextMenuDiapMultiplier ? el.contextMenuDiapMultiplier.value.trim() : "";
+      const m = parseFloat(raw);
+      if (!isFinite(m) || m <= 0) {
+        window.alert("Enter a positive floor/roof multiplier.");
+        return;
+      }
+      applyModelEdit({ action: "set_diap_timber_multiplier", multiplier: m });
+      return;
+    }
+    if (action === "create-dmem") {
+      if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
+        || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
+        window.alert("Pick exactly 3 nodes (no elements / DMEM / WRW) to create a DMEM triangle.");
+        return;
+      }
+      const diapRaw = el.contextMenuDmemCreateDiap ? el.contextMenuDmemCreateDiap.value : "";
+      const diapId = parseInt(diapRaw, 10);
+      if (!isFinite(diapId)) {
+        window.alert("Select a DIAP for the new DMEM.");
+        return;
+      }
+      const ids = selectedNodeIdList();
+      const ok = window.confirm(
+        "Create DMEM on DIAP " + diapId + " with nodes " + ids.join(", ") + "?"
+      );
+      if (!ok) return;
+      applyModelEdit({ action: "create_dmem", diap_id: diapId });
+      return;
+    }
+    if (action === "create-wrw") {
+      if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
+        || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
+        window.alert("Pick exactly 4 nodes (no elements / DMEM / WRW) to create a WRW wall.");
+        return;
+      }
+      const multRaw = el.contextMenuWrwCreateMultiplier
+        ? el.contextMenuWrwCreateMultiplier.value.trim() : "2";
+      const multiplier = parseFloat(multRaw);
+      if (!isFinite(multiplier) || multiplier <= 0) {
+        window.alert("Enter a positive wall multiplier.");
+        return;
+      }
+      const model = getPickWrwCreateModel();
+      const diapRaw = el.contextMenuWrwCreateDiap ? el.contextMenuWrwCreateDiap.value : "";
+      const modelLabel = wwllModelLabelFromCode(model);
+      const ids = selectedNodeIdList();
+      const diapText = diapRaw ? ("DIAP " + diapRaw) : "no DIAP tie";
+      const ok = window.confirm(
+        "Create WRW (" + modelLabel + ", M=" + multiplier + ", " + diapText +
+        ") with nodes " + ids.join(", ") + "?"
+      );
+      if (!ok) return;
+      applyModelEdit({
+        action: "create_wwll",
+        multiplier: multiplier,
+        model: model,
+        diap_id: diapRaw,
+        layo: model === 0 ? 1 : 1,
+      });
+      return;
+    }
     if (action === "ejnt-edit") {
       openEjntEditor();
+      return;
+    }
+    if (action === "cons-preset-fixed") {
+      applyConsPreset(CONS_PRESET_FIXED);
+      return;
+    }
+    if (action === "cons-preset-pinned") {
+      applyConsPreset(CONS_PRESET_PINNED);
+      return;
+    }
+    if (action === "cons-preset-free") {
+      applyConsPreset(CONS_PRESET_FREE);
+      return;
+    }
+    if (action === "set-cons") {
+      applyConsChange(readConsFixedFromCheckboxes(consCheckboxElements("contextMenu")));
       return;
     }
   });
@@ -1544,6 +2761,54 @@ function initContextMenu() {
   if (el.btnEjntEditClose) {
     el.btnEjntEditClose.addEventListener("click", () => hideEjntEditor());
   }
+
+  if (el.pickWrwCreateModel) {
+    el.pickWrwCreateModel.addEventListener("change", function () {
+      setPickWrwCreateModelValue(getPickWrwCreateModel());
+    });
+  }
+  if (el.contextMenuWrwCreateModel) {
+    el.contextMenuWrwCreateModel.addEventListener("change", function () {
+      if (el.pickWrwCreateModel) {
+        el.pickWrwCreateModel.value = el.contextMenuWrwCreateModel.value;
+      }
+      setPickWrwCreateModelValue(el.contextMenuWrwCreateModel.value);
+    });
+  }
+  if (el.btnPickWrwApplyModel) {
+    el.btnPickWrwApplyModel.addEventListener("click", function () {
+      const raw = el.pickWrwEditModel ? el.pickWrwEditModel.value : "1";
+      applyWrwModelChange(raw);
+    });
+  }
+  if (el.btnPickConsFixed) {
+    el.btnPickConsFixed.addEventListener("click", function () {
+      applyConsPreset(CONS_PRESET_FIXED);
+    });
+  }
+  if (el.btnPickConsPinned) {
+    el.btnPickConsPinned.addEventListener("click", function () {
+      applyConsPreset(CONS_PRESET_PINNED);
+    });
+  }
+  if (el.btnPickConsFree) {
+    el.btnPickConsFree.addEventListener("click", function () {
+      applyConsPreset(CONS_PRESET_FREE);
+    });
+  }
+  if (el.btnPickConsApply) {
+    el.btnPickConsApply.addEventListener("click", function () {
+      applyConsChange(readConsFixedFromCheckboxes(consCheckboxElements("pick")));
+    });
+  }
+  consCheckboxElements("pick").forEach(function (input) {
+    if (!input) return;
+    input.addEventListener("change", function () {
+      input.indeterminate = false;
+      const fixed = readConsFixedFromCheckboxes(consCheckboxElements("pick"));
+      syncConsCheckboxGroups(fixed, false);
+    });
+  });
 
   document.addEventListener("mousedown", function (ev) {
     if (!el.elemContextMenu || el.elemContextMenu.hidden) return;
@@ -1612,21 +2877,29 @@ function updateViewerInfoOverlay(model) {
     displayLines.push("input loads (" + loadTypeFilterValue() + ")");
     if (el.chkLoadValues.checked) displayLines.push("load values");
   }
+  if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
+    const wc = windCaseById(windVisualData, selectedWindCaseId);
+    if (wc) {
+      displayLines.push(
+        "wind: " + wc.name + " (" + (wc.direction_label || wc.direction) + ", LC" + wc.load_case + ")"
+      );
+    }
+  }
   if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
   if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
   if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
-  if (el.chkEJnt && el.chkEJnt.checked) displayLines.push("EJNT markers");
+  if (el.chkEJnt && el.chkEJnt.checked) displayLines.push("element joints");
   if (el.chkLabels && el.chkLabels.checked) displayLines.push("node IDs");
   if (el.chkElemLabels && el.chkElemLabels.checked) displayLines.push("element IDs");
   if (el.chkMaterial && el.chkMaterial.checked) displayLines.push("material labels");
   if (el.chkSection && el.chkSection.checked) displayLines.push("section labels");
   if (el.chkMembrane && el.chkMembrane.checked) {
     const nmem = model.membrane_elements ? model.membrane_elements.length : 0;
-    displayLines.push("DMEM (" + nmem + ")");
+    displayLines.push("diaphragm members (" + nmem + ")");
   }
   if (el.chkWoodWall && el.chkWoodWall.checked) {
     const nwrw = model.wood_rated_walls ? model.wood_rated_walls.length : 0;
-    displayLines.push("WRW (" + nwrw + ")");
+    displayLines.push("wood walls (" + nwrw + ")");
   }
   if (forceComp !== "None") {
     displayLines.push(
@@ -1644,14 +2917,35 @@ function updateViewerInfoOverlay(model) {
     "solved: " + boolOnOff(solved),
     "analysis date: " + (model.date_analysis || "-"),
     "LC: " + lc,
+  ];
+
+  if (solved) {
+    const reactTotals = computeReactionTotals(model, lc);
+    if (reactTotals) {
+      lines.push(
+        "ΣTx/Ty/Tz: "
+          + formatReactionValue(reactTotals.tx) + " / "
+          + formatReactionValue(reactTotals.ty) + " / "
+          + formatReactionValue(reactTotals.tz) + " kN",
+        "ΣRx/Ry/Rz: "
+          + formatReactionValue(reactTotals.rx) + " / "
+          + formatReactionValue(reactTotals.ry) + " / "
+          + formatReactionValue(reactTotals.rz) + " kNm"
+      );
+    } else {
+      lines.push("reactions: (none for this LC)");
+    }
+  }
+
+  lines.push(
     "nodes: " + (model.nodes ? model.nodes.length : 0),
     "elements: " + (model.elements ? model.elements.length : 0),
-    "DMEM: " + (model.membrane_elements ? model.membrane_elements.length : 0),
-    "WRW: " + (model.wood_rated_walls ? model.wood_rated_walls.length : 0),
+    "Diaphragm members: " + (model.membrane_elements ? model.membrane_elements.length : 0),
+    "Wood walls: " + (model.wood_rated_walls ? model.wood_rated_walls.length : 0),
     "supports: " + supports,
     "point loads: " + pointLoads,
     "element loads: " + elemLoads,
-  ];
+  );
 
   if (displayLines.length > 0) {
     lines.push(
@@ -1665,6 +2959,7 @@ function updateViewerInfoOverlay(model) {
     "",
     "[Options]",
     "load arrow scale: " + Number(viewerOptions.loadArrowSize).toFixed(1),
+    "reaction arrow scale: " + Number(viewerOptions.reactionArrowSize).toFixed(1),
     "load label scale: " + Number(viewerOptions.loadLabelSize).toFixed(0),
     "reaction label scale: " + Number(viewerOptions.reactionLabelSize).toFixed(0),
   );
@@ -1714,6 +3009,10 @@ function initThree() {
   scene.add(forceGroup);
   forceLabelGroup = new THREE.Group();
   scene.add(forceLabelGroup);
+  windGroup = new THREE.Group();
+  scene.add(windGroup);
+  windLabelGroup = new THREE.Group();
+  scene.add(windLabelGroup);
   axesGroup = new THREE.Group();
   scene.add(axesGroup);
 
@@ -1745,7 +3044,10 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   updateSupportGizmoPositions();
+  updateReactionForceDisplay();
   updateNodeLabelPositions();
+  updateElemLabelPositions();
+  updateForceLabelPositions();
   renderer.render(scene, camera);
 }
 
@@ -2137,6 +3439,7 @@ function applyDispContourAutoRange() {
   const autoRange = dispMagnitudeRange(currentModel, lc, defFac);
   dispContourScaleKey = null;
   syncDispContourInputs(autoRange, lc, defFac, true);
+  onResultsDisplayChanged();
   rebuildScene();
 }
 
@@ -2149,10 +3452,12 @@ function addDispContourLineSegments(positions, colors, group) {
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
       linewidth: 1,
+      depthTest: false,
+      depthWrite: false,
     });
     const lines = new THREE.LineSegments(geo, mat);
     lines.frustumCulled = false;
-    lines.renderOrder = 12;
+    lines.renderOrder = 31;
     group.add(lines);
     return;
   }
@@ -2165,7 +3470,7 @@ function addDispContourLineSegments(positions, colors, group) {
     const g = (colors[base + 1] + colors[base + 4]) * 0.5;
     const b = (colors[base + 2] + colors[base + 5]) * 0.5;
     const hex = (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
-    addWideLineSegmentsFromPts(pts, hex, group, 12, lineW);
+    addWideLineSegmentsFromPts(pts, hex, group, 31, lineW, ALPHA.opaque, "overlay");
   }
 }
 
@@ -2227,6 +3532,451 @@ function clearGroup(g) {
   }
 }
 
+function modelSectionMap(model) {
+  const out = {};
+  for (const s of model.sections || []) out[s.id] = s;
+  return out;
+}
+
+function sectionDimsMeters(section) {
+  if (!section || !Array.isArray(section.dims) || section.dims.length === 0) return null;
+  const dims = [];
+  for (const d of section.dims) {
+    const v = Number(d) * 1e-3; // mm -> m
+    if (!isFinite(v) || v <= 0) return null;
+    dims.push(v);
+  }
+  return dims;
+}
+
+function sanitizeHexColor(value, fallback) {
+  const fb = fallback || "#c9cdd3";
+  const s = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : fb;
+}
+
+function sectionProfileKey(type, dims) {
+  const ds = dims.map(function (v) { return v.toFixed(6); }).join(",");
+  return String(type) + ":" + ds;
+}
+
+function makeRectShape(width, height) {
+  const hw = width * 0.5;
+  const hh = height * 0.5;
+  const shape = new THREE.Shape();
+  shape.moveTo(-hw, -hh);
+  shape.lineTo(hw, -hh);
+  shape.lineTo(hw, hh);
+  shape.lineTo(-hw, hh);
+  shape.lineTo(-hw, -hh);
+  return shape;
+}
+
+function makeSectionShape(type, dims) {
+  if (type === 0) {
+    if (dims.length < 2) return null;
+    return makeRectShape(dims[0], dims[1]);
+  }
+  if (type === 1) {
+    if (dims.length < 1) return null;
+    const r = dims[0] * 0.5;
+    if (r <= 0) return null;
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, r, 0, Math.PI * 2, false);
+    return shape;
+  }
+  if (type === 2) {
+    if (dims.length < 4) return null;
+    const h = dims[0], w = dims[1], tw = dims[2], tf = dims[3];
+    if (h <= 0 || w <= 0 || tw <= 0 || tf <= 0) return null;
+    if (tw >= w || tf * 2 >= h) return null;
+    const shape = makeRectShape(w, h);
+    const hw = w * 0.5;
+    const hh = h * 0.5;
+    const webHalf = tw * 0.5;
+    const clearH = h - 2 * tf;
+    const holeLeft = new THREE.Path();
+    holeLeft.moveTo(-hw, -clearH * 0.5);
+    holeLeft.lineTo(-webHalf, -clearH * 0.5);
+    holeLeft.lineTo(-webHalf, clearH * 0.5);
+    holeLeft.lineTo(-hw, clearH * 0.5);
+    holeLeft.lineTo(-hw, -clearH * 0.5);
+    const holeRight = new THREE.Path();
+    holeRight.moveTo(webHalf, -clearH * 0.5);
+    holeRight.lineTo(hw, -clearH * 0.5);
+    holeRight.lineTo(hw, clearH * 0.5);
+    holeRight.lineTo(webHalf, clearH * 0.5);
+    holeRight.lineTo(webHalf, -clearH * 0.5);
+    shape.holes.push(holeLeft, holeRight);
+    return shape;
+  }
+  if (type === 3) {
+    if (dims.length < 2) return null;
+    const d = dims[0], t = dims[1];
+    const ro = d * 0.5;
+    const ri = ro - t;
+    if (ro <= 0 || ri <= 1e-6) return null;
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, ro, 0, Math.PI * 2, false);
+    const hole = new THREE.Path();
+    hole.absarc(0, 0, ri, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+    return shape;
+  }
+  if (type === 4) {
+    if (dims.length < 4) return null;
+    const h = dims[0], w = dims[1], tw = dims[2], tf = dims[3];
+    if (h <= 0 || w <= 0 || tw <= 0 || tf <= 0) return null;
+    const innerW = w - 2 * tw;
+    const innerH = h - 2 * tf;
+    if (innerW <= 1e-6 || innerH <= 1e-6) return null;
+    const shape = makeRectShape(w, h);
+    const hole = makeRectShape(innerW, innerH);
+    shape.holes.push(hole);
+    return shape;
+  }
+  return null;
+}
+
+function sectionProfile(type, dims) {
+  const key = sectionProfileKey(type, dims);
+  if (_sectionProfileCache.has(key)) return _sectionProfileCache.get(key);
+  const shape = makeSectionShape(type, dims);
+  _sectionProfileCache.set(key, shape || null);
+  return shape || null;
+}
+
+function sectionSolidGeometry(type, dims) {
+  const key = sectionProfileKey(type, dims);
+  if (_sectionSolidGeometryCache.has(key)) return _sectionSolidGeometryCache.get(key);
+  const profile = sectionProfile(type, dims);
+  if (!profile) {
+    _sectionSolidGeometryCache.set(key, null);
+    return null;
+  }
+  const geo = new THREE.ExtrudeGeometry(profile, {
+    steps: 1,
+    depth: 1,
+    bevelEnabled: false,
+    curveSegments: SECTION_SOLID_SEGMENTS,
+  });
+  // Extrude depth(+Z) -> member axis(+X)
+  geo.rotateY(Math.PI * 0.5);
+  // Normalize local member axis to [0, 1] so start/end can be mapped robustly.
+  geo.computeBoundingBox();
+  if (geo.boundingBox) {
+    const minX = geo.boundingBox.min.x;
+    const maxX = geo.boundingBox.max.x;
+    const spanX = maxX - minX;
+    if (spanX > 1e-9) {
+      geo.translate(-minX, 0, 0);
+      geo.scale(1 / spanX, 1, 1);
+    }
+  }
+  geo.computeVertexNormals();
+  _sectionSolidGeometryCache.set(key, geo);
+  return geo;
+}
+
+function sectionSolidEndpointMismatch(p0, p1, basis, length) {
+  const end = p0.clone().addScaledVector(basis.vx, length);
+  const tol = Math.max(length * 1e-4, 1e-6);
+  return end.distanceToSquared(p1) > tol * tol;
+}
+
+const _sectionSolidExportMaterial = new THREE.MeshBasicMaterial();
+
+function forEachSectionSolidMesh(model, visitor, options) {
+  if (!model || !Array.isArray(model.elements) || typeof visitor !== "function") return 0;
+  const opts = options || {};
+  const lc = opts.lc != null ? opts.lc : (el.lcSelect ? el.lcSelect.value : 1);
+  const defFac = opts.defFac != null ? opts.defFac : 0;
+  const deformed = !!opts.deformed;
+  if (deformed) return 0;
+
+  const nm = nodeMap(model);
+  const sectionById = modelSectionMap(model);
+  let count = 0;
+
+  for (const e of model.elements) {
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1) continue;
+    const sec = sectionById[e.section_id];
+    const dims = sectionDimsMeters(sec);
+    if (!sec || !dims) continue;
+
+    const p0u = nodePosition(n0, model, lc, defFac, false);
+    const p1u = nodePosition(n1, model, lc, defFac, false);
+    const axis = p1u.clone().sub(p0u);
+    const len = axis.length();
+    if (len < 1e-8) continue;
+
+    const geo = sectionSolidGeometry(sec.type, dims);
+    if (!geo) continue;
+
+    const basis = elementBasisVectors(e, p0u, p1u);
+    if (sectionSolidEndpointMismatch(p0u, p1u, basis, len)) continue;
+
+    const rot = new THREE.Matrix4().makeBasis(basis.vx, basis.vy, basis.vz);
+    const q = new THREE.Quaternion().setFromRotationMatrix(rot);
+    const mesh = new THREE.Mesh(geo, _sectionSolidExportMaterial);
+    mesh.position.copy(p0u);
+    mesh.quaternion.copy(q);
+    mesh.scale.set(len, 1, 1);
+    mesh.updateMatrixWorld(true);
+    visitor(mesh, e, sec);
+    count += 1;
+  }
+  return count;
+}
+
+function meshWorldTriangles(mesh, layerName) {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  if (!pos) return [];
+  const matrix = mesh.matrixWorld;
+  const index = geo.index;
+  const out = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+
+  function pushTri(i0, i1, i2) {
+    a.fromBufferAttribute(pos, i0).applyMatrix4(matrix);
+    b.fromBufferAttribute(pos, i1).applyMatrix4(matrix);
+    c.fromBufferAttribute(pos, i2).applyMatrix4(matrix);
+    out.push({
+      layer: layerName,
+      x1: a.x, y1: a.y, z1: a.z,
+      x2: b.x, y2: b.y, z2: b.z,
+      x3: c.x, y3: c.y, z3: c.z,
+    });
+  }
+
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      pushTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+    }
+  } else {
+    for (let i = 0; i < pos.count; i += 3) {
+      pushTri(i, i + 1, i + 2);
+    }
+  }
+  return out;
+}
+
+function collectSectionSolidTriangles(model) {
+  const triangles = [];
+  let meshCount = 0;
+  forEachSectionSolidMesh(model, function (mesh, elem) {
+    triangles.push.apply(triangles, meshWorldTriangles(mesh, "E" + elem.id));
+    meshCount += 1;
+  });
+  return { triangles: triangles, meshCount: meshCount };
+}
+
+function dxfLine(code, value) {
+  return String(code) + "\r\n" + String(value) + "\r\n";
+}
+
+function dxfNum(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  return n.toFixed(6).replace(/-0\.000000$/, "0.000000");
+}
+
+function dxfBounds(triangles) {
+  let xmin = Infinity;
+  let ymin = Infinity;
+  let zmin = Infinity;
+  let xmax = -Infinity;
+  let ymax = -Infinity;
+  let zmax = -Infinity;
+  triangles.forEach(function (tri) {
+    [
+      [tri.x1, tri.y1, tri.z1],
+      [tri.x2, tri.y2, tri.z2],
+      [tri.x3, tri.y3, tri.z3],
+    ].forEach(function (p) {
+      xmin = Math.min(xmin, p[0]);
+      ymin = Math.min(ymin, p[1]);
+      zmin = Math.min(zmin, p[2]);
+      xmax = Math.max(xmax, p[0]);
+      ymax = Math.max(ymax, p[1]);
+      zmax = Math.max(zmax, p[2]);
+    });
+  });
+  if (!Number.isFinite(xmin)) {
+    return { xmin: 0, ymin: 0, zmin: 0, xmax: 1, ymax: 1, zmax: 1 };
+  }
+  return { xmin: xmin, ymin: ymin, zmin: zmin, xmax: xmax, ymax: ymax, zmax: zmax };
+}
+
+function buildSectionSolidsDxf(triangles) {
+  const layers = { "0": true };
+  triangles.forEach(function (tri) {
+    layers[tri.layer] = true;
+  });
+  const layerNames = Object.keys(layers).sort();
+  const b = dxfBounds(triangles);
+
+  let out = "";
+  out += dxfLine(999, "Structural Toolbox section solids");
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "HEADER");
+  out += dxfLine(9, "$ACADVER");
+  out += dxfLine(1, "AC1009");
+  out += dxfLine(9, "$INSBASE");
+  out += dxfLine(10, "0.0");
+  out += dxfLine(20, "0.0");
+  out += dxfLine(30, "0.0");
+  out += dxfLine(9, "$EXTMIN");
+  out += dxfLine(10, dxfNum(b.xmin));
+  out += dxfLine(20, dxfNum(b.ymin));
+  out += dxfLine(30, dxfNum(b.zmin));
+  out += dxfLine(9, "$EXTMAX");
+  out += dxfLine(10, dxfNum(b.xmax));
+  out += dxfLine(20, dxfNum(b.ymax));
+  out += dxfLine(30, dxfNum(b.zmax));
+  out += dxfLine(0, "ENDSEC");
+
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "TABLES");
+  out += dxfLine(0, "TABLE");
+  out += dxfLine(2, "LTYPE");
+  out += dxfLine(70, 1);
+  out += dxfLine(0, "LTYPE");
+  out += dxfLine(2, "CONTINUOUS");
+  out += dxfLine(70, 64);
+  out += dxfLine(3, "Solid line");
+  out += dxfLine(72, 65);
+  out += dxfLine(73, 0);
+  out += dxfLine(40, "0.0");
+  out += dxfLine(0, "ENDTAB");
+  out += dxfLine(0, "TABLE");
+  out += dxfLine(2, "LAYER");
+  out += dxfLine(70, layerNames.length);
+  layerNames.forEach(function (name) {
+    out += dxfLine(0, "LAYER");
+    out += dxfLine(2, name);
+    out += dxfLine(70, 64);
+    out += dxfLine(62, 7);
+    out += dxfLine(6, "CONTINUOUS");
+  });
+  out += dxfLine(0, "ENDTAB");
+  out += dxfLine(0, "TABLE");
+  out += dxfLine(2, "STYLE");
+  out += dxfLine(70, 0);
+  out += dxfLine(0, "ENDTAB");
+  out += dxfLine(0, "ENDSEC");
+
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "BLOCKS");
+  out += dxfLine(0, "ENDSEC");
+
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "ENTITIES");
+  triangles.forEach(function (tri) {
+    out += dxfLine(0, "3DFACE");
+    out += dxfLine(8, tri.layer);
+    out += dxfLine(10, dxfNum(tri.x1));
+    out += dxfLine(20, dxfNum(tri.y1));
+    out += dxfLine(30, dxfNum(tri.z1));
+    out += dxfLine(11, dxfNum(tri.x2));
+    out += dxfLine(21, dxfNum(tri.y2));
+    out += dxfLine(31, dxfNum(tri.z2));
+    out += dxfLine(12, dxfNum(tri.x3));
+    out += dxfLine(22, dxfNum(tri.y3));
+    out += dxfLine(32, dxfNum(tri.z3));
+    out += dxfLine(13, dxfNum(tri.x3));
+    out += dxfLine(23, dxfNum(tri.y3));
+    out += dxfLine(33, dxfNum(tri.z3));
+  });
+  out += dxfLine(0, "ENDSEC");
+  out += dxfLine(0, "EOF");
+  return out;
+}
+
+function sectionSolidDxfFilename() {
+  const path = currentModelPath || "model.dat";
+  const base = path.replace(/^.*[\\/]/, "").replace(/\.dat$/i, "") || "model";
+  return base + "_section_solids.dxf";
+}
+
+function downloadTextFile(filename, text, mimeType) {
+  const blob = new Blob([text], { type: mimeType || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+}
+
+function exportSectionSolidsDxf() {
+  if (!currentModel) {
+    window.alert("モデルが読み込まれていません。");
+    return;
+  }
+  if (el.status) el.status.textContent = "Section solid DXF を生成中…";
+  if (el.btnExportSectionSolidsDxf) el.btnExportSectionSolidsDxf.disabled = true;
+
+  window.setTimeout(function () {
+    try {
+      const result = collectSectionSolidTriangles(currentModel);
+      if (!result.meshCount) {
+        window.alert("DXF に書き出せる section solid がありません（断面形状未対応、または部材がありません）。");
+        return;
+      }
+      const dxf = buildSectionSolidsDxf(result.triangles);
+      downloadTextFile(sectionSolidDxfFilename(), dxf, "application/dxf");
+      if (el.status) {
+        el.status.textContent = "DXF 出力: " + result.meshCount + " 部材, "
+          + result.triangles.length + " 面 (" + sectionSolidDxfFilename() + ")";
+      }
+    } catch (ex) {
+      window.alert("DXF 出力エラー: " + ex.message);
+      if (el.status) el.status.textContent = "DXF 出力エラー";
+    } finally {
+      if (el.btnExportSectionSolidsDxf) el.btnExportSectionSolidsDxf.disabled = !currentModel;
+    }
+  }, 0);
+}
+
+function elementBasisVectors(e, p0, p1) {
+  const vx = p1.clone().sub(p0).normalize();
+  if (e && Array.isArray(e.vy) && Array.isArray(e.vz)) {
+    const vyRaw = new THREE.Vector3(e.vy[0], e.vy[1], e.vy[2]);
+    const vzRaw = new THREE.Vector3(e.vz[0], e.vz[1], e.vz[2]);
+    if (vyRaw.lengthSq() > 1e-10 && vzRaw.lengthSq() > 1e-10) {
+      const vyProj = vyRaw.clone().addScaledVector(vx, -vyRaw.dot(vx));
+      if (vyProj.lengthSq() > 1e-10) {
+        const vy = vyProj.normalize();
+        let vz = new THREE.Vector3().crossVectors(vx, vy).normalize();
+        if (vz.dot(vzRaw) < 0) {
+          vy.multiplyScalar(-1);
+          vz = new THREE.Vector3().crossVectors(vx, vy).normalize();
+        }
+        return { vx, vy, vz };
+      }
+    }
+  }
+  let ref = new THREE.Vector3(0, 0, 1);
+  if (Math.abs(vx.dot(ref)) > 0.92) ref = new THREE.Vector3(0, 1, 0);
+  const vy = new THREE.Vector3().crossVectors(ref, vx).normalize();
+  const vz = new THREE.Vector3().crossVectors(vx, vy).normalize();
+  return { vx, vy, vz };
+}
+
+function sectionSolidRenderEnabled(model, showSectionSolids, deformed, showDispContour) {
+  if (!showSectionSolids || deformed || showDispContour) return false;
+  const nElem = model && model.elements ? model.elements.length : 0;
+  return nElem <= SECTION_SOLID_MAX_ELEMENTS;
+}
+
 function fitCamera(model) {
   const b = model.bounds;
   if (!b) return;
@@ -2243,11 +3993,30 @@ function fitCamera(model) {
   controls.update();
 }
 
+function captureCameraState() {
+  if (!camera || !controls) return null;
+  return {
+    position: camera.position.clone(),
+    target: controls.target.clone(),
+    near: camera.near,
+    far: camera.far,
+  };
+}
+
+function restoreCameraState(state) {
+  if (!state || !camera || !controls) return;
+  camera.position.copy(state.position);
+  controls.target.copy(state.target);
+  camera.near = state.near;
+  camera.far = state.far;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
 function updateWorldAxes(model) {
   clearGroup(axesGroup);
   if (!showWorldAxes) return;
-  const span = modelSpan(model);
-  const len = Math.max(span * 0.1, 0.12);
+  const len = worldAxesLength(model);
   const origin = new THREE.Vector3(0, 0, 0);
   const lineW = Math.max(supportLineWidthPx(), 1.5);
   const axes = [
@@ -2265,7 +4034,9 @@ function buildModelScene(model) {
   clearGroup(labelGroup);
   clearWideLineMaterials();
   supportGizmoEntries = [];
+  reactionForceEntries = [];
   nodeLabelEntries = [];
+  elemLabelEntries = [];
 
   enrichModelReactions(model);
 
@@ -2284,10 +4055,16 @@ function buildModelScene(model) {
   const showElemLabels = el.chkElemLabels.checked;
   const showMaterial = el.chkMaterial.checked;
   const showSection = el.chkSection.checked;
+  const showSectionSolids = !!(el.chkSectionSolids && el.chkSectionSolids.checked);
   const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  const showMembraneEdge = showMembrane
+    && !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
   const showWoodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
+  const showWoodWallEdge = showWoodWall
+    && !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
   const nm = nodeMap(model);
   const em = elemMap(model);
+  const sectionById = modelSectionMap(model);
   const span = modelSpan(model);
   const nodeLabelScale = nodeLabelScaleFactor();
   const elemLabelScale = elemLabelScaleFactor();
@@ -2296,6 +4073,12 @@ function buildModelScene(model) {
   const loadLabelScale = loadLabelScaleFactor();
   const reactionLabelScale = reactionLabelScaleFactor();
 
+  const useSectionSolids = sectionSolidRenderEnabled(
+    model,
+    showSectionSolids,
+    deformed,
+    showDispContour
+  );
   const linePts = [];
   const linePtsDef = [];
   const contourPts = [];
@@ -2313,68 +4096,123 @@ function buildModelScene(model) {
   }
 
   const defDiv = 16;
-  for (const e of model.elements) {
-    const n0 = nm[e.n0];
-    const n1 = nm[e.n1];
-    if (!n0 || !n1) continue;
-    const p0u = nodePosition(n0, model, lc, defFac, false);
-    const p1u = nodePosition(n1, model, lc, defFac, false);
-    linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+  if (useSectionSolids) {
+    const solidColor = sanitizeHexColor(viewerOptions.sectionSolidColor, colorHex(COLORS.element));
+    const solidOpacity = clampViewerOption("sectionSolidOpacity", Number(viewerOptions.sectionSolidOpacity));
+    const mat = new THREE.MeshStandardMaterial({
+      color: solidColor,
+      roughness: 0.85,
+      metalness: 0.02,
+      transparent: solidOpacity < 0.999,
+      opacity: solidOpacity,
+      side: THREE.DoubleSide,
+    });
+    forEachSectionSolidMesh(model, function (mesh) {
+      mesh.material = mat;
+      mesh.renderOrder = 2;
+      modelGroup.add(mesh);
+    }, { lc: lc, defFac: 0, deformed: false });
 
-    const needCurve = (deformed && !showDispContour) || (showDispContour && deformed && dispDisplayRange);
-    const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv) : null;
+    for (const e of model.elements) {
+      const n0 = nm[e.n0];
+      const n1 = nm[e.n1];
+      if (!n0 || !n1) continue;
+      const sec = sectionById[e.section_id];
+      const dims = sectionDimsMeters(sec);
+      if (!sec || !dims) {
+        const p0u = nodePosition(n0, model, lc, defFac, false);
+        const p1u = nodePosition(n1, model, lc, defFac, false);
+        linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+        continue;
+      }
+      const p0u = nodePosition(n0, model, lc, defFac, false);
+      const p1u = nodePosition(n1, model, lc, defFac, false);
+      const geo = sectionSolidGeometry(sec.type, dims);
+      if (!geo) {
+        linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+        continue;
+      }
+      const basis = elementBasisVectors(e, p0u, p1u);
+      const len = p0u.distanceTo(p1u);
+      if (sectionSolidEndpointMismatch(p0u, p1u, basis, len)) {
+        linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+      }
+    }
+    if (linePts.length > 0) {
+      addWideLineSegmentsFromPts(
+        linePts,
+        COLORS.element,
+        modelGroup,
+        2,
+        elementLineWidthPx(),
+        ALPHA.opaque
+      );
+    }
+  } else {
+    for (const e of model.elements) {
+      const n0 = nm[e.n0];
+      const n1 = nm[e.n1];
+      if (!n0 || !n1) continue;
+      const p0u = nodePosition(n0, model, lc, defFac, false);
+      const p1u = nodePosition(n1, model, lc, defFac, false);
+      linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
 
-    if (showDispContour && dispDisplayRange) {
-      if (deformed && curve) {
+      const needCurve = (deformed && !showDispContour) || (showDispContour && deformed && dispDisplayRange);
+      const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv) : null;
+
+      if (showDispContour && dispDisplayRange) {
+        if (deformed && curve) {
+          for (let i = 0; i < curve.pts.length - 1; i++) {
+            const a = curve.pts[i];
+            const b = curve.pts[i + 1];
+            contourPts.push(a.x, a.y, a.z, b.x, b.y, b.z);
+            const ca = dispContourColor(dispContourT(curve.mags[i], dispDisplayRange));
+            const cb = dispContourColor(dispContourT(curve.mags[i + 1], dispDisplayRange));
+            contourColors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b);
+          }
+        } else {
+          contourPts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
+          const m0 = nodeDispMagnitude(n0, lc, defFac);
+          const m1 = nodeDispMagnitude(n1, lc, defFac);
+          const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
+          const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
+          contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
+        }
+      }
+
+      if (deformed && !showDispContour && curve) {
         for (let i = 0; i < curve.pts.length - 1; i++) {
           const a = curve.pts[i];
           const b = curve.pts[i + 1];
-          contourPts.push(a.x, a.y, a.z, b.x, b.y, b.z);
-          const ca = dispContourColor(dispContourT(curve.mags[i], dispDisplayRange));
-          const cb = dispContourColor(dispContourT(curve.mags[i + 1], dispDisplayRange));
-          contourColors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b);
+          linePtsDef.push(a.x, a.y, a.z, b.x, b.y, b.z);
         }
-      } else {
-        contourPts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
-        const m0 = nodeDispMagnitude(n0, lc, defFac);
-        const m1 = nodeDispMagnitude(n1, lc, defFac);
-        const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
-        const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
-        contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
       }
     }
 
-    if (deformed && !showDispContour && curve) {
-      for (let i = 0; i < curve.pts.length - 1; i++) {
-        const a = curve.pts[i];
-        const b = curve.pts[i + 1];
-        linePtsDef.push(a.x, a.y, a.z, b.x, b.y, b.z);
-      }
+    if (linePts.length > 0) {
+      addWideLineSegmentsFromPts(
+        linePts,
+        COLORS.element,
+        modelGroup,
+        2,
+        elementLineWidthPx(),
+        (deformed || showDispContour) ? ALPHA.elementGhost : ALPHA.opaque
+      );
     }
-  }
 
-  if (linePts.length > 0) {
-    addWideLineSegmentsFromPts(
-      linePts,
-      COLORS.element,
-      modelGroup,
-      2,
-      elementLineWidthPx(),
-      (deformed || showDispContour) ? ALPHA.elementGhost : ALPHA.opaque
-    );
-  }
-
-  if (showDispContour && contourPts.length > 0) {
-    addDispContourLineSegments(contourPts, contourColors, modelGroup);
-  } else if (deformed && linePtsDef.length > 0) {
-    addWideLineSegmentsFromPts(
-      linePtsDef,
-      COLORS.deform,
-      modelGroup,
-      3,
-      elementLineWidthPx(),
-      ALPHA.opaque
-    );
+    if (showDispContour && contourPts.length > 0) {
+      addDispContourLineSegments(contourPts, contourColors, modelGroup);
+    } else if (deformed && linePtsDef.length > 0) {
+      addWideLineSegmentsFromPts(
+        linePtsDef,
+        COLORS.deform,
+        modelGroup,
+        30,
+        elementLineWidthPx(),
+        ALPHA.opaque,
+        "overlay"
+      );
+    }
   }
 
   const nodePts = [];
@@ -2425,6 +4263,7 @@ function buildModelScene(model) {
       deformed,
       nm,
       group: modelGroup,
+      showEdge: showMembraneEdge,
     });
   }
 
@@ -2435,6 +4274,7 @@ function buildModelScene(model) {
       deformed,
       nm,
       group: modelGroup,
+      showEdge: showWoodWallEdge,
     });
   }
 
@@ -2482,10 +4322,23 @@ function buildModelScene(model) {
       showValues: showLoadValues,
       loadLabelScale,
     });
+
+    drawDiaphragmInputLoads(model, {
+      lc,
+      defFac,
+      deformed,
+      span,
+      nm,
+      arrowBase,
+      maxWMag: Math.max(maxWMag, maxDiaphragmLoadMag(model, lc)),
+      showValues: showLoadValues,
+      loadLabelScale,
+    });
   }
 
+  const showReactionArrows = complete && el.chkReactions && el.chkReactions.checked;
   const showReactionLabels = complete && (
-    el.chkReactionValues.checked || (el.chkReactions && el.chkReactions.checked)
+    el.chkReactionValues && el.chkReactionValues.checked
   );
 
   drawSupportReactions(model, {
@@ -2493,6 +4346,7 @@ function buildModelScene(model) {
     lcKey,
     defFac,
     deformed,
+    showArrows: showReactionArrows,
     showValues: showReactionLabels,
     span,
     nm,
@@ -2535,26 +4389,63 @@ function buildModelScene(model) {
     const p1 = nodePosition(n1, model, lc, defFac, deformed);
 
     if (showElemLabels) {
-      const p = offsetLabelPoint(elemPointAlong(p0, p1, 0.55), p0, p1, 0);
-      addElemLabel(String(e.id), p, span, elemLabelScale, labelGroup, LABEL_BG.elem, false);
+      addElemLabelWithLeader(
+        String(e.id),
+        elemPointAlong(p0, p1, 0.55),
+        p0,
+        p1,
+        1,
+        span,
+        elemLabelScale,
+        labelGroup,
+        LABEL_BG.elem,
+        false
+      );
     }
     if (showMaterial) {
       const text = elementMaterialText(e);
       if (text) {
-        const p = offsetLabelPoint(elemPointAlong(p0, p1, 0.67), p0, p1, 1);
-        addElemLabel(text, p, span, materialLabelScale, labelGroup, LABEL_BG.material);
+        addElemLabelWithLeader(
+          text,
+          elemPointAlong(p0, p1, 0.67),
+          p0,
+          p1,
+          1,
+          span,
+          materialLabelScale,
+          labelGroup,
+          LABEL_BG.material
+        );
       }
     }
     if (showSection) {
       const text = elementSectionText(e);
       if (text) {
-        const p = elemPointAlong(p0, p1, 0.25);
-        addElemLabel(text, p, span, sectionLabelScale, labelGroup, LABEL_BG.section);
+        addElemLabelWithLeader(
+          text,
+          elemPointAlong(p0, p1, 0.25),
+          p0,
+          p1,
+          -1,
+          span,
+          sectionLabelScale,
+          labelGroup,
+          LABEL_BG.section
+        );
       }
     }
   }
 
   buildForceDiagrams(model);
+
+  clearGroup(windGroup);
+  clearGroup(windLabelGroup);
+  if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
+    const wc = windCaseById(windVisualData, selectedWindCaseId);
+    if (wc) drawWindOverlay(model, windVisualData, wc, span);
+  }
+  updateWindLegendOverlay();
+
   updateWorldAxes(model);
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
@@ -2613,6 +4504,14 @@ function supportGizmoSize(model) {
   return base * (pct / 100);
 }
 
+function worldAxesLength(model) {
+  const span = modelSpan(model);
+  const base = Math.max(span * 0.1, 0.12);
+  const pct = parseFloat(viewerOptions.axesSize);
+  if (!isFinite(pct) || pct < 1) return base;
+  return base * (pct / 100);
+}
+
 function billboardPixelSize(worldPos, worldDiameter, camera, renderer) {
   _viewPosScratch.copy(worldPos).applyMatrix4(camera.matrixWorldInverse);
   const dist = Math.max(-_viewPosScratch.z, 1e-6);
@@ -2667,10 +4566,11 @@ function nodeLabelLeaderMaterial() {
 function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
   const width = renderer.domElement.clientWidth;
   const height = renderer.domElement.clientHeight;
+  const leaderStart = nodePos.clone();
   if (width < 1 || height < 1) {
     return {
       labelPos: nodePos.clone().add(new THREE.Vector3(0, nodeMarkerSize(model) * 0.8, 0)),
-      leaderStart: nodePos.clone(),
+      leaderStart: leaderStart,
     };
   }
 
@@ -2683,15 +4583,7 @@ function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
 
   _ndcScratch.copy(nodePos).project(camera);
 
-  const edgePx = nodeRadiusPx + 2;
-  _labelNdc.set(
-    _ndcScratch.x + (sx * edgePx / width) * 2,
-    _ndcScratch.y + (sy * edgePx / height) * 2,
-    _ndcScratch.z
-  );
-  _leaderStart.copy(_labelNdc).unproject(camera);
-
-  const labelPx = nodeRadiusPx + 18;
+  const labelPx = nodeRadiusPx + 24;
   _labelNdc.set(
     _ndcScratch.x + (sx * labelPx / width) * 2,
     _ndcScratch.y + (sy * labelPx / height) * 2,
@@ -2699,15 +4591,22 @@ function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
   );
   _leaderEnd.copy(_labelNdc).unproject(camera);
 
-  return { labelPos: _leaderEnd.clone(), leaderStart: _leaderStart.clone() };
+  return { labelPos: _leaderEnd.clone(), leaderStart: leaderStart };
 }
 
 function updateNodeLabelEntry(entry, model, camera, renderer) {
   const placement = computeNodeLabelPlacement(entry.nodePos, model, camera, renderer);
   entry.sprite.position.copy(placement.labelPos);
+  const leaderEnd = labelLeaderEnd(
+    placement.labelPos,
+    placement.leaderStart,
+    entry.sprite,
+    camera,
+    renderer
+  );
   const pos = entry.line.geometry.attributes.position;
   pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
-  pos.setXYZ(1, placement.labelPos.x, placement.labelPos.y, placement.labelPos.z);
+  pos.setXYZ(1, leaderEnd.x, leaderEnd.y, leaderEnd.z);
   pos.needsUpdate = true;
   entry.line.geometry.computeBoundingSphere();
 }
@@ -2719,12 +4618,279 @@ function updateNodeLabelPositions() {
   }
 }
 
+function computeElemLabelPlacement(anchorPos, p0, p1, camera, renderer, side) {
+  const width = renderer.domElement.clientWidth;
+  const height = renderer.domElement.clientHeight;
+  const sign = side >= 0 ? 1 : -1;
+  const leaderStart = anchorPos.clone();
+  if (width < 1 || height < 1) {
+    return {
+      labelPos: offsetLabelPoint(anchorPos, p0, p1, sign),
+      leaderStart: leaderStart,
+    };
+  }
+
+  _ndcScratch.copy(anchorPos).project(camera);
+  const ndcZ = _ndcScratch.z;
+  _ndcP0.copy(p0).project(camera);
+  _ndcP1.copy(p1).project(camera);
+
+  let edx = _ndcP1.x - _ndcP0.x;
+  let edy = _ndcP1.y - _ndcP0.y;
+  const edLen = Math.hypot(edx, edy);
+  if (edLen < 1e-8) {
+    edx = 20 / width * 2;
+    edy = 24 / height * 2;
+  } else {
+    edx /= edLen;
+    edy /= edLen;
+  }
+
+  let sx = -edy * sign;
+  let sy = edx * sign;
+  const sLen = Math.hypot(sx, sy) || 1;
+  sx /= sLen;
+  sy /= sLen;
+
+  const labelPx = 28;
+  _labelNdc.set(
+    _ndcScratch.x + (sx * labelPx / width) * 2,
+    _ndcScratch.y + (sy * labelPx / height) * 2,
+    ndcZ
+  );
+  _leaderEnd.copy(_labelNdc).unproject(camera);
+
+  return { labelPos: _leaderEnd.clone(), leaderStart: leaderStart };
+}
+
+function worldLengthForScreenPixels(px, worldPos, camera, renderer) {
+  if (px <= 0) return 0;
+  const width = renderer.domElement.clientWidth;
+  if (width < 1) return 0;
+  _ndcScratch.copy(worldPos).project(camera);
+  const ndcZ = _ndcScratch.z;
+  _labelNdc.set(_ndcScratch.x + (px / width) * 2, _ndcScratch.y, ndcZ);
+  _leaderStart.copy(_labelNdc).unproject(camera);
+  return worldPos.distanceTo(_leaderStart);
+}
+
+function spriteExtentAlongDirection(sprite, worldDir, camera) {
+  const halfW = sprite.scale.x * 0.5;
+  const halfH = sprite.scale.y * 0.5;
+  _camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  _camUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+  const d = worldDir.lengthSq() > 1e-12 ? worldDir.clone().normalize() : _camRight;
+  return halfW * Math.abs(d.dot(_camRight)) + halfH * Math.abs(d.dot(_camUp));
+}
+
+function labelLeaderEnd(labelCenter, leaderStart, sprite, camera, renderer) {
+  _leaderDir.subVectors(labelCenter, leaderStart);
+  const dist = _leaderDir.length();
+  if (dist < 1e-8) return labelCenter.clone();
+  _leaderDir.divideScalar(dist);
+  const inset = spriteExtentAlongDirection(sprite, _leaderDir, camera);
+  const gap = worldLengthForScreenPixels(3, labelCenter, camera, renderer);
+  return labelCenter.clone().addScaledVector(_leaderDir, -(inset + gap));
+}
+
+function updateElemLabelEntry(entry, camera, renderer) {
+  const placement = computeElemLabelPlacement(
+    entry.anchorPos,
+    entry.p0,
+    entry.p1,
+    camera,
+    renderer,
+    entry.side
+  );
+  entry.sprite.position.copy(placement.labelPos);
+  const leaderEnd = labelLeaderEnd(
+    placement.labelPos,
+    placement.leaderStart,
+    entry.sprite,
+    camera,
+    renderer
+  );
+  const pos = entry.line.geometry.attributes.position;
+  pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
+  pos.setXYZ(1, leaderEnd.x, leaderEnd.y, leaderEnd.z);
+  pos.needsUpdate = true;
+  entry.line.geometry.computeBoundingSphere();
+}
+
+function updateElemLabelPositions() {
+  if (!camera || !renderer || elemLabelEntries.length === 0) return;
+  for (const entry of elemLabelEntries) {
+    updateElemLabelEntry(entry, camera, renderer);
+  }
+}
+
+function computeForceLabelPlacement(diagramPt, axisPt, camera, renderer) {
+  const width = renderer.domElement.clientWidth;
+  const height = renderer.domElement.clientHeight;
+  const leaderStart = diagramPt.clone();
+  if (width < 1 || height < 1) {
+    const out = diagramPt.clone().sub(axisPt);
+    if (out.lengthSq() < 1e-12) out.set(0, 1, 0);
+    else out.normalize();
+    return {
+      labelPos: diagramPt.clone().addScaledVector(out, worldLengthForScreenPixels(28, diagramPt, camera, renderer) || 0.05),
+      leaderStart: leaderStart,
+    };
+  }
+
+  _ndcScratch.copy(diagramPt).project(camera);
+  const ndcZ = _ndcScratch.z;
+  _ndcP0.copy(axisPt).project(camera);
+
+  let sx = _ndcScratch.x - _ndcP0.x;
+  let sy = _ndcScratch.y - _ndcP0.y;
+  const sLen = Math.hypot(sx, sy);
+  if (sLen < 1e-8) {
+    sx = 20 / width * 2;
+    sy = 24 / height * 2;
+  } else {
+    sx /= sLen;
+    sy /= sLen;
+  }
+
+  const labelPx = 30;
+  _labelNdc.set(
+    _ndcScratch.x + (sx * labelPx / width) * 2,
+    _ndcScratch.y + (sy * labelPx / height) * 2,
+    ndcZ
+  );
+  _leaderEnd.copy(_labelNdc).unproject(camera);
+
+  return { labelPos: _leaderEnd.clone(), leaderStart: leaderStart };
+}
+
+function updateForceLabelEntry(entry, camera, renderer) {
+  const placement = computeForceLabelPlacement(
+    entry.diagramPt,
+    entry.axisPt,
+    camera,
+    renderer
+  );
+  entry.sprite.position.copy(placement.labelPos);
+  const leaderEnd = labelLeaderEnd(
+    placement.labelPos,
+    placement.leaderStart,
+    entry.sprite,
+    camera,
+    renderer
+  );
+  const pos = entry.line.geometry.attributes.position;
+  pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
+  pos.setXYZ(1, leaderEnd.x, leaderEnd.y, leaderEnd.z);
+  pos.needsUpdate = true;
+  entry.line.geometry.computeBoundingSphere();
+}
+
+function updateForceLabelPositions() {
+  if (!camera || !renderer || forceLabelEntries.length === 0) return;
+  for (const entry of forceLabelEntries) {
+    updateForceLabelEntry(entry, camera, renderer);
+  }
+}
+
 function updateSupportGizmoPositions() {
   if (!camera || !renderer || !currentModel || supportGizmoEntries.length === 0) return;
   for (const entry of supportGizmoEntries) {
     supportGizmoCenter(
       entry.nodePos, currentModel, entry.gizmoRadius, camera, renderer, entry.sprite.position
     );
+  }
+}
+
+function reactionForceDirection(axisIndex, fval) {
+  return REACTION_TRANS_AXES[axisIndex].clone().multiplyScalar(fval >= 0 ? 1 : -1);
+}
+
+function computeReactionTransArrowEndpoints(gizmoCenter, gizmoRadius, screenDir, arrowLen) {
+  const d = screenDir.clone().normalize();
+  const head = gizmoCenter.clone().addScaledVector(d, -gizmoRadius);
+  const tail = gizmoCenter.clone().addScaledVector(d, -(gizmoRadius + arrowLen));
+  return { tail, head };
+}
+
+function billboardViewDirection(worldPos, camera, target) {
+  const out = target || new THREE.Vector3();
+  out.subVectors(camera.position, worldPos);
+  if (out.lengthSq() < 1e-18) {
+    return out.copy(camera.getWorldDirection(new THREE.Vector3()));
+  }
+  return out.normalize();
+}
+
+function billboardScreenDirection(worldPos, worldDir, camera, target) {
+  const out = target || new THREE.Vector3();
+  const viewDir = billboardViewDirection(worldPos, camera, _viewToCenterScratch);
+  const d = worldDir.clone().normalize();
+  out.copy(d).addScaledVector(viewDir, -d.dot(viewDir));
+  if (out.lengthSq() < 1e-12) {
+    out.copy(camera.up).addScaledVector(viewDir, -camera.up.dot(viewDir));
+    if (out.lengthSq() < 1e-12) {
+      out.set(1, 0, 0);
+    }
+  }
+  return out.normalize();
+}
+
+function reactionArrowLength(model) {
+  const span = modelSpan(model);
+  const pct = parseFloat(viewerOptions.reactionArrowSize);
+  if (!isFinite(pct) || pct <= 0) return span * 0.01;
+  return span * (pct / 100);
+}
+
+function reactionLineWidthPx(mag, maxMag) {
+  const base = clampLineWidthPx(
+    viewerOptions.reactionLineWidth, 2, OPTIONS_LIMITS.reactionLineWidth.max
+  );
+  if (maxMag < 1e-9) return base * 0.25;
+  return base * Math.max(0.25, Math.abs(mag) / maxMag);
+}
+
+function updateReactionForceLabel(entry, tail, screenDir) {
+  if (!entry.labelSprite) return;
+  const worldH = entry.span * entry.scaleFactor;
+  const gap = worldH * 0.08;
+  entry.labelSprite.position.copy(tail).addScaledVector(
+    screenDir, -(worldH * 0.5 + gap)
+  );
+}
+
+function updateReactionZeroLabel(entry, gizmoCenter, screenDir) {
+  if (!entry.labelSprite) return;
+  const worldH = entry.span * entry.scaleFactor;
+  const inset = entry.gizmoRadius * 0.12;
+  entry.labelSprite.position.copy(gizmoCenter).addScaledVector(
+    screenDir, -(entry.gizmoRadius + inset + worldH * 0.35)
+  );
+}
+
+function updateReactionForceDisplay() {
+  if (!camera || !renderer || !currentModel || reactionForceEntries.length === 0) return;
+  for (const entry of reactionForceEntries) {
+    const center = supportGizmoCenter(
+      entry.nodePos, currentModel, entry.gizmoRadius, camera, renderer, _gizmoCenterScratch
+    );
+    if (entry.zeroDisplay) {
+      const axisDir = REACTION_TRANS_AXES[entry.axisIndex];
+      const screenDir = billboardScreenDirection(center, axisDir, camera, _screenDirScratch);
+      updateReactionZeroLabel(entry, center, screenDir);
+      continue;
+    }
+    const forceDir = reactionForceDirection(entry.axisIndex, entry.fval);
+    const screenDir = billboardScreenDirection(center, forceDir, camera, _screenDirScratch);
+    const viewDir = billboardViewDirection(center, camera, _viewToCenterScratch);
+    const { tail, head } = computeReactionTransArrowEndpoints(
+      center, entry.gizmoRadius, screenDir, entry.arrowLen
+    );
+    if (entry.lines) {
+      updateBillboardDirectedWideArrow(entry.lines, tail, head, viewDir, entry.headScale);
+    }
+    updateReactionForceLabel(entry, tail, screenDir);
   }
 }
 
@@ -2845,14 +5011,16 @@ function drawWoodRatedWalls(model, opts) {
   mesh.renderOrder = 3;
   group.add(mesh);
 
-  addWideLineSegmentsFromPts(
-    edgePts,
-    COLORS.woodWallEdge,
-    group,
-    4,
-    Math.max(elementLineWidthPx() * 0.9, 0.5),
-    ALPHA.woodWallEdge
-  );
+  if (opts.showEdge !== false) {
+    addWideLineSegmentsFromPts(
+      edgePts,
+      COLORS.woodWallEdge,
+      group,
+      4,
+      Math.max(elementLineWidthPx() * 0.9, 0.5),
+      ALPHA.woodWallEdge
+    );
+  }
 }
 
 function drawMembraneElements(model, opts) {
@@ -2901,14 +5069,23 @@ function drawMembraneElements(model, opts) {
   mesh.renderOrder = 4;
   group.add(mesh);
 
-  addWideLineSegmentsFromPts(
-    edgePts,
-    COLORS.membraneEdge,
-    group,
-    5,
-    Math.max(elementLineWidthPx() * 0.85, 0.5),
-    ALPHA.membraneEdge
-  );
+  if (opts.showEdge !== false) {
+    addWideLineSegmentsFromPts(
+      edgePts,
+      COLORS.membraneEdge,
+      group,
+      5,
+      Math.max(elementLineWidthPx() * 0.85, 0.5),
+      ALPHA.membraneEdge
+    );
+  }
+}
+
+function syncRegionEdgeCheckboxes() {
+  const showMembrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  const showWoodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
+  if (el.chkMembraneEdge) el.chkMembraneEdge.disabled = !showMembrane;
+  if (el.chkWoodWallEdge) el.chkWoodWallEdge.disabled = !showWoodWall;
 }
 
 function axisPerpendiculars(d) {
@@ -2978,16 +5155,21 @@ function forceLineWidthPx() {
   return clampLineWidthPx(viewerOptions.forceLineWidth, 1.5, OPTIONS_LIMITS.forceLineWidth.max);
 }
 
-function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx, opacity) {
-  if (pts.length < 6) return;
+function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx, opacity, opaque) {
+  if (pts.length < 6) return null;
   const geo = new LineSegmentsGeometry();
   geo.setPositions(pts);
+  const useOpaque = opaque === true;
+  const useOverlay = opaque === "overlay";
+  const isTransparent = useOverlay || (!useOpaque && opacity != null && opacity < ALPHA.opaque);
   const mat = new LineMaterial({
     color: color,
     linewidth: lineWidthPx,
     worldUnits: false,
-    transparent: opacity != null && opacity < ALPHA.opaque,
-    opacity: opacity != null ? opacity : ALPHA.opaque,
+    transparent: isTransparent,
+    opacity: useOpaque ? 1 : (opacity != null ? opacity : ALPHA.opaque),
+    depthTest: (useOpaque || useOverlay) ? false : true,
+    depthWrite: (useOpaque || useOverlay) ? false : !isTransparent,
   });
   const w = el.viewport.clientWidth || 1;
   const h = el.viewport.clientHeight || 1;
@@ -2997,6 +5179,7 @@ function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx,
   lines.frustumCulled = false;
   lines.renderOrder = renderOrder;
   group.add(lines);
+  return lines;
 }
 
 function supportDiscTextureKey(fixed) {
@@ -3032,7 +5215,7 @@ function createSupportDiscTexture(fixed) {
     COLORS.supportTrans, COLORS.supportTrans, COLORS.supportTrans,
     COLORS.supportRot, COLORS.supportRot, COLORS.supportRot,
   ];
-  const outline = "#000000";
+  const outline = supportDiscOutlineColor();
 
   ctx.clearRect(0, 0, px, px);
 
@@ -3063,6 +5246,20 @@ function createSupportDiscTexture(fixed) {
   tex.needsUpdate = true;
   _supportDiscTexCache.set(key, tex);
   return tex;
+}
+
+function clearSupportDiscTextureCache() {
+  for (const tex of _supportDiscTexCache.values()) {
+    try {
+      tex.dispose();
+    } catch (e) { /* ignore */ }
+  }
+  _supportDiscTexCache.clear();
+}
+
+function supportDiscOutlineColor() {
+  const palette = THEME_RENDER_COLORS[uiTheme] || THEME_RENDER_COLORS.dark;
+  return palette.supportOutline;
 }
 
 function addSupportDisc(center, fixed, size, group) {
@@ -3185,17 +5382,24 @@ function loadValueLabelPoint(tail, tip, span, scaleFactor) {
 
 function loadTypeFilterValue() {
   const t = viewerOptions.inputLoadType;
-  if (t === "area" || t === "gravity" || t === "linepoint") return t;
+  if (t === "area" || t === "gravity" || t === "linepoint" || t === "dlod") return t;
   return "all";
+}
+
+function shouldDrawDiaphragmLoad() {
+  const t = loadTypeFilterValue();
+  return t === "all" || t === "dlod";
 }
 
 function shouldDrawPointLoad() {
   const t = loadTypeFilterValue();
+  if (t === "dlod") return false;
   return t === "all" || t === "linepoint";
 }
 
 function shouldDrawElementLoad(ld) {
   const t = loadTypeFilterValue();
+  if (t === "dlod") return false;
   if (t === "all") return true;
   if (t === "area") return isAreaLoad(ld);
   if (t === "gravity") return isGravityLoad(ld);
@@ -3205,7 +5409,26 @@ function shouldDrawElementLoad(ld) {
 
 function addLoadValueLabel(text, point, span, scaleFactor, group) {
   if (!text) return;
-  addReactionValueLabel(text, point, span, scaleFactor, group, colorHex(COLORS.load));
+  const sprite = makeLoadValueLabelSprite(text, span, scaleFactor);
+  sprite.position.copy(point);
+  sprite.renderOrder = 15;
+  group.add(sprite);
+}
+
+function makeLoadValueLabelSprite(text, span, scaleFactor) {
+  const factor = scaleFactor != null ? scaleFactor : 0.06;
+  const quality = Math.min(20, Math.max(4, labelTextureQualityScale(factor) * 1.75));
+  return makeTextSprite(text, span, {
+    bg: "transparent",
+    fg: colorHex(COLORS.load),
+    pad: 2,
+    scaleFactor: factor,
+    qualityScale: quality,
+    solidAlpha: true,
+    crispLabel: true,
+    transparent: true,
+    alphaTest: 0.5,
+  });
 }
 
 function elemMap(model) {
@@ -3259,6 +5482,431 @@ function maxPointLoadMag(model, lc) {
   return max;
 }
 
+function windCaseById(visual, caseId) {
+  const cases = (visual && visual.cases) || [];
+  if (!cases.length) return null;
+  if (caseId == null) return cases[0];
+  return cases.find(function (c) { return c.wind_case_id === caseId; }) || cases[0];
+}
+
+function pickWindCaseIdForLc(visual) {
+  if (!visual || !visual.cases || !visual.cases.length) return null;
+  const lc = String(el.lcSelect.value || "");
+  const match = visual.cases.find(function (c) { return String(c.load_case) === lc; });
+  return match ? match.wind_case_id : visual.cases[0].wind_case_id;
+}
+
+function windFlowDirection3(flow) {
+  const ux = flow && flow.ux != null ? Number(flow.ux) : 0;
+  const uy = flow && flow.uy != null ? Number(flow.uy) : 0;
+  const dir = new THREE.Vector3(ux, uy, 0);
+  if (dir.lengthSq() < 1e-12) return new THREE.Vector3(1, 0, 0);
+  return dir.normalize();
+}
+
+function windSurfaceQuadCenter(corners) {
+  const c = new THREE.Vector3();
+  for (let i = 0; i < corners.length; i++) {
+    c.add(corners[i]);
+  }
+  return c.multiplyScalar(1 / corners.length);
+}
+
+function windWindwardFaceCenter(bbox, windCase, zFallback) {
+  const cx = 0.5 * (bbox.x_min + bbox.x_max);
+  const cy = 0.5 * (bbox.y_min + bbox.y_max);
+  let zMid = zFallback;
+  const surfaces = windCase.surfaces || [];
+  if (surfaces.length) {
+    let zb = Infinity;
+    let zt = -Infinity;
+    for (const s of surfaces) {
+      zb = Math.min(zb, Number(s.z_bottom) || 0);
+      zt = Math.max(zt, Number(s.z_top) || 0);
+    }
+    if (isFinite(zb) && isFinite(zt)) zMid = 0.5 * (zb + zt);
+  }
+  const face = String(windCase.windward_face || "").toUpperCase();
+  const anchor = new THREE.Vector3(cx, cy, zMid);
+  if (face === "X_MIN") anchor.set(bbox.x_min, cy, zMid);
+  else if (face === "X_MAX") anchor.set(bbox.x_max, cy, zMid);
+  else if (face === "Y_MIN") anchor.set(cx, bbox.y_min, zMid);
+  else if (face === "Y_MAX") anchor.set(cx, bbox.y_max, zMid);
+  return anchor;
+}
+
+function windWindwardFlowLayout(bbox, windCase, span, zFallback) {
+  const flowDir = windFlowDirection3(windCase.flow);
+  const upwindDir = flowDir.clone().negate();
+  const surfaceGap = Math.max(span * WIND_FLOW_SURFACE_GAP_RATIO, WIND_FLOW_MIN_SURFACE_GAP_M);
+  const arrowLen = Math.max(span * WIND_FLOW_ARROW_LEN_RATIO, WIND_FLOW_MIN_ARROW_LEN_M);
+  const labelPad = Math.max(span * WIND_FLOW_LABEL_PAD_RATIO, WIND_FLOW_MIN_LABEL_PAD_M);
+
+  let faceCenter = null;
+  for (const s of windCase.surfaces || []) {
+    if (s.surface_role !== "WINDWARD") continue;
+    const corners = windWallCorners(bbox, s);
+    if (!corners) continue;
+    faceCenter = windSurfaceQuadCenter(corners);
+    break;
+  }
+  if (!faceCenter) {
+    faceCenter = windWindwardFaceCenter(bbox, windCase, zFallback);
+  }
+
+  // Head sits surfaceGap upwind of the windward face plane; tail and label are further upwind.
+  const flowHead = faceCenter.clone().addScaledVector(upwindDir, surfaceGap);
+  const flowTail = flowHead.clone().addScaledVector(upwindDir, arrowLen);
+  const labelPos = flowTail.clone().addScaledVector(upwindDir, labelPad);
+  return { flowDir, upwindDir, flowTail, flowHead, labelPos, arrowLen, surfaceGap };
+}
+
+function windWallCorners(bbox, surface) {
+  const zb = Number(surface.z_bottom);
+  const zt = Number(surface.z_top);
+  const w = Math.max(Number(surface.width) || 0, 1e-6);
+  const side = surface.wall_side || "";
+  if (side === "x_max") {
+    const x = bbox.x_max;
+    return [
+      new THREE.Vector3(x, bbox.y_min, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zt),
+      new THREE.Vector3(x, bbox.y_min, zt),
+    ];
+  }
+  if (side === "x_min") {
+    const x = bbox.x_min;
+    return [
+      new THREE.Vector3(x, bbox.y_min, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zb),
+      new THREE.Vector3(x, bbox.y_min + w, zt),
+      new THREE.Vector3(x, bbox.y_min, zt),
+    ];
+  }
+  if (side === "y_max") {
+    const y = bbox.y_max;
+    return [
+      new THREE.Vector3(bbox.x_min, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zt),
+      new THREE.Vector3(bbox.x_min, y, zt),
+    ];
+  }
+  if (side === "y_min") {
+    const y = bbox.y_min;
+    return [
+      new THREE.Vector3(bbox.x_min, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zb),
+      new THREE.Vector3(bbox.x_min + w, y, zt),
+      new THREE.Vector3(bbox.x_min, y, zt),
+    ];
+  }
+  return null;
+}
+
+function addWindQuadMesh(corners, color, opacity, group) {
+  if (!corners || corners.length !== 4) return;
+  const pos = [];
+  const tri = [0, 1, 2, 0, 2, 3];
+  for (let i = 0; i < tri.length; i++) {
+    const p = corners[tri[i]];
+    pos.push(p.x, p.y, p.z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: opacity,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 6;
+  group.add(mesh);
+}
+
+function addWindWallOutline(corners, color, group) {
+  if (!corners || corners.length !== 4) return;
+  const pts = [];
+  for (let i = 0; i < 4; i++) {
+    addLinePair(corners[i], corners[(i + 1) % 4], pts);
+  }
+  addWideLineSegmentsFromPts(
+    pts,
+    color,
+    group,
+    7,
+    Math.max(loadLineWidthPx() * 1.2, 1.5),
+    ALPHA.opaque
+  );
+}
+
+function formatWindForceKn(value) {
+  const n = Number(value);
+  if (!isFinite(n)) return "—";
+  if (Math.abs(n - Math.round(n)) < 1e-6) return String(Math.round(n));
+  return n.toFixed(2);
+}
+
+function drawWindOverlay(model, visual, windCase, span) {
+  const bbox = visual.bbox;
+  if (!bbox || !windCase) return;
+
+  const cx = 0.5 * (bbox.x_min + bbox.x_max);
+  const cy = 0.5 * (bbox.y_min + bbox.y_max);
+  const zGround = model.bounds ? model.bounds[4] : Number(windCase.story_forces[0]?.z_bottom || 0);
+  const flowDir = windFlowDirection3(windCase.flow);
+
+  const footPts = [];
+  const zf = zGround;
+  addLinePair(
+    new THREE.Vector3(bbox.x_min, bbox.y_min, zf),
+    new THREE.Vector3(bbox.x_max, bbox.y_min, zf),
+    footPts
+  );
+  addLinePair(
+    new THREE.Vector3(bbox.x_max, bbox.y_min, zf),
+    new THREE.Vector3(bbox.x_max, bbox.y_max, zf),
+    footPts
+  );
+  addLinePair(
+    new THREE.Vector3(bbox.x_max, bbox.y_max, zf),
+    new THREE.Vector3(bbox.x_min, bbox.y_max, zf),
+    footPts
+  );
+  addLinePair(
+    new THREE.Vector3(bbox.x_min, bbox.y_max, zf),
+    new THREE.Vector3(bbox.x_min, bbox.y_min, zf),
+    footPts
+  );
+  addWideLineSegmentsFromPts(
+    footPts,
+    COLORS.windFootprint,
+    windGroup,
+    5,
+    Math.max(elementLineWidthPx() * 0.85, 1.0),
+    ALPHA.windFootprint
+  );
+
+  (windCase.surfaces || []).forEach(function (s) {
+    const corners = windWallCorners(bbox, s);
+    if (!corners) return;
+    const isWindward = s.surface_role === "WINDWARD";
+    const color = isWindward ? COLORS.windWindward : COLORS.windLeeward;
+    addWindQuadMesh(corners, color, ALPHA.windWall, windGroup);
+    addWindWallOutline(corners, color, windGroup);
+  });
+
+  let zTop = zGround;
+  (windCase.surfaces || []).forEach(function (s) {
+    zTop = Math.max(zTop, Number(s.z_top) || zGround);
+  });
+  if (model.bounds) zTop = Math.max(zTop, model.bounds[5]);
+
+  const zMidFallback = 0.5 * (zGround + zTop);
+  const flowLayout = windWindwardFlowLayout(bbox, windCase, span, zMidFallback);
+  addDirectedArrow(
+    flowLayout.flowTail,
+    flowLayout.flowHead,
+    windGroup,
+    COLORS.windFlow,
+    loadLineWidthPx() * 0.95,
+    0.8,
+    20,
+    true
+  );
+  const flowLabel = makeTextSprite(windCase.direction_label || "Wind", span, {
+    scaleFactor: loadLabelScaleFactor() * 0.72,
+    bg: "rgba(90, 72, 168, 1.0)",
+    fg: "#ffffff",
+    opaque: true,
+    transparent: false,
+  });
+  flowLabel.position.copy(flowLayout.labelPos);
+  flowLabel.renderOrder = 21;
+  windLabelGroup.add(flowLabel);
+
+  const maxF = Math.max(
+    Number(windCase.max_f_story_kN) || 0,
+    ...(windCase.tributary_rows || []).map(function (r) { return Math.abs(Number(r.story_wind_force_kN) || 0); }),
+    ...(windCase.story_forces || []).map(function (sf) { return Math.abs(Number(sf.f_story_kN) || 0); }),
+    1e-6
+  );
+  const forceRows = (windCase.tributary_rows && windCase.tributary_rows.length)
+    ? windCase.tributary_rows
+    : (windCase.story_forces || []);
+  forceRows.forEach(function (row) {
+    const fKn = Number(row.story_wind_force_kN != null ? row.story_wind_force_kN : row.f_story_kN) || 0;
+    const len = Math.max(span * 0.035, (Math.abs(fKn) / maxF) * span * 0.2);
+    const z = Number(row.diaphragm_level != null ? row.diaphragm_level : row.z_ref);
+    const tail = new THREE.Vector3(cx, cy, z);
+    const sign = fKn >= 0 ? 1 : -1;
+    const head = tail.clone().addScaledVector(flowDir, len * sign);
+    addDirectedArrow(
+      tail,
+      head,
+      windGroup,
+      COLORS.windStoryForce,
+      loadLineWidthPx(),
+      0.85,
+      8,
+      true
+    );
+    const labelStory = row.story != null ? row.story : String(row.diaphragm_id || "");
+    const label = makeTextSprite(
+      labelStory + " F=" + formatWindForceKn(fKn) + "kN",
+      span,
+      {
+        scaleFactor: loadLabelScaleFactor() * 0.82,
+        bg: "rgba(20, 83, 45, 0.78)",
+        fg: "#ffffff",
+      }
+    );
+    label.position.copy(head).add(new THREE.Vector3(0, 0, span * 0.012));
+    label.renderOrder = 17;
+    windLabelGroup.add(label);
+  });
+
+  (windCase.diaphragm_loads || []).forEach(function (dl) {
+    const z = Number(dl.load_level_m);
+    const sign = Number(dl.sign) >= 0 ? 1 : -1;
+    const axis = String(dl.axis || "X").toUpperCase();
+    const dir = axis === "Y"
+      ? new THREE.Vector3(0, sign, 0)
+      : new THREE.Vector3(sign, 0, 0);
+    const len = Math.max(span * 0.1, 0.25);
+    const origin = new THREE.Vector3(cx, cy, z);
+    addDirectionArrow(
+      origin,
+      dir,
+      len,
+      windGroup,
+      COLORS.load,
+      loadLineWidthPx() * 0.9,
+      0.7
+    );
+    const areaLoad = Number(dl.area_load_kN_m2);
+    if (isFinite(areaLoad) && Math.abs(areaLoad) > 1e-9) {
+      const tip = origin.clone().addScaledVector(dir, len);
+      const dlLabel = makeTextSprite(
+        "DIAP " + dl.diaphragm_id + " " + formatWindForceKn(areaLoad) + " kN/m²",
+        span,
+        {
+          scaleFactor: loadLabelScaleFactor() * 0.78,
+          bg: LABEL_BG.load,
+          fg: "#ffffff",
+        }
+      );
+      dlLabel.position.copy(tip).add(new THREE.Vector3(0, 0, span * 0.01));
+      dlLabel.renderOrder = 16;
+      windLabelGroup.add(dlLabel);
+    }
+  });
+}
+
+function populateWindCaseSelect() {
+  if (!el.windCaseSelect) return;
+  const sel = el.windCaseSelect;
+  sel.innerHTML = "";
+  const cases = (windVisualData && windVisualData.cases) || [];
+  if (!cases.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(none)";
+    sel.appendChild(opt);
+    sel.disabled = true;
+    return;
+  }
+  cases.forEach(function (c) {
+    const opt = document.createElement("option");
+    opt.value = String(c.wind_case_id);
+    opt.textContent = c.name + " (" + (c.direction_label || c.direction) + ", LC" + c.load_case + ")";
+    if (selectedWindCaseId != null && c.wind_case_id === selectedWindCaseId) {
+      opt.selected = true;
+    }
+    sel.appendChild(opt);
+  });
+  if (selectedWindCaseId == null) {
+    sel.value = String(cases[0].wind_case_id);
+    selectedWindCaseId = cases[0].wind_case_id;
+  } else {
+    sel.value = String(selectedWindCaseId);
+  }
+  sel.disabled = !(el.chkWindLoads && el.chkWindLoads.checked);
+}
+
+function updateWindControlsAvailability() {
+  const hasCases = !!(windVisualData && windVisualData.cases && windVisualData.cases.length);
+  if (el.chkWindLoads) {
+    el.chkWindLoads.disabled = !hasCases;
+    if (!hasCases) el.chkWindLoads.checked = false;
+  }
+  if (el.windCaseSelect) {
+    el.windCaseSelect.disabled = !hasCases || !(el.chkWindLoads && el.chkWindLoads.checked);
+  }
+  updateWindLegendOverlay();
+}
+
+function updateWindLegendOverlay() {
+  if (!el.windLegendOverlay) return;
+  const show = !!(el.chkWindLoads && el.chkWindLoads.checked && windVisualData);
+  if (!show) {
+    el.windLegendOverlay.hidden = true;
+    el.windLegendOverlay.classList.remove("visible");
+    return;
+  }
+  const wc = windCaseById(windVisualData, selectedWindCaseId);
+  if (!wc) {
+    el.windLegendOverlay.hidden = true;
+    el.windLegendOverlay.classList.remove("visible");
+    return;
+  }
+  el.windLegendOverlay.hidden = false;
+  el.windLegendOverlay.classList.add("visible");
+  if (el.windLegendCase) {
+    el.windLegendCase.textContent =
+      wc.name + " · " + (wc.direction_label || wc.direction) + " · LC" + wc.load_case
+      + " — orange=windward / blue=leeward / green=F_story / purple=wind dir";
+  }
+}
+
+async function loadWindVisualForCurrentModel() {
+  const path = getCurrentModelPath();
+  windVisualData = null;
+  selectedWindCaseId = null;
+  if (!path) {
+    populateWindCaseSelect();
+    updateWindControlsAvailability();
+    return;
+  }
+  try {
+    const view = await fetchApiJson("/api/loads/wind?path=" + encodeURIComponent(path));
+    if (view.found && view.visual && view.visual.cases && view.visual.cases.length) {
+      windVisualData = view.visual;
+      if (displayPrefs.windCaseId != null && windCaseById(windVisualData, displayPrefs.windCaseId)) {
+        selectedWindCaseId = displayPrefs.windCaseId;
+      } else {
+        selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+      }
+    }
+  } catch (ex) {
+    console.warn("Wind visual load failed:", ex.message);
+  }
+  populateWindCaseSelect();
+  updateWindControlsAvailability();
+}
+
+function syncLcToWindCase(windCase) {
+  if (!windCase || !el.lcSelect) return;
+  const lcVal = String(windCase.load_case);
+  if (String(el.lcSelect.value) === lcVal) return;
+  const opt = Array.from(el.lcSelect.options).find(function (o) { return o.value === lcVal; });
+  if (opt) el.lcSelect.value = lcVal;
+}
+
 function drawElementInputLoads(model, opts) {
   const {
     lc, defFac, deformed, span, nm, em, arrowBase, maxWMag,
@@ -3288,6 +5936,288 @@ function drawElementInputLoads(model, opts) {
       loadLabelScale,
       showValues,
     });
+  }
+}
+
+function diaphragmLoadType(dl) {
+  return String(dl && dl.type != null ? dl.type : "").toUpperCase();
+}
+
+function diaphragmCentroid(model, diapId, nm, lc, defFac, deformed) {
+  const pts = [];
+  for (const mem of model.membrane_elements || []) {
+    if (mem.diaphragm_id !== diapId) continue;
+    for (const nid of mem.nodes || []) {
+      const n = nm[nid];
+      if (n) pts.push(nodePosition(n, model, lc, defFac, deformed));
+    }
+  }
+  if (pts.length === 0) return null;
+  const c = new THREE.Vector3();
+  for (const p of pts) c.add(p);
+  return c.multiplyScalar(1 / pts.length);
+}
+
+function membraneMemberCentroid(model, memberId, nm, lc, defFac, deformed) {
+  const mem = (model.membrane_elements || []).find(function (m) { return m.id === memberId; });
+  if (!mem || !mem.nodes || mem.nodes.length < 3) return null;
+  const pts = [];
+  for (const nid of mem.nodes) {
+    const n = nm[nid];
+    if (n) pts.push(nodePosition(n, model, lc, defFac, deformed));
+  }
+  if (pts.length === 0) return null;
+  const c = new THREE.Vector3();
+  for (const p of pts) c.add(p);
+  return c.multiplyScalar(1 / pts.length);
+}
+
+function maxDiaphragmLoadMag(model, lc) {
+  let max = 0;
+  for (const dl of model.diaphragm_loads || []) {
+    if (String(dl.lc) !== String(lc)) continue;
+    const lt = diaphragmLoadType(dl);
+    if (lt === "AREA" || lt === "LINE" || lt === "MEMBER_TRANSFER") {
+      max = Math.max(max, Math.abs(dl.px), Math.abs(dl.py));
+    } else if (lt === "MASS") {
+      max = Math.max(max, Math.abs(dl.mass) * Math.max(Math.abs(dl.ax), Math.abs(dl.ay), 1));
+    } else if (lt === "WEIGHT") {
+      max = Math.max(max, Math.abs(dl.weight) * Math.max(Math.abs(dl.ax), Math.abs(dl.ay), 1));
+    }
+  }
+  return max;
+}
+
+function formatDlodPressureLabel(mag) {
+  if (Math.abs(mag) < 1e-9) return "";
+  return formatReactionValue(mag) + " kN/m²";
+}
+
+function quantizeDlodPointKey(p) {
+  const q = (v) => Math.round(v * 1e4);
+  return q(p.x) + "," + q(p.y) + "," + q(p.z);
+}
+
+function dlodEdgeKey(p0, p1) {
+  const k0 = quantizeDlodPointKey(p0);
+  const k1 = quantizeDlodPointKey(p1);
+  return k0 < k1 ? k0 + "|" + k1 : k1 + "|" + k0;
+}
+
+function registerDlodTriangleEdge(edgeMap, p0, p1) {
+  const key = dlodEdgeKey(p0, p1);
+  let entry = edgeMap.get(key);
+  if (!entry) {
+    entry = { count: 0, a: p0.clone(), b: p1.clone() };
+    edgeMap.set(key, entry);
+  }
+  entry.count += 1;
+}
+
+function boundaryEdgesFromMap(edgeMap) {
+  const edgePts = [];
+  for (const entry of edgeMap.values()) {
+    if (entry.count !== 1) continue;
+    edgePts.push(
+      entry.a.x, entry.a.y, entry.a.z,
+      entry.b.x, entry.b.y, entry.b.z
+    );
+  }
+  return edgePts;
+}
+
+function collectMembraneEnvelope(model, opts) {
+  const { diapId, memberId, nm, lc, defFac, deformed } = opts;
+  const edgeMap = new Map();
+  for (const mem of model.membrane_elements || []) {
+    if (diapId != null && mem.diaphragm_id !== diapId) continue;
+    if (memberId != null && mem.id !== memberId) continue;
+    const ids = mem.nodes;
+    if (!ids || ids.length !== 3) continue;
+    const n0 = nm[ids[0]];
+    const n1 = nm[ids[1]];
+    const n2 = nm[ids[2]];
+    if (!n0 || !n1 || !n2) continue;
+    const p0 = nodePosition(n0, model, lc, defFac, deformed);
+    const p1 = nodePosition(n1, model, lc, defFac, deformed);
+    const p2 = nodePosition(n2, model, lc, defFac, deformed);
+    registerDlodTriangleEdge(edgeMap, p0, p1);
+    registerDlodTriangleEdge(edgeMap, p1, p2);
+    registerDlodTriangleEdge(edgeMap, p2, p0);
+  }
+  return { edgePts: boundaryEdgesFromMap(edgeMap) };
+}
+
+function addDlodEnvelopeOutline(edgePts) {
+  if (edgePts.length < 6) return;
+  addWideLineSegmentsFromPts(
+    edgePts,
+    COLORS.load,
+    modelGroup,
+    6,
+    Math.max(loadLineWidthPx() * 1.15, 1.0),
+    null,
+    true
+  );
+}
+
+function dlodLineEnvelopeHalfWidth(span) {
+  return Math.max(span * 0.012, 0.06);
+}
+
+function horizontalPerpToSegment(p0, p1) {
+  const along = new THREE.Vector3().subVectors(p1, p0);
+  if (along.lengthSq() < 1e-18) return null;
+  along.z = 0;
+  if (along.lengthSq() < 1e-18) return null;
+  along.normalize();
+  const perp = new THREE.Vector3(-along.y, along.x, 0);
+  if (perp.lengthSq() < 1e-18) return null;
+  return perp.normalize();
+}
+
+function addDlodLineEnvelope(p0, p1, span) {
+  const perp = horizontalPerpToSegment(p0, p1);
+  if (!perp) return;
+  const halfW = dlodLineEnvelopeHalfWidth(span);
+  const off = perp.clone().multiplyScalar(halfW);
+  const a = p0.clone().add(off);
+  const b = p0.clone().sub(off);
+  const c = p1.clone().sub(off);
+  const d = p1.clone().add(off);
+  const edgePts = [
+    a.x, a.y, a.z, b.x, b.y, b.z,
+    b.x, b.y, b.z, c.x, c.y, c.z,
+    c.x, c.y, c.z, d.x, d.y, d.z,
+    d.x, d.y, d.z, a.x, a.y, a.z,
+  ];
+  addDlodEnvelopeOutline(edgePts);
+}
+
+function drawDlodMembraneEnvelope(model, diapId, memberId, nm, lc, defFac, deformed) {
+  const env = collectMembraneEnvelope(model, {
+    diapId: diapId,
+    memberId: memberId,
+    nm: nm,
+    lc: lc,
+    defFac: defFac,
+    deformed: deformed,
+  });
+  if (env.edgePts.length > 0) addDlodEnvelopeOutline(env.edgePts);
+}
+
+function addDlodHorizontalArrow(origin, hx, hy, arrowBase, maxMag, span, loadLabelScale, showValues, labelPrefix) {
+  const comps = [
+    { val: hx, dir: new THREE.Vector3(1, 0, 0), name: "Px" },
+    { val: hy, dir: new THREE.Vector3(0, 1, 0), name: "Py" },
+  ];
+  for (const c of comps) {
+    if (Math.abs(c.val) < 1e-9) continue;
+    const sign = c.val >= 0 ? 1 : -1;
+    const dir = c.dir.clone().multiplyScalar(sign);
+    const mag = Math.abs(c.val);
+    const len = scaledReactionArrowLength(arrowBase, mag, maxMag);
+    const tip = addLoadArrow(origin, dir, len, modelGroup);
+    if (showValues && tip) {
+      const text = (labelPrefix ? labelPrefix + " " : "") + c.name + " " + formatDlodPressureLabel(mag);
+      addLoadValueLabel(
+        text,
+        loadValueLabelPoint(origin, tip, span, loadLabelScale),
+        span,
+        loadLabelScale,
+        labelGroup
+      );
+    }
+  }
+}
+
+function drawDiaphragmInputLoads(model, opts) {
+  if (!shouldDrawDiaphragmLoad()) return;
+  const {
+    lc, defFac, deformed, span, nm, arrowBase, maxWMag, showValues, loadLabelScale,
+  } = opts;
+  const loads = model.diaphragm_loads;
+  if (!loads || loads.length === 0) return;
+
+  for (const dl of loads) {
+    if (String(dl.lc) !== String(lc)) continue;
+    const lt = diaphragmLoadType(dl);
+    const prefix = "DIAP " + dl.diaphragm_id;
+
+    if (lt === "AREA") {
+      drawDlodMembraneEnvelope(model, dl.diaphragm_id, null, nm, lc, defFac, deformed);
+      const origin = diaphragmCentroid(model, dl.diaphragm_id, nm, lc, defFac, deformed);
+      if (!origin) continue;
+      addDlodHorizontalArrow(
+        origin, dl.px, dl.py, arrowBase, maxWMag, span, loadLabelScale, showValues, prefix
+      );
+      continue;
+    }
+
+    if (lt === "LINE") {
+      const ids = dl.nodes || [];
+      if (ids.length < 2) continue;
+      const n0 = nm[ids[0]];
+      const n1 = nm[ids[1]];
+      if (!n0 || !n1) continue;
+      const p0 = nodePosition(n0, model, lc, defFac, deformed);
+      const p1 = nodePosition(n1, model, lc, defFac, deformed);
+      addDlodLineEnvelope(p0, p1, span);
+      const mid = p0.clone().add(p1).multiplyScalar(0.5);
+      addDlodHorizontalArrow(
+        mid, dl.px, dl.py, arrowBase, maxWMag, span, loadLabelScale, showValues, prefix + " LINE"
+      );
+      continue;
+    }
+
+    if (lt === "MEMBER_TRANSFER") {
+      drawDlodMembraneEnvelope(model, null, dl.member_id, nm, lc, defFac, deformed);
+      const origin = membraneMemberCentroid(model, dl.member_id, nm, lc, defFac, deformed)
+        || diaphragmCentroid(model, dl.diaphragm_id, nm, lc, defFac, deformed);
+      if (!origin) continue;
+      addDlodHorizontalArrow(
+        origin, dl.px, dl.py, arrowBase, maxWMag, span, loadLabelScale, showValues, prefix + " MBTR"
+      );
+      continue;
+    }
+
+    if (lt === "MASS" || lt === "WEIGHT") {
+      drawDlodMembraneEnvelope(model, dl.diaphragm_id, null, nm, lc, defFac, deformed);
+      const origin = diaphragmCentroid(model, dl.diaphragm_id, nm, lc, defFac, deformed);
+      if (!origin) continue;
+      const ax = Number(dl.ax) || 0;
+      const ay = Number(dl.ay) || 0;
+      const scalar = lt === "MASS" ? Number(dl.mass) || 0 : Number(dl.weight) || 0;
+      if (Math.abs(ax) > 1e-9 || Math.abs(ay) > 1e-9) {
+        const dir = new THREE.Vector3(ax, ay, 0);
+        const mag = dir.length();
+        if (mag > 1e-9) {
+          dir.multiplyScalar(1 / mag);
+          const eff = scalar * mag;
+          const len = scaledReactionArrowLength(arrowBase, eff, maxWMag);
+          const tip = addLoadArrow(origin, dir, len, modelGroup);
+          if (showValues && tip) {
+            const kind = lt === "MASS" ? "M" : "W";
+            addLoadValueLabel(
+              prefix + " " + kind + "=" + formatReactionValue(scalar) + " ax=" + formatReactionValue(ax) + " ay=" + formatReactionValue(ay),
+              loadValueLabelPoint(origin, tip, span, loadLabelScale),
+              span,
+              loadLabelScale,
+              labelGroup
+            );
+          }
+        }
+      } else if (showValues && Math.abs(scalar) > 1e-9) {
+        const kind = lt === "MASS" ? "M" : "W";
+        addLoadValueLabel(
+          prefix + " " + kind + "=" + formatReactionValue(scalar),
+          origin.clone().add(new THREE.Vector3(0, 0, span * 0.01)),
+          span,
+          loadLabelScale,
+          labelGroup
+        );
+      }
+    }
   }
 }
 
@@ -3336,11 +6266,11 @@ function drawTrapezoidalDistributedLoad(ld, e, p0, p1, opts) {
       if (isParallel) {
         if (j === LOAD_DIV_NUM) continue;
         const tip = pt.clone().add(vOff);
-        addDirectedArrow(pt, tip, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(pt, tip, modelGroup, loadColor, loadLineWidthPx(), undefined, undefined, true);
       } else {
         const ept = pt.clone().sub(vOff);
         outlineOffsets.push(ept);
-        addDirectedArrow(ept, pt, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(ept, pt, modelGroup, loadColor, loadLineWidthPx(), undefined, undefined, true);
       }
     }
 
@@ -3349,21 +6279,24 @@ function drawTrapezoidalDistributedLoad(ld, e, p0, p1, opts) {
       for (let i = 0; i < outlineOffsets.length - 1; i++) {
         addLinePair(outlineOffsets[i], outlineOffsets[i + 1], outlinePts);
       }
-      addWideLineSegmentsFromPts(outlinePts, loadColor, modelGroup, 4, loadLineWidthPx(), 1.0);
+      addWideLineSegmentsFromPts(outlinePts, loadColor, modelGroup, 4, loadLineWidthPx(), null, true);
       if (!isAreaLoad(ld)) {
-        addDirectedArrow(outlineOffsets[0], p0, modelGroup, loadColor, loadLineWidthPx());
+        addDirectedArrow(outlineOffsets[0], p0, modelGroup, loadColor, loadLineWidthPx(), undefined, undefined, true);
         addDirectedArrow(
           outlineOffsets[outlineOffsets.length - 1],
           p1,
           modelGroup,
           loadColor,
-          loadLineWidthPx()
+          loadLineWidthPx(),
+          undefined,
+          undefined,
+          true
         );
       } else {
         const endPts = [];
         addLinePair(outlineOffsets[0], p0, endPts);
         addLinePair(outlineOffsets[outlineOffsets.length - 1], p1, endPts);
-        addWideLineSegmentsFromPts(endPts, loadColor, modelGroup, 4, loadLineWidthPx(), 1.0);
+        addWideLineSegmentsFromPts(endPts, loadColor, modelGroup, 4, loadLineWidthPx(), null, true);
       }
     }
   }
@@ -3551,6 +6484,23 @@ function formatReactionValue(val) {
   return val.toFixed(1);
 }
 
+function reactionForceIsZeroDisplay(fval) {
+  if (Math.abs(fval) < 1e-6) return true;
+  return Math.abs(parseFloat(fval.toFixed(1))) < 1e-9;
+}
+
+function makeReactionForceLabelSprite(text, span, color, scaleFactor) {
+  return makeTextSprite(text, span, {
+    bg: "transparent",
+    fg: colorHex(color),
+    pad: 2,
+    scaleFactor: scaleFactor,
+    transparent: true,
+    alphaTest: 0.01,
+    labelPremultiplied: true,
+  });
+}
+
 function supportReactsForLc(model, s, lcKey) {
   if (s.reacts) {
     if (s.reacts[lcKey]) return s.reacts[lcKey];
@@ -3559,7 +6509,7 @@ function supportReactsForLc(model, s, lcKey) {
   }
   for (const r of model.reactions || []) {
     if (r.node === s.node && String(r.lc) === lcKey) {
-      return [r.rx, r.ry, r.rz, r.mx, r.my, r.mz];
+      return reactionRecordToArray(r);
     }
   }
   return null;
@@ -3573,6 +6523,24 @@ function modelHasReactionData(model, lcKey) {
   return false;
 }
 
+function computeReactionTotals(model, lcKey) {
+  enrichModelReactions(model);
+  const totals = [0, 0, 0, 0, 0, 0];
+  let count = 0;
+  for (const s of model.supports || []) {
+    const r = supportReactsForLc(model, s, lcKey);
+    if (!r) continue;
+    count += 1;
+    for (let i = 0; i < 6; i++) totals[i] += r[i];
+  }
+  if (count === 0) return null;
+  return {
+    tx: totals[0], ty: totals[1], tz: totals[2],
+    rx: totals[3], ry: totals[4], rz: totals[5],
+    count: count,
+  };
+}
+
 function orientMeshAxisX(mesh, dir) {
   const xAxis = dir.clone().normalize();
   let refUp = new THREE.Vector3(0, 0, 1);
@@ -3584,16 +6552,34 @@ function orientMeshAxisX(mesh, dir) {
   mesh.setRotationFromMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
 }
 
-function createLabelTexture(canvas, opaqueText) {
+function createLabelTexture(canvas, premultiplyOnUpload, crisp) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.premultiplyAlpha = opaqueText;
+  const filt = crisp ? THREE.NearestFilter : THREE.LinearFilter;
+  tex.minFilter = filt;
+  tex.magFilter = filt;
+  // Keep canvas label colors consistent with line/material colors.
+  if ("colorSpace" in tex && THREE.SRGBColorSpace) {
+    tex.colorSpace = THREE.SRGBColorSpace;
+  }
+  tex.premultiplyAlpha = !!premultiplyOnUpload;
   if (renderer && renderer.capabilities) {
     tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   }
   return tex;
+}
+
+function drawLabelCanvasText(ctx, text, x, y, fg, opts) {
+  const quality = opts.quality || 1;
+  if (opts.textOutline) {
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.strokeStyle = opts.outlineColor || fg;
+    ctx.lineWidth = Math.max(2, quality * 3);
+    ctx.strokeText(text, x, y);
+  }
+  ctx.fillStyle = fg;
+  ctx.fillText(text, x, y);
 }
 
 function buildLabelCanvas(text, span, opts) {
@@ -3603,7 +6589,9 @@ function buildLabelCanvas(text, span, opts) {
   const fg = opts.fg || "#ffffff";
   const pad = opts.pad != null ? opts.pad : 4;
   const factor = opts.scaleFactor != null ? opts.scaleFactor : 0.06;
-  const quality = labelTextureQualityScale(factor);
+  const quality = opts.qualityScale != null
+    ? opts.qualityScale
+    : labelTextureQualityScale(factor);
   const baseFs = 28;
 
   const canvas = document.createElement("canvas");
@@ -3622,28 +6610,35 @@ function buildLabelCanvas(text, span, opts) {
   if (ctx.imageSmoothingQuality) {
     ctx.imageSmoothingQuality = "high";
   }
+  if (ctx.textRendering) {
+    ctx.textRendering = "optimizeLegibility";
+  }
 
   if (bg != null && bg !== "transparent") {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
-  ctx.fillStyle = fg;
-  ctx.globalAlpha = ALPHA.opaque;
-  ctx.fillText(text, padPx, quality * (baseFs + pad - 2));
+  const textY = quality * (baseFs + pad - 2);
+  drawLabelCanvasText(ctx, text, padPx, textY, fg, { quality: quality, textOutline: opts.textOutline });
 
-  const opaqueText = opts.opaque && (bg == null || bg === "transparent");
-  if (opaqueText) {
-    premultiplyCanvasAlpha(canvas);
+  if (opts.solidAlpha) {
+    solidifyCanvasForeground(canvas, fg);
   }
+
+  const labelPremultiplied = !!(
+    opts.labelPremultiplied
+    || opts.textOutline
+    || (opts.opaque && (bg == null || bg === "transparent") && !opts.solidAlpha)
+  );
 
   const worldH = span * factor;
   const worldW = worldH * (canvas.width / canvas.height);
-  return { canvas, opaqueText, worldW, worldH };
+  return { canvas, labelPremultiplied, worldW, worldH };
 }
 
 function makeTextPlaneMesh(text, span, opts) {
-  const { canvas, opaqueText, worldW, worldH } = buildLabelCanvas(text, span, opts);
-  const tex = createLabelTexture(canvas, opaqueText);
+  const { canvas, labelPremultiplied, worldW, worldH } = buildLabelCanvas(text, span, opts);
+  const tex = createLabelTexture(canvas, labelPremultiplied, !!opts.crispLabel);
   const mat = new THREE.MeshBasicMaterial({
     map: tex,
     transparent: true,
@@ -3651,8 +6646,8 @@ function makeTextPlaneMesh(text, span, opts) {
     depthWrite: false,
     side: THREE.DoubleSide,
     opacity: ALPHA.opaque,
-    premultipliedAlpha: opaqueText,
-    alphaTest: opaqueText ? 0.01 : 0,
+    premultipliedAlpha: labelPremultiplied,
+    alphaTest: labelPremultiplied ? 0.01 : 0,
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(worldW, worldH), mat);
   mesh.renderOrder = 15;
@@ -3666,6 +6661,7 @@ function addOrientedReactionLabel(text, contact, axisDir, span, scaleFactor, gro
     fg: fgColor,
     pad: 2,
     scaleFactor: scaleFactor,
+    labelPremultiplied: true,
   });
   orientMeshAxisX(mesh, d);
   const pad = labelOffsetDistance(span, scaleFactor, 0.03);
@@ -3675,10 +6671,14 @@ function addOrientedReactionLabel(text, contact, axisDir, span, scaleFactor, gro
 
 function drawSupportReactions(model, opts) {
   const {
-    lc, lcKey, defFac, deformed, showValues, span, nm, reactionLabelScale,
+    lc, lcKey, defFac, deformed, showArrows, showValues, span, nm, reactionLabelScale,
   } = opts;
-  if (!showValues) return;
+  if (!showArrows && !showValues) return;
   if (!analysisComplete(model) || !model.supports || model.supports.length === 0) return;
+
+  const arrowLen = reactionArrowLength(model);
+  const maxForceMag = maxReactionForceMag(model, lcKey);
+  const gizmoRadius = supportGizmoSize(model);
 
   for (const s of model.supports) {
     const r = supportReactsForLc(model, s, lcKey);
@@ -3686,29 +6686,83 @@ function drawSupportReactions(model, opts) {
     const n = nm[s.node];
     if (!n) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
-    const fx = r[0], fy = r[1], fz = r[2];
-    const mx = r[3], my = r[4], mz = r[5];
+    const tx = r[0], ty = r[1], tz = r[2];
+    const rx = r[3], ry = r[4], rz = r[5];
+    const forces = [tx, ty, tz];
 
-    const forceAxes = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, 0, 1),
-    ];
-    const forces = [fx, fy, fz];
+    const gizmoCenter = supportGizmoCenter(p, model, gizmoRadius, camera, renderer, _gizmoCenterScratch);
+
     for (let i = 0; i < 3; i++) {
       const fval = forces[i];
-      if (Math.abs(fval) < 1e-9) continue;
-      const dir = forceAxes[i].clone().multiplyScalar(fval >= 0 ? 1 : -1);
-      addOrientedReactionLabel(
-        formatReactionValue(fval),
-        p,
-        dir,
-        span,
-        reactionLabelScale,
-        labelGroup,
-        colorHex(COLORS.reaction),
-        -1
+      const color = REACTION_TRANS_COLORS[i];
+      const zeroDisplay = reactionForceIsZeroDisplay(fval);
+
+      if (zeroDisplay) {
+        if (!showArrows && !showValues) continue;
+        const axisDir = REACTION_TRANS_AXES[i];
+        const screenDir = billboardScreenDirection(gizmoCenter, axisDir, camera, _screenDirScratch);
+        const entry = {
+          nodePos: p.clone(),
+          gizmoRadius: gizmoRadius,
+          axisIndex: i,
+          fval: fval,
+          arrowLen: arrowLen,
+          lines: null,
+          headScale: 0.85,
+          labelSprite: null,
+          zeroDisplay: true,
+          span: span,
+          scaleFactor: reactionLabelScale,
+        };
+        const sprite = makeReactionForceLabelSprite("0", span, color, reactionLabelScale);
+        sprite.renderOrder = 15;
+        entry.labelSprite = sprite;
+        updateReactionZeroLabel(entry, gizmoCenter, screenDir);
+        labelGroup.add(sprite);
+        reactionForceEntries.push(entry);
+        continue;
+      }
+
+      const forceDir = reactionForceDirection(i, fval);
+      const screenDir = billboardScreenDirection(gizmoCenter, forceDir, camera, _screenDirScratch);
+      const viewDir = billboardViewDirection(gizmoCenter, camera, _viewToCenterScratch);
+      const { tail, head } = computeReactionTransArrowEndpoints(
+        gizmoCenter, gizmoRadius, screenDir, arrowLen
       );
+
+      const entry = {
+        nodePos: p.clone(),
+        gizmoRadius: gizmoRadius,
+        axisIndex: i,
+        fval: fval,
+        arrowLen: arrowLen,
+        lines: null,
+        headScale: 0.85,
+        labelSprite: null,
+        zeroDisplay: false,
+        span: span,
+        scaleFactor: reactionLabelScale,
+      };
+
+      if (showArrows) {
+        const lineW = reactionLineWidthPx(fval, maxForceMag);
+        entry.lines = addDirectedArrowWideMutable(
+          tail, head, modelGroup, color, lineW, entry.headScale, 7, true, viewDir
+        );
+      }
+
+      if (showValues) {
+        const text = formatReactionValue(fval);
+        const sprite = makeReactionForceLabelSprite(text, span, color, reactionLabelScale);
+        sprite.renderOrder = 15;
+        entry.labelSprite = sprite;
+        updateReactionForceLabel(entry, tail, screenDir);
+        labelGroup.add(sprite);
+      }
+
+      if (showArrows || showValues) {
+        reactionForceEntries.push(entry);
+      }
     }
 
     const momentAxes = [
@@ -3716,21 +6770,24 @@ function drawSupportReactions(model, opts) {
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(0, 0, 1),
     ];
-    const moments = [mx, my, mz];
-    for (let i = 0; i < 3; i++) {
-      const mval = moments[i];
-      if (Math.abs(mval) < 1e-9) continue;
-      const axisDir = momentAxes[i].clone().multiplyScalar(mval >= 0 ? 1 : -1);
-      addOrientedReactionLabel(
-        formatReactionValue(mval),
-        p,
-        axisDir,
-        span,
-        reactionLabelScale,
-        labelGroup,
-        colorHex(COLORS.reactionMoment),
-        1
-      );
+    const moments = [rx, ry, rz];
+    const momentLabels = ["Rx", "Ry", "Rz"];
+    if (showValues) {
+      for (let i = 0; i < 3; i++) {
+        const mval = moments[i];
+        if (Math.abs(mval) < 1e-9) continue;
+        const axisDir = momentAxes[i].clone().multiplyScalar(mval >= 0 ? 1 : -1);
+        addOrientedReactionLabel(
+          momentLabels[i] + " " + formatReactionValue(mval),
+          p,
+          axisDir,
+          span,
+          reactionLabelScale,
+          labelGroup,
+          colorHex(COLORS.reactionMoment),
+          1
+        );
+      }
     }
   }
 }
@@ -3794,6 +6851,34 @@ function addElemLabel(text, point, span, scaleFactor, group, bg, transparent) {
   group.add(sprite);
 }
 
+function addElemLabelWithLeader(text, anchorPos, p0, p1, side, span, scaleFactor, group, bg, transparent) {
+  const sprite = makeTextSprite(text, span, {
+    bg: bg || LABEL_BG.elem,
+    fg: "#ffffff",
+    pad: 4,
+    scaleFactor: scaleFactor,
+    transparent: transparent !== false,
+  });
+  sprite.renderOrder = 16;
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(6, 3));
+  const line = new THREE.Line(lineGeo, nodeLabelLeaderMaterial());
+  line.frustumCulled = false;
+  line.renderOrder = 15;
+  const entry = {
+    anchorPos: anchorPos.clone(),
+    p0: p0.clone(),
+    p1: p1.clone(),
+    side: side,
+    sprite: sprite,
+    line: line,
+  };
+  updateElemLabelEntry(entry, camera, renderer);
+  group.add(sprite);
+  group.add(line);
+  elemLabelEntries.push(entry);
+}
+
 function addAnnotationLabel(text, point, dir, span, scaleFactor, group, bg) {
   if (!text) return;
   const offset = dir.clone().normalize().multiplyScalar(span * 0.04);
@@ -3809,7 +6894,78 @@ function arrowPerpendicular(dir) {
   return new THREE.Vector3().crossVectors(d, ref).normalize();
 }
 
-function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, renderOrder) {
+function directedArrowLinePoints(tail, head, headScale) {
+  const d = head.clone().sub(tail);
+  const length = d.length();
+  if (length < 1e-12) return [];
+  const dir = d.clone().normalize();
+  const hs = (headScale != null && isFinite(headScale) && headScale > 0) ? headScale : 1.0;
+  const headLen = Math.max(length * 0.22 * hs, length * 0.08 * hs);
+  const headWide = headLen * 0.55;
+  const wingBase = head.clone().addScaledVector(dir, -headLen);
+  const perp = arrowPerpendicular(dir);
+  const wingA = wingBase.clone().addScaledVector(perp, headWide);
+  const wingB = wingBase.clone().addScaledVector(perp, -headWide);
+  const pts = [];
+  addLinePair(tail, head, pts);
+  addLinePair(wingA, head, pts);
+  addLinePair(wingB, head, pts);
+  return pts;
+}
+
+function updateDirectedWideArrow(lines, tail, head, headScale) {
+  if (!lines) return;
+  const pts = directedArrowLinePoints(tail, head, headScale);
+  if (pts.length < 6) return;
+  lines.geometry.setPositions(pts);
+  lines.geometry.computeBoundingSphere();
+}
+
+function billboardArrowPerpendicular(screenDir, viewDir) {
+  const perp = new THREE.Vector3().crossVectors(viewDir, screenDir);
+  if (perp.lengthSq() < 1e-12) {
+    return arrowPerpendicular(screenDir);
+  }
+  return perp.normalize();
+}
+
+function billboardDirectedArrowLinePoints(tail, head, viewDir, headScale) {
+  const d = head.clone().sub(tail);
+  const length = d.length();
+  if (length < 1e-12) return [];
+  const dir = d.clone().normalize();
+  const hs = (headScale != null && isFinite(headScale) && headScale > 0) ? headScale : 1.0;
+  const headLen = Math.max(length * 0.22 * hs, length * 0.08 * hs);
+  const headWide = headLen * 0.55;
+  const wingBase = head.clone().addScaledVector(dir, -headLen);
+  const perp = billboardArrowPerpendicular(dir, viewDir);
+  const wingA = wingBase.clone().addScaledVector(perp, headWide);
+  const wingB = wingBase.clone().addScaledVector(perp, -headWide);
+  const pts = [];
+  addLinePair(tail, head, pts);
+  addLinePair(wingA, head, pts);
+  addLinePair(wingB, head, pts);
+  return pts;
+}
+
+function updateBillboardDirectedWideArrow(lines, tail, head, viewDir, headScale) {
+  if (!lines) return;
+  const pts = billboardDirectedArrowLinePoints(tail, head, viewDir, headScale);
+  if (pts.length < 6) return;
+  lines.geometry.setPositions(pts);
+  lines.geometry.computeBoundingSphere();
+}
+
+function addDirectedArrowWideMutable(tail, head, group, color, lineWidthPx, headScale, renderOrder, opaque, viewDir) {
+  const pts = viewDir
+    ? billboardDirectedArrowLinePoints(tail, head, viewDir, headScale)
+    : directedArrowLinePoints(tail, head, headScale);
+  if (pts.length < 6) return null;
+  const ro = (renderOrder != null && isFinite(renderOrder)) ? renderOrder : 5;
+  return addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx, null, opaque === true);
+}
+
+function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, renderOrder, opaque) {
   const d = head.clone().sub(tail);
   const length = d.length();
   if (length < 1e-12) return head.clone();
@@ -3824,11 +6980,8 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, rend
   const ro = (renderOrder != null && isFinite(renderOrder)) ? renderOrder : 5;
 
   if (lineWidthPx != null) {
-    const pts = [];
-    addLinePair(tail, head, pts);
-    addLinePair(wingA, head, pts);
-    addLinePair(wingB, head, pts);
-    addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx);
+    const pts = directedArrowLinePoints(tail, head, headScale);
+    addWideLineSegmentsFromPts(pts, color, group, ro, lineWidthPx, null, opaque === true);
     return head.clone();
   }
 
@@ -3855,15 +7008,15 @@ function addDirectedArrow(tail, head, group, color, lineWidthPx, headScale, rend
   return head.clone();
 }
 
-function addDirectionArrow(origin, dir, length, group, color, lineWidthPx, headScale) {
+function addDirectionArrow(origin, dir, length, group, color, lineWidthPx, headScale, opaque) {
   const d = dir.clone().normalize();
   const tip = origin.clone().addScaledVector(d, length);
-  return addDirectedArrow(origin, tip, group, color, lineWidthPx, headScale);
+  return addDirectedArrow(origin, tip, group, color, lineWidthPx, headScale, undefined, opaque);
 }
 
 function addLoadArrow(origin, dir, length, group) {
   // Slightly slimmer load arrows for better readability on dense scenes.
-  return addDirectionArrow(origin, dir, length, group, COLORS.load, loadLineWidthPx(), 0.75);
+  return addDirectionArrow(origin, dir, length, group, COLORS.load, loadLineWidthPx(), 0.75, true);
 }
 
 function nodeLabelScaleFactor() {
@@ -4023,22 +7176,40 @@ function addForceStemAndSpline(stemPts, splinePts, group) {
   }
 }
 
-function addForceValueLabel(text, point, model, group) {
-  const span = modelSpan(model);
+function addForceValueLabelWithLeader(text, diagramPt, axisPt, span, group) {
   const sprite = makeTextSprite(text, span, {
-    bg: "rgba(0, 71, 171, " + ALPHA.forceValueBg + ")",
-    fg: "#ffffff",
-    pad: 6,
     scaleFactor: forceLabelScaleFactor(),
+    bg: null,
+    fg: colorHex(COLORS.nodeLabel),
   });
   sprite.renderOrder = 20;
-  sprite.position.copy(point);
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(6, 3));
+  const line = new THREE.Line(lineGeo, nodeLabelLeaderMaterial());
+  line.frustumCulled = false;
+  line.renderOrder = 19;
+  const entry = {
+    diagramPt: diagramPt.clone(),
+    axisPt: axisPt.clone(),
+    sprite: sprite,
+    line: line,
+  };
+  updateForceLabelEntry(entry, camera, renderer);
   group.add(sprite);
+  group.add(line);
+  forceLabelEntries.push(entry);
+}
+
+function anchorDiagramValue(rawValue, rawMid, rawEnd, targetMid, targetEnd, t) {
+  const midCorrection = (targetMid - rawMid) * 4 * t * (1 - t);
+  const endCorrection = (targetEnd - rawEnd) * (2 * t * t - t);
+  return rawValue + midCorrection + endCorrection;
 }
 
 function buildForceDiagrams(model) {
   clearGroup(forceGroup);
   clearGroup(forceLabelGroup);
+  forceLabelEntries = [];
 
   const forceId = parseInt(el.forceSelect.value, 10) || 0;
   const lcKey = el.lcSelect.value;
@@ -4088,10 +7259,11 @@ function buildForceDiagrams(model) {
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: ni, pt: splinePts[0] },
-        { val: nXc, pt: mp },
-        { val: nj, pt: splinePts[splinePts.length - 1] },
+        { val: ni, pt: splinePts[0], axisPt: p0 },
+        { val: nXc, pt: mp, axisPt: pMid },
+        { val: nj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 2) {
       const vy = new THREE.Vector3().fromArray(e.vy);
@@ -4111,10 +7283,11 @@ function buildForceDiagrams(model) {
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: qyi, pt: splinePts[0] },
-        { val: qXc, pt: mp },
-        { val: qyj, pt: splinePts[splinePts.length - 1] },
+        { val: qyi, pt: splinePts[0], axisPt: p0 },
+        { val: qXc, pt: mp, axisPt: pMid },
+        { val: qyj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 3) {
       const vz = new THREE.Vector3().fromArray(e.vz);
@@ -4134,10 +7307,11 @@ function buildForceDiagrams(model) {
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: qzi, pt: splinePts[0] },
-        { val: qXc, pt: mp },
-        { val: qzj, pt: splinePts[splinePts.length - 1] },
+        { val: qzi, pt: splinePts[0], axisPt: p0 },
+        { val: qXc, pt: mp, axisPt: pMid },
+        { val: qzj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 5) {
       let vz = new THREE.Vector3().fromArray(e.vz);
@@ -4145,7 +7319,9 @@ function buildForceDiagrams(model) {
       const wzi = lds[2], wzj = lds[5];
       const qzi = f[2], myi = f[4], myj = f[10];
       const wXc = wzi + (wzj - wzi) * 0.5;
-      const mXc = myi + qzi * 0.5 * e.len + (1 / 6) * (wzi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXcCalc = myi + qzi * 0.5 * e.len + (1 / 6) * (wzi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXc = Number.isFinite(f[12]) ? f[12] : mXcCalc;
+      const mEndCalc = myi + qzi * e.len + (1 / 6) * (wzi + 2 * wzj) * e.len * e.len;
       const mp = new THREE.Vector3().lerpVectors(p0, p1, 0.5).addScaledVector(vz, -dispFac * mXc);
 
       for (let i = 0; i <= divNum; i++) {
@@ -4153,15 +7329,17 @@ function buildForceDiagrams(model) {
         const x = t * e.len;
         const pt = new THREE.Vector3().lerpVectors(p0, p1, t);
         const wX = wzi + (wzj - wzi) * t;
-        const mX = myi + qzi * x + (1 / 6) * (wzi + 2 * wX) * x * x;
+        const mRaw = myi + qzi * x + (1 / 6) * (wzi + 2 * wX) * x * x;
+        const mX = anchorDiagramValue(mRaw, mXcCalc, mEndCalc, mXc, myj, t);
         const ptF = pt.clone().addScaledVector(vz, -dispFac * mX);
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: myi, pt: splinePts[0] },
-        { val: mXc, pt: mp },
-        { val: myj, pt: splinePts[splinePts.length - 1] },
+        { val: myi, pt: splinePts[0], axisPt: p0 },
+        { val: mXc, pt: mp, axisPt: pMid },
+        { val: myj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 6) {
       let vy = new THREE.Vector3().fromArray(e.vy);
@@ -4169,7 +7347,9 @@ function buildForceDiagrams(model) {
       const wyi = lds[1], wyj = lds[4];
       const qyi = f[1], mzi = f[5], mzj = f[11];
       const wXc = wyi + (wyj - wyi) * 0.5;
-      const mXc = mzi - qyi * 0.5 * e.len - (1 / 6) * (wyi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXcCalc = mzi - qyi * 0.5 * e.len - (1 / 6) * (wyi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXc = Number.isFinite(f[13]) ? f[13] : mXcCalc;
+      const mEndCalc = mzi - qyi * e.len - (1 / 6) * (wyi + 2 * wyj) * e.len * e.len;
       const mp = new THREE.Vector3().lerpVectors(p0, p1, 0.5).addScaledVector(vy, dispFac * mXc);
 
       for (let i = 0; i <= divNum; i++) {
@@ -4177,22 +7357,31 @@ function buildForceDiagrams(model) {
         const x = t * e.len;
         const pt = new THREE.Vector3().lerpVectors(p0, p1, t);
         const wX = wyi + (wyj - wyi) * t;
-        const mX = mzi - qyi * x - (1 / 6) * (wyi + 2 * wX) * x * x;
+        const mRaw = mzi - qyi * x - (1 / 6) * (wyi + 2 * wX) * x * x;
+        const mX = anchorDiagramValue(mRaw, mXcCalc, mEndCalc, mXc, mzj, t);
         const ptF = pt.clone().addScaledVector(vy, dispFac * mX);
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: mzi, pt: splinePts[0] },
-        { val: mXc, pt: mp },
-        { val: mzj, pt: splinePts[splinePts.length - 1] },
+        { val: mzi, pt: splinePts[0], axisPt: p0 },
+        { val: mXc, pt: mp, axisPt: pMid },
+        { val: mzj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     }
 
     addForceStemAndSpline(stemPts, splinePts, forceGroup);
     if (showValues) {
+      const span = modelSpan(model);
       for (const item of labels) {
-        addForceValueLabel(formatForceValue(item.val), item.pt, model, forceLabelGroup);
+        addForceValueLabelWithLeader(
+          formatForceValue(item.val),
+          item.pt,
+          item.axisPt,
+          span,
+          forceLabelGroup
+        );
       }
     }
   }
@@ -4218,18 +7407,48 @@ function premultiplyCanvasAlpha(canvas) {
   ctx.putImageData(img, 0, 0);
 }
 
+function solidifyCanvasForeground(canvas, fg, alphaThreshold) {
+  const h = String(fg || "#ffffff").replace(/^#/, "");
+  let r = 255;
+  let g = 255;
+  let b = 255;
+  if (h.length === 6) {
+    r = parseInt(h.slice(0, 2), 16);
+    g = parseInt(h.slice(2, 4), 16);
+    b = parseInt(h.slice(4, 6), 16);
+  }
+  const thresh = alphaThreshold != null ? alphaThreshold : 8;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] > thresh) {
+      d[i] = r;
+      d[i + 1] = g;
+      d[i + 2] = b;
+      d[i + 3] = 255;
+    } else {
+      d[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 function makeTextSprite(text, span, opts) {
-  const { canvas, opaqueText, worldW, worldH } = buildLabelCanvas(text, span, opts);
-  const tex = createLabelTexture(canvas, opaqueText);
-  const useTransparent = !(opts && opts.transparent === false);
+  opts = opts || {};
+  const { canvas, labelPremultiplied, worldW, worldH } = buildLabelCanvas(text, span, opts);
+  const tex = createLabelTexture(canvas, labelPremultiplied, !!opts.crispLabel);
+  const useTransparent = opts.transparent !== false;
   const mat = new THREE.SpriteMaterial({
     map: tex,
     depthTest: false,
     depthWrite: false,
     transparent: useTransparent,
     opacity: ALPHA.opaque,
-    premultipliedAlpha: opaqueText,
-    alphaTest: useTransparent ? (opaqueText ? 0.01 : 0) : 0,
+    premultipliedAlpha: labelPremultiplied,
+    alphaTest: opts.alphaTest != null
+      ? opts.alphaTest
+      : (useTransparent ? (labelPremultiplied ? 0.01 : 0) : 0),
   });
   const sp = new THREE.Sprite(mat);
   sp.scale.set(worldW, worldH, 1);
@@ -4252,12 +7471,221 @@ function fillLcSelect(model) {
     opt.textContent = "LC " + lc;
     el.lcSelect.appendChild(opt);
   }
+  const savedLc = displayPrefs.loadCase;
+  if (savedLc && Array.from(el.lcSelect.options).some(function (o) { return o.value === savedLc; })) {
+    el.lcSelect.value = savedLc;
+  }
 }
 
 async function fetchModelList() {
   const res = await fetch("/api/models");
   if (!res.ok) throw new Error("Failed to list models");
   return res.json();
+}
+
+function guiApiOrigin(targetWindow) {
+  const readOrigin = (win) => {
+    try {
+      if (!win || win.closed) return null;
+      if (win.__stbGuiOrigin && win.__stbGuiOrigin !== "null") {
+        return win.__stbGuiOrigin;
+      }
+      const origin = win.location && win.location.origin;
+      if (origin && origin !== "null") {
+        return origin;
+      }
+    } catch (_) {
+      /* cross-origin opener access may fail */
+    }
+    return null;
+  };
+
+  if (targetWindow) {
+    const pinned = readOrigin(targetWindow);
+    if (pinned) return pinned;
+    const fromOpener = readOrigin(targetWindow.opener);
+    if (fromOpener) return fromOpener;
+    const fromTarget = readOrigin(targetWindow);
+    if (fromTarget) return fromTarget;
+  }
+  return readOrigin(window) || "";
+}
+
+function guiApiUrl(path, targetWindow) {
+  const rel = path.startsWith("/") ? path : "/" + path;
+  const origin = guiApiOrigin(targetWindow);
+  if (!origin || origin === "null") {
+    throw new Error("Cannot resolve GUI API origin. Reload the main window.");
+  }
+  return origin + rel;
+}
+
+function primeStbPopupOrigin(popupWin) {
+  if (!popupWin || popupWin.closed) return;
+  const origin = guiApiOrigin(window);
+  if (!origin || origin === "null") return;
+  try {
+    popupWin.__stbGuiOrigin = origin;
+  } catch (_) {
+    /* popup may be cross-origin until navigation completes */
+  }
+}
+
+const childWindows = new Set();
+const childWindowRefs = Object.create(null);
+
+const CHILD_WINDOW_NAMES = {
+  input: "stb_gui_input",
+  project: "stb_gui_project",
+  loadsVerify: "stb_loads_verify",
+  results: "stb_gui_results",
+};
+
+function getLivingChildWindow(kind) {
+  const w = childWindowRefs[kind];
+  if (!w) return null;
+  if (w.closed) {
+    delete childWindowRefs[kind];
+    return null;
+  }
+  return w;
+}
+
+function focusChildWindow(w) {
+  if (!w || w.closed) return;
+  try {
+    w.focus();
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function registerChildWindow(win) {
+  if (!win) return;
+  childWindows.add(win);
+}
+
+function pruneClosedChildWindows() {
+  for (const w of childWindows) {
+    if (!w || w.closed) childWindows.delete(w);
+  }
+}
+
+function closeAllChildWindows() {
+  pruneClosedChildWindows();
+  for (const w of childWindows) {
+    try {
+      if (!w.closed) w.close();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  childWindows.clear();
+  for (const kind of Object.keys(childWindowRefs)) {
+    delete childWindowRefs[kind];
+  }
+  inputEditors.clear();
+}
+
+function openNamedChildPopup(kind, features) {
+  pruneClosedChildWindows();
+  const existing = getLivingChildWindow(kind);
+  if (existing) {
+    focusChildWindow(existing);
+    return existing;
+  }
+  const url = guiApiUrl("/static/popup.html", window);
+  const w = window.open(url, CHILD_WINDOW_NAMES[kind] || "_blank", features);
+  primeStbPopupOrigin(w);
+  if (w) {
+    childWindowRefs[kind] = w;
+    registerChildWindow(w);
+  }
+  return w;
+}
+
+function openNamedChildUrl(kind, url, features) {
+  pruneClosedChildWindows();
+  const existing = getLivingChildWindow(kind);
+  if (existing) {
+    try {
+      if (existing.location.href !== url) existing.location.href = url;
+    } catch (_) {
+      /* cross-origin during navigation */
+    }
+    focusChildWindow(existing);
+    return existing;
+  }
+  const w = window.open(url, CHILD_WINDOW_NAMES[kind] || "_blank", features);
+  primeStbPopupOrigin(w);
+  if (w) {
+    childWindowRefs[kind] = w;
+    registerChildWindow(w);
+  }
+  return w;
+}
+
+function runWhenPopupReady(w, initFn) {
+  if (!w) return;
+  const run = () => {
+    primeStbPopupOrigin(w);
+    try {
+      initFn();
+    } catch (ex) {
+      setStatus("Error: " + ex.message);
+      alert(String(ex.message || ex));
+    }
+  };
+  if (w.document.readyState === "complete" || w.document.readyState === "interactive") {
+    run();
+    return;
+  }
+  w.addEventListener("load", run, { once: true });
+}
+
+function stbIconHeadHtml(targetWindow) {
+  const base = guiApiOrigin(targetWindow) || "";
+  return "<meta name=\"theme-color\" content=\"" + uiThemeMetaColor(uiTheme) + "\">"
+    + "<meta name=\"color-scheme\" content=\"dark light\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-32.png\" type=\"image/png\" sizes=\"32x32\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-48.png\" type=\"image/png\" sizes=\"48x48\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/st-icon-256.png\" type=\"image/png\" sizes=\"256x256\">"
+    + "<link rel=\"icon\" href=\"" + base + "/static/icons/favicon.ico\" sizes=\"48x48\">"
+    + "<link rel=\"apple-touch-icon\" href=\"" + base + "/static/icons/st-icon-192.png\">";
+}
+
+async function fetchApiJson(path, targetWindow, options) {
+  const url = guiApiUrl(path, targetWindow);
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (ex) {
+    throw new Error("API request failed (" + url + "): " + ex.message);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = err.detail;
+    if (Array.isArray(detail)) {
+      throw new Error(detail.map((d) => d.msg || String(d)).join("; "));
+    }
+    throw new Error(detail || res.statusText || "request failed");
+  }
+  return res.json();
+}
+
+async function fetchApiText(path, targetWindow) {
+  const url = guiApiUrl(path, targetWindow);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (ex) {
+    throw new Error("API request failed (" + url + "): " + ex.message);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.text();
 }
 
 async function fetchModel(path, solve) {
@@ -4277,31 +7705,1083 @@ function outputFileName(path) {
   return dir + stem + ".out";
 }
 
-function showTextDocumentWindow(text, title) {
-  const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
-  const saveName = title;
-  const w = window.open("", "_blank", "width=920,height=720,scrollbars=yes,resizable=yes");
+async function fetchProjectView(path, targetWindow) {
+  return fetchApiJson("/api/project?path=" + encodeURIComponent(path), targetWindow || window);
+}
+
+async function fetchProjectTemplate(path, targetWindow) {
+  return fetchApiJson("/api/project/template?path=" + encodeURIComponent(path), targetWindow || window);
+}
+
+async function saveProjectJson(datPath, project, targetWindow) {
+  return fetchApiJson(
+    "/api/project?path=" + encodeURIComponent(datPath),
+    targetWindow || window,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: project }),
+    },
+  );
+}
+
+function escapeHtml(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const DEFAULT_SEISMIC_RT = 1.0;
+const DEFAULT_SEISMIC_TC = 0.6;
+const DEFAULT_BASE_MASS_POLICY = "LUMP_TO_ABOVE_DIAPHRAGM";
+
+function deepCloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function deepSet(obj, path, value) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (cur[key] == null || typeof cur[key] !== "object") {
+      cur[key] = {};
+    }
+    cur = cur[key];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+function parseCsvInts(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+    const n = Number(s);
+    if (!Number.isFinite(n) || Math.trunc(n) !== n) {
+      throw new Error("整数リストの形式が不正です: " + text);
+    }
+    return n;
+  });
+}
+
+function parseCsvNumbers(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+    const n = Number(s);
+    if (!Number.isFinite(n)) {
+      throw new Error("数値リストの形式が不正です: " + text);
+    }
+    return n;
+  });
+}
+
+function formatCsvInts(values) {
+  if (!values || !values.length) return "";
+  return values.join(", ");
+}
+
+function parseProjectFieldValue(type, raw, path) {
+  const text = String(raw ?? "").trim();
+  if (type === "optional_int") {
+    if (!text || text === "—") return null;
+    const n = Number(text);
+    if (!Number.isFinite(n) || Math.trunc(n) !== n) {
+      throw new Error("整数を入力してください: " + raw);
+    }
+    return n;
+  }
+  if (type === "csv_int") {
+    return parseCsvInts(text);
+  }
+  if (type === "csv_number") {
+    return parseCsvNumbers(text);
+  }
+  if (type === "bool") {
+    return text === "true" || text === "1" || text === "はい";
+  }
+  if (type === "select") {
+    if (!text) return undefined;
+    return text;
+  }
+  if (type === "number") {
+    if (!text) {
+      if (
+        path === "load_conditions.seismic.ci"
+        || path === "load_conditions.seismic.rt"
+        || path === "load_conditions.seismic.design_period_s"
+        || path === "load_conditions.seismic.height_m"
+        || path === "load_conditions.seismic.base_elevation"
+      ) {
+        return undefined;
+      }
+      return 0;
+    }
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      throw new Error("数値を入力してください: " + raw);
+    }
+    if (path === "load_conditions.seismic.ci" && n <= 0) {
+      return undefined;
+    }
+    return n;
+  }
+  return text;
+}
+
+function parseProjectTableCellValue(type, raw) {
+  const text = String(raw ?? "").trim();
+  if (type === "number") {
+    if (!text) return null;
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      throw new Error("数値を入力してください: " + raw);
+    }
+    return n;
+  }
+  if (type === "optional_int") {
+    if (!text || text === "—") return null;
+    const n = Number(text);
+    if (!Number.isFinite(n) || Math.trunc(n) !== n) {
+      throw new Error("整数を入力してください: " + raw);
+    }
+    return n;
+  }
+  if (type === "csv_int") {
+    if (!text) return [];
+    return parseCsvInts(text);
+  }
+  if (type === "csv_number") {
+    if (!text) return [];
+    return parseCsvNumbers(text);
+  }
+  if (type === "bool") {
+    return text === "true" || text === "1" || text === "はい";
+  }
+  return text;
+}
+
+function shouldIncludeProjectTableRow(row, columns) {
+  const keyColumn = columns.find((c) => c.path === "name")
+    || columns.find((c) => c.path === "id")
+    || columns[0];
+  if (!keyColumn) return false;
+  const value = row[keyColumn.path];
+  if (keyColumn.type === "number" || keyColumn.type === "optional_int") {
+    return value != null && value !== "" && Number.isFinite(Number(value));
+  }
+  if (keyColumn.type === "csv_int" || keyColumn.type === "csv_number") {
+    return Array.isArray(value) && value.length > 0;
+  }
+  return String(value ?? "").trim() !== "";
+}
+
+function filterEmptyProjectTableRows(project) {
+  if (!project || typeof project !== "object") return project;
+  if (Array.isArray(project.grids)) {
+    project.grids = project.grids.filter((row) => String(row && row.name || "").trim() !== "");
+  }
+  if (Array.isArray(project.stories)) {
+    project.stories = project.stories.filter((row) => String(row && row.name || "").trim() !== "");
+  }
+  if (Array.isArray(project.member_classes)) {
+    project.member_classes = project.member_classes.filter((row) => String(row && row.name || "").trim() !== "");
+  }
+  const diaps = project.load_conditions && project.load_conditions.diaphragms;
+  if (Array.isArray(diaps)) {
+    project.load_conditions.diaphragms = diaps.filter((row) => {
+      if (!row) return false;
+      const id = row.id;
+      return id != null && id !== "" && Number.isFinite(Number(id));
+    });
+  }
+  return project;
+}
+
+function normalizeSeismicSettings(project) {
+  const loadConditions = project.load_conditions;
+  if (!loadConditions) return;
+  const seismic = loadConditions.seismic;
+  if (!seismic || typeof seismic !== "object") return;
+
+  const ci = Number(seismic.ci);
+  if (!Number.isFinite(ci) || ci <= 0) {
+    delete seismic.ci;
+  }
+  if (seismic.c0 === "" || seismic.c0 == null) {
+    delete seismic.c0;
+  } else {
+    const c0 = Number(seismic.c0);
+    if (!Number.isFinite(c0) || c0 <= 0) {
+      delete seismic.c0;
+    }
+  }
+  if (seismic.z === "" || seismic.z == null) {
+    delete seismic.z;
+  } else {
+    const z = Number(seismic.z);
+    if (!Number.isFinite(z) || z <= 0) {
+      delete seismic.z;
+    }
+  }
+  const rt = Number(seismic.rt);
+  if (!Number.isFinite(rt) || rt <= 0) {
+    delete seismic.rt;
+  }
+  if (seismic.base_level != null && String(seismic.base_level).trim() === "") {
+    delete seismic.base_level;
+  }
+  if (seismic.base_mass_policy != null && String(seismic.base_mass_policy).trim() === "") {
+    delete seismic.base_mass_policy;
+  } else if (seismic.base_mass_policy === DEFAULT_BASE_MASS_POLICY) {
+    delete seismic.base_mass_policy;
+  }
+  if (seismic.base_elevation === "" || seismic.base_elevation == null) {
+    delete seismic.base_elevation;
+  }
+  if (seismic.design_period_s === "" || seismic.design_period_s == null) {
+    delete seismic.design_period_s;
+  }
+  if (seismic.height_m === "" || seismic.height_m == null) {
+    delete seismic.height_m;
+  }
+  const steelRatio = Number(seismic.steel_ratio_alpha);
+  if (!Number.isFinite(steelRatio) || steelRatio === 0) {
+    delete seismic.steel_ratio_alpha;
+  }
+  const tc = Number(seismic.tc);
+  if (!Number.isFinite(tc) || Math.abs(tc - DEFAULT_SEISMIC_TC) < 1.0e-12) {
+    delete seismic.tc;
+  }
+  const liveLoadFactor = Number(seismic.live_load_factor);
+  if (!Number.isFinite(liveLoadFactor) || liveLoadFactor === 0) {
+    delete seismic.live_load_factor;
+  }
+  if (seismic.dead_load_lc === "" || seismic.dead_load_lc == null) {
+    delete seismic.dead_load_lc;
+  }
+  if (seismic.live_load_lc === "" || seismic.live_load_lc == null) {
+    delete seismic.live_load_lc;
+  }
+  if (Array.isArray(seismic.directions) && seismic.directions.length === 0) {
+    delete seismic.directions;
+  }
+  if (Object.keys(seismic).length === 0) {
+    loadConditions.seismic = {};
+  }
+}
+
+function normalizeProjectPayload(project) {
+  if (!project || typeof project !== "object") return project;
+  if (project.schema != null && Number.isFinite(Number(project.schema))) {
+    project.schema = Math.trunc(Number(project.schema));
+  }
+  const diaps = project.load_conditions && project.load_conditions.diaphragms;
+  if (Array.isArray(diaps)) {
+    for (const item of diaps) {
+      if (item && item.id != null && Number.isFinite(Number(item.id))) {
+        item.id = Math.trunc(Number(item.id));
+      }
+    }
+  }
+  normalizeSeismicSettings(project);
+  return filterEmptyProjectTableRows(project);
+}
+
+function formatProjectFieldValue(type, value) {
+  if (type === "optional_int") {
+    return value == null ? "" : String(value);
+  }
+  if (type === "csv_int") {
+    return formatCsvInts(value);
+  }
+  if (type === "csv_number") {
+    return formatCsvInts(value);
+  }
+  if (type === "bool") {
+    return value ? "true" : "false";
+  }
+  if (type === "number") {
+    if (value == null || value === "") return "";
+    return String(value);
+  }
+  return value == null ? "" : String(value);
+}
+
+function renderProjectFieldInput(field, inputId) {
+  const value = formatProjectFieldValue(field.type, field.value);
+  const hint = field.hint ? "<span class=\"proj-hint\">" + escapeHtml(field.hint) + "</span>" : "";
+  if (field.type === "bool") {
+    return "<select class=\"proj-input\" data-path=\"" + escapeHtml(field.path) + "\" data-type=\"bool\" id=\"" + inputId + "\">"
+      + "<option value=\"true\"" + (value === "true" ? " selected" : "") + ">はい</option>"
+      + "<option value=\"false\"" + (value === "false" ? " selected" : "") + ">いいえ</option>"
+      + "</select>" + hint;
+  }
+  if (field.type === "select") {
+    let html = "<select class=\"proj-input\" data-path=\"" + escapeHtml(field.path) + "\" data-type=\"select\" id=\"" + inputId + "\">";
+    for (const opt of field.options || []) {
+      html += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(field.value) ? " selected" : "") + ">"
+        + escapeHtml(projectOptionLabel(field, opt)) + "</option>";
+    }
+    html += "</select>" + hint;
+    return html;
+  }
+  if (field.type === "number" || field.type === "optional_int") {
+    const inputMode = field.type === "optional_int" ? "numeric" : "decimal";
+    return "<input class=\"proj-input proj-input-num\" type=\"text\" inputmode=\"" + inputMode + "\" data-path=\""
+      + escapeHtml(field.path) + "\" data-type=\"" + escapeHtml(field.type) + "\" id=\"" + inputId + "\" value=\""
+      + escapeHtml(value) + "\">" + hint;
+  }
+  return "<input class=\"proj-input\" type=\"text\" data-path=\""
+    + escapeHtml(field.path) + "\" data-type=\"" + escapeHtml(field.type) + "\" id=\"" + inputId + "\" value=\""
+    + escapeHtml(value) + "\">" + hint;
+}
+
+function projectTableCellTdClass(col) {
+  if (col.type === "number" || col.type === "optional_int") return " proj-cell-num";
+  if (col.type === "select" || col.type === "bool") return " proj-cell-select";
+  return " proj-cell-text";
+}
+
+function projectOptionLabel(def, opt) {
+  const labels = def && def.option_labels;
+  if (labels && Object.prototype.hasOwnProperty.call(labels, opt)) {
+    return labels[opt];
+  }
+  return opt;
+}
+
+function renderProjectEditTableCellHtml(col, cellId, val) {
+  if (col.type === "csv_int" || col.type === "csv_number") {
+    const cellValue = formatCsvInts(val);
+    return "<input class=\"proj-cell-input proj-cell-text\" type=\"text\" data-col=\""
+      + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
+      + escapeHtml(cellValue) + "\">";
+  }
+  if (col.type === "select") {
+    let select = "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"select\" id=\"" + cellId + "\">";
+    for (const opt of col.options || []) {
+      select += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(val) ? " selected" : "") + ">"
+        + escapeHtml(projectOptionLabel(col, opt)) + "</option>";
+    }
+    select += "</select>";
+    return select;
+  }
+  if (col.type === "bool") {
+    const checked = val === true || val === "true" || val === 1 || val === "1";
+    return "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"bool\" id=\"" + cellId + "\">"
+      + "<option value=\"true\"" + (checked ? " selected" : "") + ">はい</option>"
+      + "<option value=\"false\"" + (!checked ? " selected" : "") + ">いいえ</option>"
+      + "</select>";
+  }
+  if (col.type === "number" || col.type === "optional_int") {
+    const inputMode = col.type === "optional_int" ? "numeric" : "decimal";
+    return "<input class=\"proj-cell-input proj-cell-num\" type=\"text\" inputmode=\"" + inputMode + "\" data-col=\""
+      + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
+      + escapeHtml(formatProjectFieldValue(col.type, val)) + "\">";
+  }
+  return "<input class=\"proj-cell-input proj-cell-text\" type=\"text\" data-col=\""
+    + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
+    + escapeHtml(formatProjectFieldValue(col.type, val)) + "\">";
+}
+
+function renderProjectEditSectionHtml(section, sectionIndex) {
+  let html = "<section class=\"proj-section\" data-section-id=\"" + escapeHtml(section.id) + "\">";
+  html += "<h2>" + escapeHtml(section.title) + "</h2>";
+  if (section.fields && section.fields.length) {
+    html += "<dl class=\"proj-rows\">";
+    for (let i = 0; i < section.fields.length; i++) {
+      const field = section.fields[i];
+      const inputId = "proj-field-" + sectionIndex + "-" + i;
+      html += "<dt><label for=\"" + inputId + "\">" + escapeHtml(field.label) + "</label></dt>";
+      html += "<dd>" + renderProjectFieldInput(field, inputId) + "</dd>";
+    }
+    html += "</dl>";
+  }
+  if (section.readonly && section.readonly.length) {
+    html += "<dl class=\"proj-rows proj-readonly\">";
+    for (const row of section.readonly) {
+      html += "<dt>" + escapeHtml(row.label) + "</dt><dd>";
+      html += escapeHtml(row.value == null || row.value === "" ? "—" : row.value);
+      if (row.hint) {
+        html += "<span class=\"proj-hint\">" + escapeHtml(row.hint) + "</span>";
+      }
+      html += "</dd>";
+    }
+    html += "</dl>";
+  }
+  if (section.table) {
+    html += renderProjectEditTableHtml(section.table, sectionIndex);
+  }
+  html += "</section>";
+  return html;
+}
+
+function renderProjectEditTableHtml(table, sectionIndex) {
+  const tableId = "proj-table-" + sectionIndex;
+  let html = "<div class=\"proj-table-wrap\" data-table-path=\"" + escapeHtml(table.path) + "\" id=\"" + tableId + "\">";
+  if (table.label) {
+    html += "<h3>" + escapeHtml(table.label) + "</h3>";
+  }
+  html += "<table class=\"proj-edit-table\"><thead><tr>";
+  for (const col of table.columns) {
+    const thClass = projectTableCellTdClass(col).trim();
+    html += "<th" + (thClass ? " class=\"" + thClass + "\"" : "") + ">" + escapeHtml(col.label) + "</th>";
+  }
+  html += "<th class=\"proj-row-actions\">操作</th></tr></thead><tbody>";
+  const rows = table.rows || [];
+  if (!rows.length) {
+    html += renderProjectEditTableRowHtml(table.columns, {}, sectionIndex, 0);
+  } else {
+    for (let ri = 0; ri < rows.length; ri++) {
+      html += renderProjectEditTableRowHtml(table.columns, rows[ri], sectionIndex, ri);
+    }
+  }
+  html += "</tbody></table>";
+  html += "<button type=\"button\" class=\"btn-table-add\" data-table-id=\"" + tableId + "\">行を追加</button>";
+  html += "</div>";
+  return html;
+}
+
+function renderProjectEditTableRowHtml(columns, row, sectionIndex, rowIndex) {
+  let html = "<tr data-row-index=\"" + rowIndex + "\">";
+  for (let ci = 0; ci < columns.length; ci++) {
+    const col = columns[ci];
+    const cellId = "proj-cell-" + sectionIndex + "-" + rowIndex + "-" + ci;
+    const val = row[col.path];
+    const tdClass = projectTableCellTdClass(col).trim();
+    html += "<td" + (tdClass ? " class=\"" + tdClass + "\"" : "") + ">"
+      + renderProjectEditTableCellHtml(col, cellId, val) + "</td>";
+  }
+  html += "<td class=\"proj-row-actions\"><button type=\"button\" class=\"btn-table-del\">削除</button></td>";
+  html += "</tr>";
+  return html;
+}
+
+function collectProjectFromFormRoot(formRoot, editForm, baseProject) {
+  const out = deepCloneJson(baseProject);
+  if (!formRoot || !editForm) return out;
+
+  for (const input of formRoot.querySelectorAll(".proj-input[data-path]")) {
+    const path = input.getAttribute("data-path");
+    const type = input.getAttribute("data-type") || "text";
+    const value = parseProjectFieldValue(type, input.value, path);
+    if (value === undefined) {
+      continue;
+    }
+    deepSet(out, path, value);
+  }
+
+  for (const wrap of formRoot.querySelectorAll(".proj-table-wrap[data-table-path]")) {
+    const path = wrap.getAttribute("data-table-path");
+    const section = (editForm.sections || []).find((s) => s.table && s.table.path === path);
+    if (!section) continue;
+    const columns = section.table.columns;
+    const rows = [];
+    for (const tr of wrap.querySelectorAll("tbody tr")) {
+      const row = {};
+      for (const input of tr.querySelectorAll(".proj-cell-input")) {
+        const colPath = input.getAttribute("data-col");
+        const col = columns.find((c) => c.path === colPath);
+        const type = col ? col.type : (input.getAttribute("data-type") || "text");
+        row[colPath] = parseProjectTableCellValue(type, input.value);
+      }
+      if (shouldIncludeProjectTableRow(row, columns)) {
+        rows.push(row);
+      }
+    }
+    deepSet(out, path, rows);
+  }
+  return out;
+}
+
+function buildProjectFieldMap(editForm) {
+  const map = new Map();
+  if (!editForm || !editForm.sections) return map;
+  for (const section of editForm.sections) {
+    for (const field of section.fields || []) {
+      if (field.path) map.set(field.path, field);
+    }
+  }
+  return map;
+}
+
+function populateFormFromProject(formRoot, editForm, project) {
+  if (!formRoot || !editForm || !project) return;
+  const fieldMap = buildProjectFieldMap(editForm);
+
+  for (const input of formRoot.querySelectorAll(".proj-input[data-path]")) {
+    const path = input.getAttribute("data-path");
+    const type = input.getAttribute("data-type") || "text";
+    const parts = path.split(".");
+    let cur = project;
+    for (const p of parts) {
+      cur = cur == null ? undefined : cur[p];
+    }
+    const fieldDef = fieldMap.get(path);
+    if ((cur == null || cur === "") && fieldDef && fieldDef.value != null && fieldDef.value !== "") {
+      cur = fieldDef.value;
+    }
+    if (path === "load_conditions.seismic.rt" && (cur == null || cur === "")) {
+      cur = DEFAULT_SEISMIC_RT;
+    }
+    if (path === "load_conditions.seismic.tc" && (cur == null || cur === "")) {
+      cur = 0.6;
+    }
+    if (path === "load_conditions.seismic.steel_ratio_alpha" && (cur == null || cur === "")) {
+      cur = 0.0;
+    }
+    input.value = formatProjectFieldValue(type, cur);
+  }
+
+  for (const wrap of formRoot.querySelectorAll(".proj-table-wrap[data-table-path]")) {
+    const path = wrap.getAttribute("data-table-path");
+    const section = (editForm.sections || []).find((s) => s.table && s.table.path === path);
+    if (!section) continue;
+    const parts = path.split(".");
+    let cur = project;
+    for (const p of parts) {
+      cur = cur == null ? undefined : cur[p];
+    }
+    const rows = Array.isArray(cur) ? cur : [];
+    const tbody = wrap.querySelector("tbody");
+    if (!tbody) continue;
+    tbody.innerHTML = "";
+    const sectionIndex = Array.from(formRoot.querySelectorAll(".proj-section")).indexOf(wrap.closest(".proj-section"));
+    if (!rows.length) {
+      tbody.innerHTML = renderProjectEditTableRowHtml(section.table.columns, {}, sectionIndex, 0);
+    } else {
+      const html = rows.map((row, ri) =>
+        renderProjectEditTableRowHtml(section.table.columns, row, sectionIndex, ri),
+      ).join("");
+      tbody.innerHTML = html;
+    }
+  }
+}
+
+function showProjectWindow(view) {
+  const title = view.project_path || view.title || "project.json";
+  const w = openNamedChildPopup("project", "width=980,height=820,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
+  const init = () => initProjectEditorWindow(w, view, title);
+  if (w.__stbProjectEditorReady) {
+    init();
+    return;
+  }
+  runWhenPopupReady(w, () => {
+    w.__stbProjectEditorReady = true;
+    init();
+  });
+}
+
+function initProjectEditorWindow(w, view, title) {
+  primeStbPopupOrigin(w);
   const doc = w.document;
   doc.open();
-  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>");
+  doc.write("<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"UTF-8\">");
+  doc.write(stbIconHeadHtml(w));
+  doc.write("<title>");
+  doc.write(escapeHtml(view.title || title));
+  doc.write("</title><style>");
+  doc.write("html,body{height:100%;margin:0;}");
+  doc.write("body{background:#f4f5f7;color:#1a1a22;font-family:'Segoe UI',system-ui,sans-serif;line-height:1.45;display:flex;flex-direction:column;overflow:hidden;}");
+  doc.write(".toolbar{padding:10px 16px;background:#252530;color:#e8e6ed;border-bottom:1px solid #3a3a48;display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex-shrink:0;}");
+  doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
+  doc.write(".toolbar button.secondary{background:#3a3a48;color:#e8e6ed;}");
+  doc.write(".toolbar .path{font-size:12px;color:#aaa;margin-left:auto;}");
+  doc.write(".toolbar .status{font-size:12px;color:#555;}");
+  doc.write(".tabs{display:flex;gap:0;background:#252530;padding:0 16px;border-bottom:1px solid #3a3a48;flex-shrink:0;}");
+  doc.write(".tab{background:transparent;color:#aaa;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-weight:600;cursor:pointer;}");
+  doc.write(".tab.active{color:#e8e6ed;border-bottom-color:#e1dee4;}");
+  doc.write(".tab-panels{flex:1;min-height:0;overflow:hidden;}");
+  doc.write(".tab-panel{display:none;height:100%;box-sizing:border-box;padding:16px 20px 32px;max-width:960px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;}");
+  doc.write(".tab-panel.active{display:block;}");
+  doc.write(".banner{margin-bottom:16px;padding:10px 14px;border-radius:6px;background:#fff3cd;color:#664d03;border:1px solid #ffecb5;}");
+  doc.write(".proj-section{margin-bottom:24px;background:#fff;border:1px solid #d8dbe3;border-radius:8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.04);}");
+  doc.write(".proj-section h2{margin:0 0 12px;font-size:15px;font-weight:700;color:#111;border-bottom:1px solid #e5e7eb;padding-bottom:8px;}");
+  doc.write(".proj-section h3{margin:12px 0 8px;font-size:13px;font-weight:600;color:#374151;}");
+  doc.write(".proj-rows{display:grid;grid-template-columns:minmax(140px,34%) 1fr;gap:8px 12px;margin:0;align-items:start;}");
+  doc.write(".proj-rows dt{margin:0;font-size:12px;font-weight:600;color:#4b5563;padding-top:6px;}");
+  doc.write(".proj-rows dd{margin:0;font-size:13px;color:#111;}");
+  doc.write(".proj-readonly dt,.proj-readonly dd{color:#6b7280;}");
+  doc.write(".proj-hint{display:block;margin-top:4px;font-size:11px;color:#6b7280;font-weight:400;}");
+  doc.write(".proj-input,.proj-cell-input{box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;padding:5px 7px;font:inherit;background:#fff;}");
+  doc.write(".proj-input{width:100%;max-width:420px;}");
+  doc.write(".proj-table-wrap{margin-top:8px;overflow:auto;max-width:100%;border:1px solid #e5e7eb;border-radius:6px;background:#fafbfc;}");
+  doc.write(".proj-edit-table{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px;}");
+  doc.write(".proj-edit-table th,.proj-edit-table td{border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:5px 7px;vertical-align:middle;}");
+  doc.write(".proj-edit-table th:first-child,.proj-edit-table td:first-child{border-left:1px solid #e5e7eb;}");
+  doc.write(".proj-edit-table thead th{border-top:1px solid #e5e7eb;background:#eef2f7;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:1;}");
+  doc.write(".proj-edit-table tbody tr:nth-child(even){background:#fff;}");
+  doc.write(".proj-edit-table tbody tr:nth-child(odd){background:#f8fafc;}");
+  doc.write(".proj-edit-table tbody tr:hover{background:#f1f5f9;}");
+  doc.write(".proj-cell-num,.proj-edit-table th.proj-cell-num{text-align:right;}");
+  doc.write(".proj-cell-select,.proj-edit-table th.proj-cell-select{text-align:center;}");
+  doc.write(".proj-cell-input.proj-cell-num{min-width:4.2em;max-width:7.5em;width:100%;text-align:right;font-variant-numeric:tabular-nums;}");
+  doc.write(".proj-cell-input.proj-cell-text{min-width:6.5em;max-width:12em;width:100%;}");
+  doc.write(".proj-cell-input{width:100%;}");
+  doc.write(".proj-row-actions{width:64px;min-width:64px;text-align:center;white-space:nowrap;}");
+  doc.write(".btn-table-add{margin-top:8px;background:#eef2ff;color:#1e3a8a;border:1px solid #c7d2fe;border-radius:4px;padding:5px 10px;font-weight:600;cursor:pointer;}");
+  doc.write(".btn-table-del{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;}");
+  doc.write("#jsonEditor{width:100%;height:100%;min-height:100%;box-sizing:border-box;border:0;outline:none;padding:12px;background:#111319;color:#e8e6ed;font-family:monospace;font-size:12px;line-height:1.35;resize:none;}");
+  doc.write("</style></head><body>");
+  doc.write("<div class=\"toolbar\">");
+  doc.write("<button type=\"button\" id=\"btnSave\">保存</button>");
+  doc.write("<button type=\"button\" id=\"btnCreate\" class=\"secondary\">新規作成</button>");
+  doc.write("<button type=\"button\" id=\"btnReload\" class=\"secondary\">再読込</button>");
+  doc.write("<button type=\"button\" id=\"btnWind4Dir\" class=\"secondary\">風4方向を生成 (WX±/WY±)</button>");
+  doc.write("<span class=\"status\" id=\"status\">ready</span>");
+  doc.write("<span class=\"path\">");
+  doc.write(escapeHtml(view.project_path || ""));
+  doc.write("</span></div>");
+  doc.write("<div class=\"tabs\">");
+  doc.write("<button type=\"button\" class=\"tab active\" data-tab=\"form\">設定</button>");
+  doc.write("<button type=\"button\" class=\"tab\" data-tab=\"json\">JSON</button>");
+  doc.write("</div>");
+  doc.write("<div class=\"tab-panels\">");
+  doc.write("<div id=\"tab-form\" class=\"tab-panel active\"></div>");
+  doc.write("<div id=\"tab-json\" class=\"tab-panel\"><textarea id=\"jsonEditor\" spellcheck=\"false\"></textarea></div>");
+  doc.write("</div>");
+  doc.write("</body></html>");
+  doc.close();
+
+  const statusEl = doc.getElementById("status");
+  const tabForm = doc.getElementById("tab-form");
+  const tabJson = doc.getElementById("tab-json");
+  const jsonEditor = doc.getElementById("jsonEditor");
+  const tabs = doc.querySelectorAll(".tab");
+  let activeTab = "form";
+  let baseProject = view.raw ? deepCloneJson(view.raw) : null;
+  let editForm = view.edit || null;
+
+  function setWinStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
+  }
+
+  function renderFormTab() {
+    if (!editForm) {
+      tabForm.innerHTML = "<div class=\"banner\">対応する project.json が見つかりません。ツールバーの「新規作成」から project.json を作成できます。</div>";
+      return;
+    }
+    let html = "";
+    for (let i = 0; i < editForm.sections.length; i++) {
+      html += renderProjectEditSectionHtml(editForm.sections[i], i);
+    }
+    tabForm.innerHTML = html;
+
+    tabForm.querySelectorAll(".btn-table-add").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const wrap = doc.getElementById(btn.getAttribute("data-table-id"));
+        const path = wrap.getAttribute("data-table-path");
+        const section = editForm.sections.find((s) => s.table && s.table.path === path);
+        if (!section) return;
+        const tbody = wrap.querySelector("tbody");
+        const sectionIndex = Array.from(tabForm.querySelectorAll(".proj-section")).indexOf(wrap.closest(".proj-section"));
+        const rowIndex = tbody.querySelectorAll("tr").length;
+        tbody.insertAdjacentHTML("beforeend", renderProjectEditTableRowHtml(section.table.columns, {}, sectionIndex, rowIndex));
+      });
+    });
+  }
+
+  function computeStoryTop(project) {
+    const stories = Array.isArray(project && project.stories) ? project.stories : [];
+    if (!stories.length) return 9.045;
+    let zTop = 0;
+    for (const s of stories) {
+      const elev = Number(s && s.elevation);
+      const h = Number(s && s.height);
+      if (!Number.isFinite(elev) || !Number.isFinite(h)) continue;
+      zTop = Math.max(zTop, elev + h);
+    }
+    return zTop > 0 ? zTop : 9.045;
+  }
+
+  function pickWidthFromSurfaces(surfaces, axis, fallback) {
+    if (!Array.isArray(surfaces)) return fallback;
+    const dirs = axis === "x" ? ["X_MIN", "X_MAX", "X_PLUS", "X_MINUS"] : ["Y_MIN", "Y_MAX", "Y_PLUS", "Y_MINUS"];
+    const hit = surfaces.find((s) => dirs.includes(String(s && s.face_direction || "").toUpperCase()) && Number.isFinite(Number(s.width)));
+    if (!hit) return fallback;
+    const w = Number(hit.width);
+    return w > 0 ? w : fallback;
+  }
+
+  function pickZFromSurfaces(surfaces, key, fallback) {
+    if (!Array.isArray(surfaces)) return fallback;
+    for (const s of surfaces) {
+      const v = Number(s && s[key]);
+      if (Number.isFinite(v)) return v;
+    }
+    return fallback;
+  }
+
+  function findOldWindSurface(oldSurfaces, faceDirection, surfaceRole) {
+    if (!Array.isArray(oldSurfaces)) return null;
+    const fd = String(faceDirection || "").toUpperCase();
+    const sr = String(surfaceRole || "").toUpperCase();
+    return oldSurfaces.find((s) =>
+      String(s && s.face_direction || "").toUpperCase() === fd
+      && String(s && s.surface_role || "").toUpperCase() === sr
+    ) || null;
+  }
+
+  function buildWindSurfaceEntry(spec, oldSurfaces, zFallback, widthFallback) {
+    const old = findOldWindSurface(oldSurfaces, spec.face_direction, spec.surface_role);
+    const cfDefault = spec.surface_role === "WINDWARD" ? 0.8 : -0.4;
+    const zBottom = old && Number.isFinite(Number(old.z_bottom))
+      ? Number(old.z_bottom) : zFallback.zBottom;
+    const zTop = old && Number.isFinite(Number(old.z_top))
+      ? Number(old.z_top) : zFallback.zTop;
+    const width = old && Number.isFinite(Number(old.width)) && Number(old.width) > 0
+      ? Number(old.width) : widthFallback;
+    const cf = old && old.Cf != null && old.Cf !== "" && Number.isFinite(Number(old.Cf))
+      ? Number(old.Cf) : cfDefault;
+    return {
+      id: spec.id,
+      name: spec.name,
+      wind_case_id: spec.wind_case_id,
+      face_direction: spec.face_direction,
+      surface_role: spec.surface_role,
+      z_bottom: zBottom,
+      z_top: zTop,
+      width: width,
+      Cf: cf,
+    };
+  }
+
+  function buildWind4Dir(project) {
+    const loadConditions = project.load_conditions || (project.load_conditions = {});
+    const wind = loadConditions.wind || (loadConditions.wind = {});
+    const oldCases = Array.isArray(wind.cases) ? wind.cases : [];
+    const oldSurfaces = Array.isArray(wind.surfaces) ? wind.surfaces : [];
+    const memberLoads = Array.isArray(wind.member_loads) ? wind.member_loads : [];
+
+    const baseCase = oldCases[0] || {};
+    const v0 = Number.isFinite(Number(baseCase.V0)) ? Number(baseCase.V0) : 34.0;
+    const roughness = String(baseCase.roughness_category || "III");
+    const gf = Number.isFinite(Number(baseCase.Gf)) ? Number(baseCase.Gf) : 2.5;
+    const pressureMode = String(baseCase.pressure_mode || "STORY_HEIGHT_KZ");
+    const useKz = baseCase.use_Kz == null ? true : !!baseCase.use_Kz;
+    const inputMode = String(baseCase.diaphragm_input_mode || "DIAPHRAGM_UNIFORM");
+    const storyTop = computeStoryTop(project);
+    const zFallback = {
+      zBottom: pickZFromSurfaces(oldSurfaces, "z_bottom", 0.0),
+      zTop: pickZFromSurfaces(oldSurfaces, "z_top", storyTop),
+    };
+    const xWidth = pickWidthFromSurfaces(oldSurfaces, "x", 5.46);
+    const yWidth = pickWidthFromSurfaces(oldSurfaces, "y", 8.0);
+
+    wind.cases = [
+      { id: 1, name: "WX+", direction: "X_PLUS", load_case: 4, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+      { id: 2, name: "WX-", direction: "X_MINUS", load_case: 5, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+      { id: 3, name: "WY+", direction: "Y_PLUS", load_case: 6, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+      { id: 4, name: "WY-", direction: "Y_MINUS", load_case: 7, V0: v0, roughness_category: roughness, Gf: gf, Cf_default: 0.8, pressure_mode: pressureMode, use_Kz: useKz, diaphragm_input_mode: inputMode },
+    ];
+
+    const surfaceSpecs = [
+      { id: 1, name: "X_plus_windward_wall", wind_case_id: 1, face_direction: "X_MIN", surface_role: "WINDWARD", width: xWidth },
+      { id: 2, name: "X_plus_leeward_wall", wind_case_id: 1, face_direction: "X_MAX", surface_role: "LEEWARD", width: xWidth },
+      { id: 3, name: "X_minus_windward_wall", wind_case_id: 2, face_direction: "X_MAX", surface_role: "WINDWARD", width: xWidth },
+      { id: 4, name: "X_minus_leeward_wall", wind_case_id: 2, face_direction: "X_MIN", surface_role: "LEEWARD", width: xWidth },
+      { id: 5, name: "Y_plus_windward_wall", wind_case_id: 3, face_direction: "Y_MIN", surface_role: "WINDWARD", width: yWidth },
+      { id: 6, name: "Y_plus_leeward_wall", wind_case_id: 3, face_direction: "Y_MAX", surface_role: "LEEWARD", width: yWidth },
+      { id: 7, name: "Y_minus_windward_wall", wind_case_id: 4, face_direction: "Y_MAX", surface_role: "WINDWARD", width: yWidth },
+      { id: 8, name: "Y_minus_leeward_wall", wind_case_id: 4, face_direction: "Y_MIN", surface_role: "LEEWARD", width: yWidth },
+    ];
+    wind.surfaces = surfaceSpecs.map((spec) =>
+      buildWindSurfaceEntry(spec, oldSurfaces, zFallback, spec.width)
+    );
+    wind.member_loads = memberLoads;
+    return project;
+  }
+
+  if (!tabForm.dataset.boundDelete) {
+    tabForm.dataset.boundDelete = "1";
+    tabForm.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".btn-table-del");
+      if (!btn) return;
+      const tr = btn.closest("tr");
+      const tbody = tr && tr.parentElement;
+      if (!tbody || !tr) return;
+      if (tbody.querySelectorAll("tr").length <= 1) {
+        for (const input of tr.querySelectorAll(".proj-cell-input")) {
+          input.value = "";
+        }
+        return;
+      }
+      tr.remove();
+    });
+  }
+
+  function syncFormToJson() {
+    if (!baseProject || !editForm) return;
+    const merged = collectProjectFromFormRoot(tabForm, editForm, baseProject);
+    jsonEditor.value = JSON.stringify(merged, null, 2);
+  }
+
+  function syncJsonToForm() {
+    if (!baseProject || !editForm) return;
+    const parsed = JSON.parse(jsonEditor.value);
+    populateFormFromProject(tabForm, editForm, parsed);
+  }
+
+  function switchTab(name) {
+    if (name === activeTab) return;
+    try {
+      if (activeTab === "form") {
+        syncFormToJson();
+      } else if (activeTab === "json") {
+        syncJsonToForm();
+      }
+    } catch (ex) {
+      alert("タブ切替前の反映に失敗しました: " + ex.message);
+      return;
+    }
+    activeTab = name;
+    tabs.forEach((t) => t.classList.toggle("active", t.getAttribute("data-tab") === name));
+    tabForm.classList.toggle("active", name === "form");
+    tabJson.classList.toggle("active", name === "json");
+  }
+
+  function getProjectForSave() {
+    let project;
+    if (activeTab === "json") {
+      project = JSON.parse(jsonEditor.value);
+    } else if (!editForm || !baseProject) {
+      throw new Error("編集可能な project.json がありません");
+    } else {
+      project = collectProjectFromFormRoot(tabForm, editForm, baseProject);
+    }
+    return normalizeProjectPayload(project);
+  }
+
+  function syncEditorAvailability() {
+    const editable = !!(baseProject && editForm);
+    jsonEditor.disabled = !editable;
+    const jsonTab = doc.querySelector(".tab[data-tab=\"json\"]");
+    if (jsonTab) jsonTab.style.display = editable ? "" : "none";
+    const btnCreate = doc.getElementById("btnCreate");
+    if (btnCreate) btnCreate.style.display = (!view.found && !view.draft) ? "" : "none";
+    const btnSave = doc.getElementById("btnSave");
+    if (btnSave) btnSave.textContent = (view.draft && !view.found) ? "作成して保存" : "保存";
+  }
+
+  function applySavedView(savedView) {
+    view = savedView;
+    baseProject = savedView.raw ? deepCloneJson(savedView.raw) : null;
+    editForm = savedView.edit || null;
+    renderFormTab();
+    if (baseProject) {
+      jsonEditor.value = JSON.stringify(baseProject, null, 2);
+      populateFormFromProject(tabForm, editForm, baseProject);
+    } else {
+      jsonEditor.value = "";
+    }
+    doc.title = savedView.title || title;
+    syncEditorAvailability();
+  }
+
+  renderFormTab();
+  if (baseProject) {
+    jsonEditor.value = JSON.stringify(baseProject, null, 2);
+  }
+  syncEditorAvailability();
+
+  tabs.forEach((tabBtn) => {
+    tabBtn.addEventListener("click", () => switchTab(tabBtn.getAttribute("data-tab")));
+  });
+
+  doc.getElementById("btnSave").addEventListener("click", async () => {
+    if (!view.found && !view.draft) {
+      alert("先に「新規作成」を実行してください。");
+      return;
+    }
+    if (!baseProject || !editForm) {
+      alert("編集可能な project.json がありません。");
+      return;
+    }
+    try {
+      setWinStatus("saving...");
+      const project = getProjectForSave();
+      const result = await saveProjectJson(view.dat_path, project, w);
+      applySavedView(result.view);
+      syncFormToJson();
+      setWinStatus("saved");
+      setStatus((view.project_path || "project.json") + " — saved");
+    } catch (ex) {
+      setWinStatus("save failed");
+      alert("保存に失敗しました: " + ex.message);
+    }
+  });
+
+  doc.getElementById("btnCreate").addEventListener("click", async () => {
+    if (view.found) return;
+    try {
+      setWinStatus("creating template...");
+      const draftView = await fetchProjectTemplate(view.dat_path, w);
+      applySavedView(draftView);
+      setWinStatus("新規作成 — 編集してください");
+    } catch (ex) {
+      setWinStatus("create failed");
+      alert("新規作成テンプレートの取得に失敗しました: " + ex.message);
+    }
+  });
+
+  doc.getElementById("btnReload").addEventListener("click", async () => {
+    if (!confirm("未保存の変更は破棄されます。再読込しますか？")) return;
+    try {
+      setWinStatus("reloading...");
+      const latest = await fetchProjectView(view.dat_path, w);
+      applySavedView(latest);
+      syncFormToJson();
+      setWinStatus("reloaded");
+    } catch (ex) {
+      setWinStatus("reload failed");
+      alert("再読込に失敗しました: " + ex.message);
+    }
+  });
+
+  doc.getElementById("btnWind4Dir").addEventListener("click", () => {
+    if (!baseProject || !editForm) {
+      alert("project.json が読み込まれていないため実行できません。");
+      return;
+    }
+    try {
+      const current = getProjectForSave();
+      const updated = normalizeProjectPayload(buildWind4Dir(current));
+      baseProject = deepCloneJson(updated);
+      renderFormTab();
+      jsonEditor.value = JSON.stringify(baseProject, null, 2);
+      populateFormFromProject(tabForm, editForm, baseProject);
+      setWinStatus("wind 4-direction generated");
+    } catch (ex) {
+      setWinStatus("generate failed");
+      alert("4方向生成に失敗しました: " + ex.message);
+    }
+  });
+
+  doc.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "S")) {
+      ev.preventDefault();
+      doc.getElementById("btnSave").click();
+    }
+  });
+}
+
+async function openProjectWindow() {
+  const path = getCurrentModelPath();
+  if (!path) return;
+
+  setStatus("Loading project for " + path + "…");
+  try {
+    const view = await fetchProjectView(path);
+    showProjectWindow(view);
+    setStatus(path + " — project settings opened");
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+  }
+}
+
+function prefetchLoadsVerifyView(path) {
+  if (!path) return;
+  try {
+    const q = "?path=" + encodeURIComponent(path);
+    fetch(guiApiUrl("/api/loads/dead" + q, window)).catch(function () {});
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function openLoadsVerifyWindow() {
+  const path = getCurrentModelPath();
+  if (!path) {
+    setStatus("Open a model before using Loads…");
+    return;
+  }
+  prefetchLoadsVerifyView(path);
+  let url;
+  try {
+    url = guiApiUrl(
+      "/static/loads_verify.html?path=" + encodeURIComponent(path),
+      window
+    );
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+    return;
+  }
+  const w = openNamedChildUrl(
+    "loadsVerify",
+    url,
+    "width=1040,height=860,scrollbars=yes,resizable=yes"
+  );
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  setStatus(path + " — load verification opened");
+}
+
+window.openProjectWindow = openProjectWindow;
+window.reloadCurrentModel = () => loadSelectedModel(false, { keepCamera: true });
+window.refreshWindVisual = () => loadWindVisualForCurrentModel().then(function () {
+  if (currentModel) rebuildScene();
+});
+
+function showTextDocumentWindow(text, title) {
+  const pdfName = title.replace(/\.(dat|out)$/i, ".pdf");
+  const saveName = title;
+  const w = openNamedChildPopup("results", "width=920,height=720,scrollbars=yes,resizable=yes");
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  const init = () => initTextDocumentWindow(w, text, title, pdfName, saveName);
+  if (w.__stbTextDocumentReady) {
+    init();
+    return;
+  }
+  runWhenPopupReady(w, () => {
+    w.__stbTextDocumentReady = true;
+    init();
+  });
+}
+
+function initTextDocumentWindow(w, text, title, pdfName, saveName) {
+  const doc = w.document;
+  w.__stbTextDocContent = text;
+  w.__stbTextDocSaveName = saveName;
+  w.__stbTextDocPdfName = pdfName;
+  if (w.__stbTextDocumentReady && doc.getElementById("btnSaveTxt")) {
+    doc.title = title;
+    const titleEl = doc.querySelector("header.doc-title");
+    if (titleEl) titleEl.textContent = title;
+    const pre = doc.querySelector("pre.doc-content") || doc.querySelector("pre");
+    if (pre) pre.textContent = text;
+    return;
+  }
+  doc.open();
+  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+  doc.write(stbIconHeadHtml(w));
+  doc.write("<title>");
   doc.write(title);
   doc.write("</title><style>");
-  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
+  doc.write("html,body{height:100%;margin:0;}");
+  doc.write("body{display:flex;flex-direction:column;overflow:hidden;background:#1e1e24;color:#e8e6ed;}");
   doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
-  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
+  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0;}");
   doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
-  doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
-  doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
+  doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;flex-shrink:0;}");
+  doc.write("pre.doc-content{flex:1 1 auto;min-height:0;margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
   doc.write("@page{size:A4 landscape;margin:10mm;}");
   doc.write("@media print{");
   doc.write(".no-print{display:none !important;}");
-  doc.write("html,body{background:#fff;color:#000;margin:0;padding:0;}");
+  doc.write("html,body{height:auto;overflow:visible;background:#fff;color:#000;margin:0;padding:0;}");
   doc.write("header.doc-title{display:none;}");
-  doc.write("pre{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;}");
+  doc.write("pre.doc-content{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;flex:none;min-height:auto;}");
   doc.write("}");
   doc.write("</style></head><body>");
   doc.write("<div class=\"toolbar no-print\">");
@@ -4310,22 +8790,22 @@ function showTextDocumentWindow(text, title) {
   doc.write("</div>");
   doc.write("<header class=\"doc-title\">");
   doc.write(title);
-  doc.write("</header><pre></pre></body></html>");
+  doc.write("</header><pre class=\"doc-content\"></pre></body></html>");
   doc.close();
-  doc.querySelector("pre").textContent = text;
+  (doc.querySelector("pre.doc-content") || doc.querySelector("pre")).textContent = text;
   doc.getElementById("btnSaveTxt").onclick = function () {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([w.__stbTextDocContent], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = doc.createElement("a");
     a.href = url;
-    a.download = saveName;
+    a.download = w.__stbTextDocSaveName;
     doc.body.appendChild(a);
     a.click();
     doc.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 0);
   };
   doc.getElementById("btnPdf").onclick = function () {
-    doc.title = pdfName;
+    doc.title = w.__stbTextDocPdfName;
     w.print();
   };
 }
@@ -4334,28 +8814,29 @@ function showResultsWindow(text, path) {
   showTextDocumentWindow(text, outputFileName(path));
 }
 
-async function fetchInputText(path) {
-  const url = "/api/input?path=" + encodeURIComponent(path);
-  const res = await fetch(url);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || res.statusText);
-  }
-  return res.text();
+async function fetchInputText(path, targetWindow) {
+  return fetchApiText("/api/input?path=" + encodeURIComponent(path), targetWindow);
 }
 
-async function saveInputText(path, text) {
-  const url = "/api/input?path=" + encodeURIComponent(path);
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: text }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || res.statusText);
-  }
-  return res.json();
+function normalizeInputText(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+async function inputTextMatchesDisk(path, text, targetWindow) {
+  const onDisk = await fetchInputText(path, targetWindow);
+  return normalizeInputText(text) === normalizeInputText(onDisk);
+}
+
+async function saveInputText(path, text, targetWindow) {
+  return fetchApiJson(
+    "/api/input?path=" + encodeURIComponent(path),
+    targetWindow,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: normalizeInputText(text) }),
+    },
+  );
 }
 
 function registerInputEditor(path, win, getText) {
@@ -4375,14 +8856,38 @@ function getInputEditorText(path) {
 }
 
 function showInputEditorWindow(text, path) {
-  const w = window.open("", "_blank", "width=980,height=760,scrollbars=yes,resizable=yes");
+  const w = openNamedChildPopup("input", "width=980,height=760,scrollbars=yes,resizable=yes");
   if (!w) {
     setStatus("Popup blocked — allow popups for this site");
     return;
   }
+  const init = () => initInputEditorWindow(w, text, path);
+  if (w.__stbInputEditorReady) {
+    init();
+    return;
+  }
+  runWhenPopupReady(w, () => {
+    w.__stbInputEditorReady = true;
+    init();
+  });
+}
+
+function initInputEditorWindow(w, text, path) {
+  primeStbPopupOrigin(w);
+  w.__stbEditorPath = path;
   const doc = w.document;
+  if (w.__stbInputEditorReady && doc.getElementById("txt")) {
+    doc.title = path;
+    doc.getElementById("txt").value = text;
+    registerInputEditor(path, w, () => doc.getElementById("txt").value);
+    const statusEl = doc.getElementById("status");
+    if (statusEl) statusEl.textContent = "ready";
+    return;
+  }
   doc.open();
-  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>");
+  doc.write("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+  doc.write(stbIconHeadHtml(w));
+  doc.write("<title>");
   doc.write(path);
   doc.write("</title><style>");
   doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;font-family:'Segoe UI',system-ui,sans-serif;}");
@@ -4407,13 +8912,24 @@ function showInputEditorWindow(text, path) {
   }
 
   doc.getElementById("btnSave").addEventListener("click", async () => {
+    const editorPath = w.__stbEditorPath;
     try {
       setWinStatus("saving...");
-      await saveInputText(path, textarea.value);
+      if (await inputTextMatchesDisk(editorPath, textarea.value, w)) {
+        setWinStatus("no changes");
+        setStatus(editorPath + " — no changes to save");
+        return;
+      }
+      const result = await saveInputText(editorPath, textarea.value, w);
+      if (result && result.changed === false) {
+        setWinStatus("no changes");
+        setStatus(editorPath + " — no changes to save");
+        return;
+      }
       resetEditHistory();
       setWinStatus("saved");
-      setStatus(path + " — input file saved (undo history cleared)");
-      if (getCurrentModelPath() === path) await loadSelectedModel(false);
+      setStatus(editorPath + " — input file saved (undo history cleared)");
+      if (getCurrentModelPath() === editorPath) await loadSelectedModel(false);
     } catch (ex) {
       setWinStatus("save failed");
       setStatus("Error: " + ex.message);
@@ -4422,14 +8938,22 @@ function showInputEditorWindow(text, path) {
   });
 
   doc.getElementById("btnReload").addEventListener("click", async () => {
+    const editorPath = w.__stbEditorPath;
     try {
       setWinStatus("reloading...");
-      const latest = await fetchInputText(path);
+      const latest = await fetchInputText(editorPath, w);
       textarea.value = latest;
       setWinStatus("reloaded");
     } catch (ex) {
       setWinStatus("reload failed");
       alert("Reload failed: " + ex.message);
+    }
+  });
+
+  doc.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "S")) {
+      ev.preventDefault();
+      doc.getElementById("btnSave").click();
     }
   });
 }
@@ -4444,7 +8968,15 @@ async function saveCurrentModel() {
   try {
     const edited = getInputEditorText(path);
     const text = edited != null ? edited : await fetchInputText(path);
-    await saveInputText(path, text);
+    if (await inputTextMatchesDisk(path, text)) {
+      setStatus(path + " — no changes to save");
+      return;
+    }
+    const result = await saveInputText(path, text);
+    if (result && result.changed === false) {
+      setStatus(path + " — no changes to save");
+      return;
+    }
     resetEditHistory();
     if (getCurrentModelPath() === path) await loadSelectedModel(false);
     setStatus(path + " — saved");
@@ -4546,21 +9078,81 @@ async function openUploadedModelFile(file) {
   }
 }
 
-async function closeApplication() {
-  setStatus("Shutting down…");
-  try {
-    await fetch("/api/shutdown", { method: "POST" });
-  } catch (e) { /* server may exit before response completes */ }
-  currentModel = null;
-  currentModelPath = null;
-  document.body.innerHTML = "<p style=\"padding:2rem;font-family:system-ui,sans-serif;color:#333\">"
-    + "Structural Toolbox server stopped. You can close this tab.</p>";
+let stbShutdownRequested = false;
+let stbPageReloading = false;
+let stbExitWithBrowser = false;
+
+function requestServerShutdown() {
+  if (stbShutdownRequested) return;
+  stbShutdownRequested = true;
+  const url = "/api/shutdown";
+  if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+    navigator.sendBeacon(url, "");
+  } else {
+    fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+  }
 }
+
+function markStbPageReload() {
+  stbPageReloading = true;
+}
+
+function sendGuiHeartbeat() {
+  fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => {});
+}
+
+function startGuiHeartbeat() {
+  sendGuiHeartbeat();
+  window.setInterval(sendGuiHeartbeat, 4000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      sendGuiHeartbeat();
+    }
+  });
+}
+
+async function initGuiLifecycle() {
+  try {
+    const cfg = await fetchApiJson("/api/gui-config");
+    stbExitWithBrowser = !!cfg.exit_with_browser;
+  } catch (_) {
+    stbExitWithBrowser = false;
+  }
+  if (stbExitWithBrowser) {
+    startGuiHeartbeat();
+  }
+}
+
+async function closeApplication() {
+  setStatus("Closing…");
+  closeAllChildWindows();
+  requestServerShutdown();
+  window.close();
+}
+
+window.addEventListener("keydown", (ev) => {
+  const key = String(ev.key || "").toLowerCase();
+  if (key === "f5" || ((ev.ctrlKey || ev.metaKey) && key === "r")) {
+    markStbPageReload();
+  }
+});
+
+window.addEventListener("pagehide", (ev) => {
+  if (!stbExitWithBrowser) return;
+  if (ev.persisted || stbPageReloading) {
+    stbPageReloading = false;
+    return;
+  }
+  requestServerShutdown();
+});
+
+initGuiLifecycle();
 
 async function loadSelectedModel(solve, options) {
   options = options || {};
   const path = getCurrentModelPath();
   if (!path) return;
+  const cameraState = options.keepCamera ? captureCameraState() : null;
   if (!options.keepSelection) clearSelection();
   if (solve) {
     setStatus("Solving " + path + "…");
@@ -4580,14 +9172,19 @@ async function loadSelectedModel(solve, options) {
     setForceControlsEnabled(complete);
     setReactionControlsEnabled(complete);
     setDispContourControlsEnabled(complete);
-    if (!complete) el.chkDeformed.checked = false;
-    if (!complete && el.chkDispContour) el.chkDispContour.checked = false;
-    if (solve && complete) {
-      el.chkReactions.checked = true;
+    applyDisplayPrefsToUi();
+    if (!complete) {
+      el.chkDeformed.checked = false;
+      if (el.chkDispContour) el.chkDispContour.checked = false;
     }
+    await loadWindVisualForCurrentModel();
     buildModelScene(currentModel);
     if (!solve || !complete) {
-      fitCamera(currentModel);
+      if (cameraState) {
+        restoreCameraState(cameraState);
+      } else {
+        fitCamera(currentModel);
+      }
     }
     saveLastModelPath(path);
   } catch (ex) {
@@ -4596,7 +9193,11 @@ async function loadSelectedModel(solve, options) {
 }
 
 async function bootstrap() {
+  loadPickWrwCreateModel();
+  loadPickSubMode();
+  initUiTheme();
   initThree();
+  initDisplayPrefs();
   initViewerOptions();
   initSelectionInteraction();
   initDistanceInteraction();
@@ -4606,10 +9207,12 @@ async function bootstrap() {
     panel: el.selectionPanel,
     header: el.selectionPanelHeader,
     collapseBtn: el.btnSelectionCollapse,
-    toggleBtn: el.btnToggleSelectionPanel,
     storageKey: "stb_gui_selection_panel",
     defaultHidden: true,
+    autoVisibility: true,
   });
+  updateSelectionPanelVisibility();
+  updatePickModeUI();
   initDraggablePanel({
     panel: el.resultsPanel,
     header: el.resultsPanelHeader,
@@ -4658,6 +9261,12 @@ if (el.openFileInput) {
 el.btnReload.addEventListener("click", () => loadSelectedModel(false));
 el.btnSolve.addEventListener("click", () => loadSelectedModel(true));
 
+function isViewerTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === "TEXTAREA" || target.isContentEditable;
+}
+
 function isViewerTextInputTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
@@ -4665,6 +9274,13 @@ function isViewerTextInputTarget(target) {
 }
 
 document.addEventListener("keydown", (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "S")) {
+    if (isViewerTypingTarget(ev.target)) return;
+    ev.preventDefault();
+    saveCurrentModel();
+    return;
+  }
+
   if (isViewerTextInputTarget(ev.target)) return;
 
   if (ev.key === "F5" || ev.code === "F5") {
@@ -4680,6 +9296,21 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
 
+  if (selectionModeActive) {
+    if (ev.key === "n" || ev.key === "N") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("node");
+      return;
+    }
+    if (ev.key === "e" || ev.key === "E") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("element");
+      return;
+    }
+  }
+
   if (ev.key === "d" || ev.key === "D") {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     ev.preventDefault();
@@ -4689,6 +9320,8 @@ document.addEventListener("keydown", (ev) => {
 
 el.btnToggleAxes.addEventListener("click", () => {
   showWorldAxes = !showWorldAxes;
+  displayPrefs.showWorldAxes = showWorldAxes;
+  saveDisplayPrefs();
   el.btnToggleAxes.classList.toggle("active", showWorldAxes);
   if (currentModel) {
     updateWorldAxes(currentModel);
@@ -4703,9 +9336,27 @@ if (el.btnToggleSelect) {
   });
 }
 
+if (el.pickModeNode) {
+  el.pickModeNode.addEventListener("click", () => {
+    setPickSubMode("node");
+  });
+}
+if (el.pickModeElement) {
+  el.pickModeElement.addEventListener("click", () => {
+    setPickSubMode("element");
+  });
+}
+
 if (el.btnToggleDistance) {
   el.btnToggleDistance.addEventListener("click", () => {
     setDistanceMode(!distanceModeActive);
+  });
+}
+
+if (el.btnTheme) {
+  el.btnTheme.addEventListener("click", () => {
+    applyUiTheme(uiTheme === "dark" ? "light" : "dark");
+    saveUiTheme();
   });
 }
 
@@ -4714,32 +9365,45 @@ if (el.btnClearSelection) {
 }
 
 el.btnInput.addEventListener("click", () => openInputWindow());
+el.btnProject.addEventListener("click", () => openProjectWindow());
+el.btnLoads.addEventListener("click", () => openLoadsVerifyWindow());
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
+  onResultsDisplayChanged();
+  if (windVisualData && el.chkWindLoads && el.chkWindLoads.checked) {
+    selectedWindCaseId = pickWindCaseIdForLc(windVisualData);
+    onResultsDisplayChanged();
+    populateWindCaseSelect();
+  }
   if (currentModel) rebuildScene();
   updateSelectionPanel();
 });
 el.defFactor.addEventListener("change", () => {
   dispContourScaleKey = null;
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkDeformed.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkDispContour.addEventListener("change", () => {
   if (currentModel && el.chkDispContour.checked) {
     dispContourScaleKey = null;
   }
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 if (el.dispContourMin) {
   el.dispContourMin.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 if (el.dispContourMax) {
   el.dispContourMax.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
@@ -4747,67 +9411,275 @@ if (el.btnDispContourAuto) {
   el.btnDispContourAuto.addEventListener("click", () => applyDispContourAutoRange());
 }
 el.chkSupports.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 if (el.chkEJnt) {
   el.chkEJnt.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 el.chkLoads.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkLoadValues.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
+if (el.chkWindLoads) {
+  el.chkWindLoads.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    populateWindCaseSelect();
+    updateWindControlsAvailability();
+    if (el.chkWindLoads.checked && windVisualData) {
+      const wc = windCaseById(windVisualData, selectedWindCaseId);
+      syncLcToWindCase(wc);
+    }
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.windCaseSelect) {
+  el.windCaseSelect.addEventListener("change", () => {
+    const raw = el.windCaseSelect.value;
+    selectedWindCaseId = raw ? Number(raw) : null;
+    onResultsDisplayChanged();
+    if (el.chkWindLoads && el.chkWindLoads.checked && windVisualData) {
+      const wc = windCaseById(windVisualData, selectedWindCaseId);
+      syncLcToWindCase(wc);
+    }
+    if (currentModel) rebuildScene();
+  });
+}
 el.chkReactions.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkReactionValues.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkLabels.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkElemLabels.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkMaterial.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkSection.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
+if (el.chkSectionSolids) {
+  el.chkSectionSolids.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.btnExportSectionSolidsDxf) {
+  el.btnExportSectionSolidsDxf.addEventListener("click", exportSectionSolidsDxf);
+}
 if (el.chkMembrane) {
   el.chkMembrane.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    syncRegionEdgeCheckboxes();
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.chkMembraneEdge) {
+  el.chkMembraneEdge.addEventListener("change", () => {
+    onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
 }
 if (el.chkWoodWall) {
   el.chkWoodWall.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    syncRegionEdgeCheckboxes();
     if (currentModel) rebuildScene();
   });
 }
+if (el.chkWoodWallEdge) {
+  el.chkWoodWallEdge.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    if (currentModel) rebuildScene();
+  });
+}
+syncRegionEdgeCheckboxes();
 el.forceSelect.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.frcDiv.addEventListener("input", () => {
   el.frcDivVal.textContent = el.frcDiv.value;
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.frcFactor.addEventListener("input", () => {
   el.frcFactorVal.textContent = el.frcFactor.value;
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
 el.chkForceValues.addEventListener("change", () => {
+  onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
+
+function readDisplayPrefsFromUi() {
+  displayPrefs.defFactor = parseFloat(el.defFactor.value);
+  if (!isFinite(displayPrefs.defFactor)) displayPrefs.defFactor = RESULTS_DISPLAY_DEFAULTS.defFactor;
+  displayPrefs.deformed = !!(el.chkDeformed && el.chkDeformed.checked);
+  displayPrefs.dispContour = !!(el.chkDispContour && el.chkDispContour.checked);
+  displayPrefs.supports = !el.chkSupports || el.chkSupports.checked;
+  displayPrefs.ejnt = !!(el.chkEJnt && el.chkEJnt.checked);
+  displayPrefs.loads = !!(el.chkLoads && el.chkLoads.checked);
+  displayPrefs.loadValues = !!(el.chkLoadValues && el.chkLoadValues.checked);
+  displayPrefs.windLoads = !!(el.chkWindLoads && el.chkWindLoads.checked);
+  displayPrefs.reactions = !!(el.chkReactions && el.chkReactions.checked);
+  displayPrefs.reactionValues = !!(el.chkReactionValues && el.chkReactionValues.checked);
+  displayPrefs.nodeLabels = !!(el.chkLabels && el.chkLabels.checked);
+  displayPrefs.elemLabels = !!(el.chkElemLabels && el.chkElemLabels.checked);
+  displayPrefs.material = !!(el.chkMaterial && el.chkMaterial.checked);
+  displayPrefs.section = !!(el.chkSection && el.chkSection.checked);
+  displayPrefs.sectionSolids = !!(el.chkSectionSolids && el.chkSectionSolids.checked);
+  displayPrefs.membrane = !!(el.chkMembrane && el.chkMembrane.checked);
+  displayPrefs.membraneEdge = !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
+  displayPrefs.woodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
+  displayPrefs.woodWallEdge = !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
+  displayPrefs.forceComponent = parseInt(el.forceSelect.value, 10) || 0;
+  displayPrefs.forceDiv = parseInt(el.frcDiv.value, 10) || RESULTS_DISPLAY_DEFAULTS.forceDiv;
+  displayPrefs.forceFactor = parseFloat(el.frcFactor.value) || RESULTS_DISPLAY_DEFAULTS.forceFactor;
+  displayPrefs.forceValues = !!(el.chkForceValues && el.chkForceValues.checked);
+  displayPrefs.loadCase = el.lcSelect && el.lcSelect.value ? String(el.lcSelect.value) : null;
+  displayPrefs.windCaseId = selectedWindCaseId;
+  if (el.dispContourMin) displayPrefs.dispContourMin = String(el.dispContourMin.value || "");
+  if (el.dispContourMax) displayPrefs.dispContourMax = String(el.dispContourMax.value || "");
+  displayPrefs.showWorldAxes = showWorldAxes;
+}
+
+function applyDisplayPrefsToUi() {
+  el.defFactor.value = String(displayPrefs.defFactor);
+  if (el.chkDeformed && !el.chkDeformed.disabled) el.chkDeformed.checked = !!displayPrefs.deformed;
+  if (el.chkDispContour && !el.chkDispContour.disabled) {
+    el.chkDispContour.checked = !!displayPrefs.dispContour;
+  }
+  if (el.chkSupports) el.chkSupports.checked = !!displayPrefs.supports;
+  if (el.chkEJnt) el.chkEJnt.checked = !!displayPrefs.ejnt;
+  if (el.chkLoads) el.chkLoads.checked = !!displayPrefs.loads;
+  if (el.chkLoadValues) el.chkLoadValues.checked = !!displayPrefs.loadValues;
+  if (el.chkWindLoads && !el.chkWindLoads.disabled) el.chkWindLoads.checked = !!displayPrefs.windLoads;
+  if (el.chkReactions && !el.chkReactions.disabled) el.chkReactions.checked = !!displayPrefs.reactions;
+  if (el.chkReactionValues && !el.chkReactionValues.disabled) {
+    el.chkReactionValues.checked = !!displayPrefs.reactionValues;
+  }
+  if (el.chkLabels) el.chkLabels.checked = !!displayPrefs.nodeLabels;
+  if (el.chkElemLabels) el.chkElemLabels.checked = !!displayPrefs.elemLabels;
+  if (el.chkMaterial) el.chkMaterial.checked = !!displayPrefs.material;
+  if (el.chkSection) el.chkSection.checked = !!displayPrefs.section;
+  if (el.chkSectionSolids) el.chkSectionSolids.checked = !!displayPrefs.sectionSolids;
+  if (el.chkMembrane) el.chkMembrane.checked = !!displayPrefs.membrane;
+  if (el.chkMembraneEdge) el.chkMembraneEdge.checked = !!displayPrefs.membraneEdge;
+  if (el.chkWoodWall) el.chkWoodWall.checked = !!displayPrefs.woodWall;
+  if (el.chkWoodWallEdge) el.chkWoodWallEdge.checked = !!displayPrefs.woodWallEdge;
+  if (!el.forceSelect.disabled) el.forceSelect.value = String(displayPrefs.forceComponent);
+  if (!el.frcDiv.disabled) {
+    el.frcDiv.value = String(displayPrefs.forceDiv);
+    el.frcDivVal.textContent = String(displayPrefs.forceDiv);
+  }
+  if (!el.frcFactor.disabled) {
+    el.frcFactor.value = String(displayPrefs.forceFactor);
+    el.frcFactorVal.textContent = String(displayPrefs.forceFactor);
+  }
+  if (!el.chkForceValues.disabled) el.chkForceValues.checked = !!displayPrefs.forceValues;
+  if (displayPrefs.loadCase && el.lcSelect) {
+    const hasLc = Array.from(el.lcSelect.options).some(function (o) {
+      return o.value === displayPrefs.loadCase;
+    });
+    if (hasLc) el.lcSelect.value = displayPrefs.loadCase;
+  }
+  if (displayPrefs.windCaseId != null && windVisualData) {
+    if (windCaseById(windVisualData, displayPrefs.windCaseId)) {
+      selectedWindCaseId = displayPrefs.windCaseId;
+    }
+  }
+  if (el.dispContourMin) el.dispContourMin.value = displayPrefs.dispContourMin || "";
+  if (el.dispContourMax) el.dispContourMax.value = displayPrefs.dispContourMax || "";
+  syncRegionEdgeCheckboxes();
+}
+
+function saveDisplayPrefs() {
+  try {
+    localStorage.setItem(RESULTS_DISPLAY_STORAGE_KEY, JSON.stringify(displayPrefs));
+  } catch (e) { /* ignore */ }
+}
+
+function loadDisplayPrefs() {
+  try {
+    const raw = localStorage.getItem(RESULTS_DISPLAY_STORAGE_KEY);
+    if (!raw) return;
+    const st = JSON.parse(raw);
+    if (typeof st.defFactor === "number" && isFinite(st.defFactor)) displayPrefs.defFactor = st.defFactor;
+    if (typeof st.deformed === "boolean") displayPrefs.deformed = st.deformed;
+    if (typeof st.dispContour === "boolean") displayPrefs.dispContour = st.dispContour;
+    if (typeof st.supports === "boolean") displayPrefs.supports = st.supports;
+    if (typeof st.ejnt === "boolean") displayPrefs.ejnt = st.ejnt;
+    if (typeof st.loads === "boolean") displayPrefs.loads = st.loads;
+    if (typeof st.loadValues === "boolean") displayPrefs.loadValues = st.loadValues;
+    if (typeof st.windLoads === "boolean") displayPrefs.windLoads = st.windLoads;
+    if (typeof st.reactions === "boolean") displayPrefs.reactions = st.reactions;
+    if (typeof st.reactionValues === "boolean") displayPrefs.reactionValues = st.reactionValues;
+    if (typeof st.nodeLabels === "boolean") displayPrefs.nodeLabels = st.nodeLabels;
+    if (typeof st.elemLabels === "boolean") displayPrefs.elemLabels = st.elemLabels;
+    if (typeof st.material === "boolean") displayPrefs.material = st.material;
+    if (typeof st.section === "boolean") displayPrefs.section = st.section;
+    if (typeof st.sectionSolids === "boolean") displayPrefs.sectionSolids = st.sectionSolids;
+    if (typeof st.membrane === "boolean") displayPrefs.membrane = st.membrane;
+    if (typeof st.membraneEdge === "boolean") displayPrefs.membraneEdge = st.membraneEdge;
+    if (typeof st.woodWall === "boolean") displayPrefs.woodWall = st.woodWall;
+    if (typeof st.woodWallEdge === "boolean") displayPrefs.woodWallEdge = st.woodWallEdge;
+    if (typeof st.forceComponent === "number") displayPrefs.forceComponent = st.forceComponent;
+    if (typeof st.forceDiv === "number") displayPrefs.forceDiv = st.forceDiv;
+    if (typeof st.forceFactor === "number") displayPrefs.forceFactor = st.forceFactor;
+    if (typeof st.forceValues === "boolean") displayPrefs.forceValues = st.forceValues;
+    if (typeof st.loadCase === "string" || st.loadCase === null) displayPrefs.loadCase = st.loadCase;
+    if (typeof st.windCaseId === "number" || st.windCaseId === null) displayPrefs.windCaseId = st.windCaseId;
+    if (typeof st.dispContourMin === "string") displayPrefs.dispContourMin = st.dispContourMin;
+    if (typeof st.dispContourMax === "string") displayPrefs.dispContourMax = st.dispContourMax;
+    if (typeof st.showWorldAxes === "boolean") displayPrefs.showWorldAxes = st.showWorldAxes;
+  } catch (e) { /* ignore */ }
+}
+
+function onResultsDisplayChanged() {
+  readDisplayPrefsFromUi();
+  saveDisplayPrefs();
+}
+
+function initDisplayPrefs() {
+  loadDisplayPrefs();
+  applyDisplayPrefsToUi();
+  showWorldAxes = !!displayPrefs.showWorldAxes;
+  if (el.btnToggleAxes) {
+    el.btnToggleAxes.classList.toggle("active", showWorldAxes);
+  }
+}
 
 function readOptionsFromUi() {
   viewerOptions.loadArrowSize = clampViewerOption(
     "loadArrowSize", parseFloat(el.optLoadArrow.value) || OPTIONS_DEFAULTS.loadArrowSize);
+  viewerOptions.reactionArrowSize = clampViewerOption(
+    "reactionArrowSize", parseFloat(el.optReactionArrow.value) || OPTIONS_DEFAULTS.reactionArrowSize);
   viewerOptions.supportGizmoSize = clampViewerOption(
     "supportGizmoSize", parseInt(el.optSupportGizmo.value, 10) || OPTIONS_DEFAULTS.supportGizmoSize);
+  if (el.optAxesSize) {
+    viewerOptions.axesSize = clampViewerOption(
+      "axesSize", parseInt(el.optAxesSize.value, 10) || OPTIONS_DEFAULTS.axesSize);
+  }
   viewerOptions.supportLineWidth = clampViewerOption(
     "supportLineWidth", parseFloat(el.optSupportLineWidth.value) || OPTIONS_DEFAULTS.supportLineWidth);
   viewerOptions.dispContourLineWidth = clampViewerOption(
@@ -4816,6 +9688,8 @@ function readOptionsFromUi() {
     "elementLineWidth", parseFloat(el.optElementLineWidth.value) || OPTIONS_DEFAULTS.elementLineWidth);
   viewerOptions.loadLineWidth = clampViewerOption(
     "loadLineWidth", parseFloat(el.optLoadLineWidth.value) || OPTIONS_DEFAULTS.loadLineWidth);
+  viewerOptions.reactionLineWidth = clampViewerOption(
+    "reactionLineWidth", parseFloat(el.optReactionLineWidth.value) || OPTIONS_DEFAULTS.reactionLineWidth);
   viewerOptions.forceLineWidth = clampViewerOption(
     "forceLineWidth", parseFloat(el.optForceLineWidth.value) || OPTIONS_DEFAULTS.forceLineWidth);
   viewerOptions.nodeLabelSize = clampViewerOption(
@@ -4832,6 +9706,18 @@ function readOptionsFromUi() {
     "reactionLabelSize", parseFloat(el.optReactionLabel.value) || OPTIONS_DEFAULTS.reactionLabelSize);
   viewerOptions.forceLabelSize = clampViewerOption(
     "forceLabelSize", parseFloat(el.optForceLabel.value) || OPTIONS_DEFAULTS.forceLabelSize);
+  if (el.optSectionSolidOpacity) {
+    viewerOptions.sectionSolidOpacity = clampViewerOption(
+      "sectionSolidOpacity",
+      parseFloat(el.optSectionSolidOpacity.value) || OPTIONS_DEFAULTS.sectionSolidOpacity
+    );
+  }
+  if (el.optSectionSolidColor) {
+    viewerOptions.sectionSolidColor = sanitizeHexColor(
+      el.optSectionSolidColor.value,
+      OPTIONS_DEFAULTS.sectionSolidColor
+    );
+  }
   if (el.loadTypeFilter) {
     viewerOptions.inputLoadType = el.loadTypeFilter.value || OPTIONS_DEFAULTS.inputLoadType;
   }
@@ -4840,12 +9726,21 @@ function readOptionsFromUi() {
 function applyOptionsToUi() {
   el.optLoadArrow.value = String(viewerOptions.loadArrowSize);
   el.optLoadArrowVal.textContent = Number(viewerOptions.loadArrowSize).toFixed(1);
+  if (el.optReactionArrow) {
+    el.optReactionArrow.value = String(viewerOptions.reactionArrowSize);
+    el.optReactionArrowVal.textContent = Number(viewerOptions.reactionArrowSize).toFixed(1);
+  }
   el.optSupportGizmo.value = String(viewerOptions.supportGizmoSize);
   el.optSupportGizmoVal.textContent = String(viewerOptions.supportGizmoSize);
+  if (el.optAxesSize) {
+    el.optAxesSize.value = String(viewerOptions.axesSize);
+    el.optAxesSizeVal.textContent = String(viewerOptions.axesSize);
+  }
   el.optSupportLineWidth.value = String(viewerOptions.supportLineWidth);
   el.optDispContourLineWidth.value = String(viewerOptions.dispContourLineWidth);
   if (el.optElementLineWidth) el.optElementLineWidth.value = String(viewerOptions.elementLineWidth);
   if (el.optLoadLineWidth) el.optLoadLineWidth.value = String(viewerOptions.loadLineWidth);
+  if (el.optReactionLineWidth) el.optReactionLineWidth.value = String(viewerOptions.reactionLineWidth);
   if (el.optForceLineWidth) el.optForceLineWidth.value = String(viewerOptions.forceLineWidth);
   el.optNodeLabel.value = String(viewerOptions.nodeLabelSize);
   el.optNodeLabelVal.textContent = String(viewerOptions.nodeLabelSize);
@@ -4861,6 +9756,18 @@ function applyOptionsToUi() {
   el.optReactionLabelVal.textContent = String(viewerOptions.reactionLabelSize);
   el.optForceLabel.value = String(viewerOptions.forceLabelSize);
   el.optForceLabelVal.textContent = String(viewerOptions.forceLabelSize);
+  if (el.optSectionSolidOpacity) {
+    el.optSectionSolidOpacity.value = String(viewerOptions.sectionSolidOpacity);
+    if (el.optSectionSolidOpacityVal) {
+      el.optSectionSolidOpacityVal.textContent = Number(viewerOptions.sectionSolidOpacity).toFixed(2);
+    }
+  }
+  if (el.optSectionSolidColor) {
+    el.optSectionSolidColor.value = sanitizeHexColor(
+      viewerOptions.sectionSolidColor,
+      OPTIONS_DEFAULTS.sectionSolidColor
+    );
+  }
   if (el.loadTypeFilter) {
     el.loadTypeFilter.value = loadTypeFilterValue();
   }
@@ -4872,17 +9779,91 @@ function saveViewerOptions() {
   } catch (e) { /* ignore */ }
 }
 
+function normalizeUiTheme(theme) {
+  return theme === "light" ? "light" : "dark";
+}
+
+function uiThemeMetaColor(theme) {
+  return theme === "light" ? "#f4f5f7" : "#1a1a22";
+}
+
+function applyRenderTheme(theme) {
+  const palette = THEME_RENDER_COLORS[theme] || THEME_RENDER_COLORS.dark;
+  COLORS.background = palette.background;
+  COLORS.element = palette.element;
+  COLORS.node = palette.node;
+  COLORS.membraneEdge = palette.membraneEdge;
+  COLORS.woodWallEdge = palette.woodWallEdge;
+  COLORS.nodeLabel = palette.nodeLabel;
+  if (scene) {
+    scene.background = new THREE.Color(COLORS.background);
+  }
+  if (_nodeLabelLeaderMat) {
+    _nodeLabelLeaderMat.color.setHex(COLORS.nodeLabel);
+    _nodeLabelLeaderMat.needsUpdate = true;
+  }
+  clearSupportDiscTextureCache();
+}
+
+function preferredUiTheme() {
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+    return "light";
+  }
+  return "dark";
+}
+
+function loadUiTheme() {
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (!raw) return preferredUiTheme();
+    return normalizeUiTheme(raw);
+  } catch (e) {
+    return preferredUiTheme();
+  }
+}
+
+function saveUiTheme() {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, uiTheme);
+  } catch (e) { /* ignore */ }
+}
+
+function applyUiTheme(theme) {
+  uiTheme = normalizeUiTheme(theme);
+  document.documentElement.setAttribute("data-theme", uiTheme);
+  applyRenderTheme(uiTheme);
+  const meta = document.querySelector("meta[name=\"theme-color\"]");
+  if (meta) {
+    meta.setAttribute("content", uiThemeMetaColor(uiTheme));
+  }
+  if (el.btnTheme) {
+    const isDark = uiTheme === "dark";
+    el.btnTheme.textContent = isDark ? "Theme: Dark" : "Theme: Light";
+    el.btnTheme.title = isDark ? "Switch to light mode" : "Switch to dark mode";
+  }
+  if (currentModel) {
+    rebuildScene();
+  }
+}
+
+function initUiTheme() {
+  applyUiTheme(loadUiTheme());
+}
+
 function loadViewerOptions() {
   try {
     const raw = localStorage.getItem(OPTIONS_STORAGE_KEY);
     if (!raw) return;
     const st = JSON.parse(raw);
     if (typeof st.loadArrowSize === "number") viewerOptions.loadArrowSize = st.loadArrowSize;
+    if (typeof st.reactionArrowSize === "number") viewerOptions.reactionArrowSize = st.reactionArrowSize;
     if (typeof st.supportGizmoSize === "number") viewerOptions.supportGizmoSize = st.supportGizmoSize;
+    if (typeof st.axesSize === "number") viewerOptions.axesSize = st.axesSize;
     if (typeof st.supportLineWidth === "number") viewerOptions.supportLineWidth = st.supportLineWidth;
     if (typeof st.dispContourLineWidth === "number") viewerOptions.dispContourLineWidth = st.dispContourLineWidth;
     if (typeof st.elementLineWidth === "number") viewerOptions.elementLineWidth = st.elementLineWidth;
     if (typeof st.loadLineWidth === "number") viewerOptions.loadLineWidth = st.loadLineWidth;
+    if (typeof st.reactionLineWidth === "number") viewerOptions.reactionLineWidth = st.reactionLineWidth;
     if (typeof st.forceLineWidth === "number") viewerOptions.forceLineWidth = st.forceLineWidth;
     if (typeof st.nodeLabelSize === "number") viewerOptions.nodeLabelSize = st.nodeLabelSize;
     if (typeof st.elemLabelSize === "number") viewerOptions.elemLabelSize = st.elemLabelSize;
@@ -4891,6 +9872,12 @@ function loadViewerOptions() {
     if (typeof st.loadLabelSize === "number") viewerOptions.loadLabelSize = st.loadLabelSize;
     if (typeof st.reactionLabelSize === "number") viewerOptions.reactionLabelSize = st.reactionLabelSize;
     if (typeof st.forceLabelSize === "number") viewerOptions.forceLabelSize = st.forceLabelSize;
+    if (typeof st.sectionSolidOpacity === "number") {
+      viewerOptions.sectionSolidOpacity = st.sectionSolidOpacity;
+    }
+    if (typeof st.sectionSolidColor === "string") {
+      viewerOptions.sectionSolidColor = sanitizeHexColor(st.sectionSolidColor, OPTIONS_DEFAULTS.sectionSolidColor);
+    }
     if (typeof st.inputLoadType === "string") viewerOptions.inputLoadType = st.inputLoadType;
     clampAllViewerOptions();
   } catch (e) { /* ignore */ }
@@ -4909,10 +9896,22 @@ function initViewerOptions() {
     el.optLoadArrowVal.textContent = Number(el.optLoadArrow.value).toFixed(1);
     onOptionsChanged();
   });
+  if (el.optReactionArrow) {
+    el.optReactionArrow.addEventListener("input", () => {
+      el.optReactionArrowVal.textContent = Number(el.optReactionArrow.value).toFixed(1);
+      onOptionsChanged();
+    });
+  }
   el.optSupportGizmo.addEventListener("input", () => {
     el.optSupportGizmoVal.textContent = el.optSupportGizmo.value;
     onOptionsChanged();
   });
+  if (el.optAxesSize) {
+    el.optAxesSize.addEventListener("input", () => {
+      el.optAxesSizeVal.textContent = el.optAxesSize.value;
+      onOptionsChanged();
+    });
+  }
   el.optSupportLineWidth.addEventListener("input", onOptionsChanged);
   el.optSupportLineWidth.addEventListener("change", onOptionsChanged);
   el.optDispContourLineWidth.addEventListener("input", onOptionsChanged);
@@ -4924,6 +9923,10 @@ function initViewerOptions() {
   if (el.optLoadLineWidth) {
     el.optLoadLineWidth.addEventListener("input", onOptionsChanged);
     el.optLoadLineWidth.addEventListener("change", onOptionsChanged);
+  }
+  if (el.optReactionLineWidth) {
+    el.optReactionLineWidth.addEventListener("input", onOptionsChanged);
+    el.optReactionLineWidth.addEventListener("change", onOptionsChanged);
   }
   if (el.optForceLineWidth) {
     el.optForceLineWidth.addEventListener("input", onOptionsChanged);
@@ -4957,6 +9960,18 @@ function initViewerOptions() {
     el.optForceLabelVal.textContent = el.optForceLabel.value;
     onOptionsChanged();
   });
+  if (el.optSectionSolidOpacity) {
+    el.optSectionSolidOpacity.addEventListener("input", () => {
+      if (el.optSectionSolidOpacityVal) {
+        el.optSectionSolidOpacityVal.textContent = Number(el.optSectionSolidOpacity.value).toFixed(2);
+      }
+      onOptionsChanged();
+    });
+  }
+  if (el.optSectionSolidColor) {
+    el.optSectionSolidColor.addEventListener("input", onOptionsChanged);
+    el.optSectionSolidColor.addEventListener("change", onOptionsChanged);
+  }
   if (el.loadTypeFilter) {
     el.loadTypeFilter.addEventListener("change", onOptionsChanged);
   }
@@ -5018,11 +10033,16 @@ function initDraggablePanel(cfg) {
   }
 
   loadPanelState();
+  if (cfg.autoVisibility) {
+    panel.classList.add("hidden");
+  }
 
-  cfg.toggleBtn.addEventListener("click", () => {
-    panel.classList.toggle("hidden");
-    savePanelState();
-  });
+  if (cfg.toggleBtn) {
+    cfg.toggleBtn.addEventListener("click", () => {
+      panel.classList.toggle("hidden");
+      savePanelState();
+    });
+  }
 
   collapseBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();

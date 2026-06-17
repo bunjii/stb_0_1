@@ -1,0 +1,199 @@
+{
+  "schema": 1,
+  "model": {
+    "dat": "UK_ROOF_240420.dat"
+  },
+  "building": {
+    "name": "UK_ROOF_240420",
+    "location": "",
+    "use": "",
+    "structure": "",
+    "calculation_route": "",
+    "designer": {
+      "name": "",
+      "qualification": "",
+      "license_number": "",
+      "contact": ""
+    }
+  },
+  "grids": [],
+  "stories": [],
+  "member_classes": [],
+  "design_checks": {
+    "wood": {
+      "enabled": false,
+      "load_cases": [],
+      "deflection_limit_ratio": 0.0,
+      "allowable_stresses": {
+        "bending": 0.0,
+        "shear": 0.0,
+        "compression": 0.0,
+        "tension": 0.0
+      }
+    }
+  },
+  "load_conditions": {
+    "seismic": {
+      "ci": 0.3,
+      "dead_load_lc": null,
+      "live_load_lc": null,
+      "live_load_factor": 0.0,
+      "directions": [],
+      "rt": 1.0
+    },
+    "diaphragms": [],
+    "seismic_masses": [],
+    "wind": {
+      "cases": [
+        {
+          "id": 1,
+          "name": "WX+",
+          "direction": "X_PLUS",
+          "V0": 34.0,
+          "roughness_category": "III",
+          "load_case": 4,
+          "Gf": 2.5,
+          "Cf_default": 0.8,
+          "use_Kz": true,
+          "pressure_mode": "STORY_HEIGHT_KZ",
+          "diaphragm_input_mode": "DIAPHRAGM_UNIFORM"
+        },
+        {
+          "id": 2,
+          "name": "WX-",
+          "direction": "X_MINUS",
+          "V0": 34.0,
+          "roughness_category": "III",
+          "load_case": 5,
+          "Gf": 2.5,
+          "Cf_default": 0.8,
+          "use_Kz": true,
+          "pressure_mode": "STORY_HEIGHT_KZ",
+          "diaphragm_input_mode": "DIAPHRAGM_UNIFORM"
+        },
+        {
+          "id": 3,
+          "name": "WY+",
+          "direction": "Y_PLUS",
+          "V0": 34.0,
+          "roughness_category": "III",
+          "load_case": 6,
+          "Gf": 2.5,
+          "Cf_default": 0.8,
+          "use_Kz": true,
+          "pressure_mode": "STORY_HEIGHT_KZ",
+          "diaphragm_input_mode": "DIAPHRAGM_UNIFORM"
+        },
+        {
+          "id": 4,
+          "name": "WY-",
+          "direction": "Y_MINUS",
+          "V0": 34.0,
+          "roughness_category": "III",
+          "load_case": 7,
+          "Gf": 2.5,
+          "Cf_default": 0.8,
+          "use_Kz": true,
+          "pressure_mode": "STORY_HEIGHT_KZ",
+          "diaphragm_input_mode": "DIAPHRAGM_UNIFORM"
+        }
+      ],
+      "surfaces": [
+        {
+          "id": 1,
+          "name": "X_plus_windward_wall",
+          "wind_case_id": 1,
+          "face_direction": "X_MIN",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 5.46,
+          "Cf": 0.8
+        },
+        {
+          "id": 2,
+          "name": "X_plus_leeward_wall",
+          "wind_case_id": 1,
+          "face_direction": "X_MAX",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 5.46,
+          "Cf": -0.4,
+          "surface_role": "LEEWARD"
+        },
+        {
+          "id": 3,
+          "name": "X_minus_windward_wall",
+          "wind_case_id": 2,
+          "face_direction": "X_MAX",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 5.46,
+          "Cf": 0.8
+        },
+        {
+          "id": 4,
+          "name": "X_minus_leeward_wall",
+          "wind_case_id": 2,
+          "face_direction": "X_MIN",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 5.46,
+          "Cf": -0.4,
+          "surface_role": "LEEWARD"
+        },
+        {
+          "id": 5,
+          "name": "Y_plus_windward_wall",
+          "wind_case_id": 3,
+          "face_direction": "Y_MIN",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 8.0,
+          "Cf": 0.8
+        },
+        {
+          "id": 6,
+          "name": "Y_plus_leeward_wall",
+          "wind_case_id": 3,
+          "face_direction": "Y_MAX",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 8.0,
+          "Cf": -0.4,
+          "surface_role": "LEEWARD"
+        },
+        {
+          "id": 7,
+          "name": "Y_minus_windward_wall",
+          "wind_case_id": 4,
+          "face_direction": "Y_MAX",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 8.0,
+          "Cf": 0.8
+        },
+        {
+          "id": 8,
+          "name": "Y_minus_leeward_wall",
+          "wind_case_id": 4,
+          "face_direction": "Y_MIN",
+          "z_bottom": 0.0,
+          "z_top": 9.045,
+          "width": 8.0,
+          "Cf": -0.4,
+          "surface_role": "LEEWARD"
+        }
+      ],
+      "member_loads": []
+    },
+    "load_combinations": []
+  },
+  "report": {
+    "title": "UK_ROOF_240420",
+    "mode": "practice",
+    "language": "ja",
+    "format": "markdown",
+    "include_manual_items": true,
+    "include_warnings": true
+  }
+}

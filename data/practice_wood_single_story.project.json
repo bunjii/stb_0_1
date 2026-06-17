@@ -101,6 +101,24 @@
       }
     }
   },
+  "load_conditions": {
+    "seismic": {
+      "ci": 0.169,
+      "dead_load_lc": null,
+      "live_load_lc": null,
+      "live_load_factor": 0.0,
+      "directions": [],
+      "base_level": "1",
+      "base_mass_policy": "APPLY_TO_1F_DIAPHRAGM"
+    },
+    "diaphragms": [
+      {
+        "id": 10,
+        "story": "1"
+      }
+    ],
+    "seismic_masses": []
+  },
   "report": {
     "title": "Practice Wood Single-Story Summary",
     "mode": "practice",

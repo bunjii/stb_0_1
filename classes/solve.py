@@ -1,6 +1,7 @@
 import nd, elm, mat, sec, cons, common, mdl, io
 from ld import PLd, ALd, ELd, Lcase, Lcmb
 import copy
+import math
 import numpy as np
 import datetime
 
@@ -9,14 +10,24 @@ from scipy.sparse import csc_matrix
 
 #from classes.elm import Elm1D
 
+
+def _as_dense_disps(disps):
+    """Normalize solver output to a dense 2D displacement matrix."""
+    if np.ndim(disps) == 1:
+        return np.expand_dims(disps, axis=1)
+    if hasattr(disps, "toarray"):
+        return disps.toarray()
+    return np.asarray(disps)
+
+
 class Solve:
 
     def __init__(self, _mdl):
         
         self.mdl     = _mdl 
         self.ndof    = 6
-        self.num_row = None
-        self.num_lcs = None
+        self.num_row = 0
+        self.num_lcs = 0
 
         self.kG_orig =  None
 
@@ -54,10 +65,7 @@ class Solve:
                 # x = np.linalg.solve(kG, lm)
 
         if T is not None:
-            if np.ndim(x) == 1:
-                x = T @ x
-            else:
-                x = T @ x
+            x = T @ np.asarray(x)
         
         self.SetNodalDisps(x) 
         self.CalcElemForces()
@@ -127,11 +135,10 @@ class Solve:
     def CalcReactions(self, _disps):
 
         kG_orig = self.kG_orig
+        if kG_orig is None:
+            return
 
-        if np.ndim(_disps) == 1:
-            U = np.expand_dims(_disps, axis=1)
-        else:
-            U = _disps.toarray()
+        U = _as_dense_disps(_disps)
 
         # KU = F
         for c in self.mdl.cons: 
@@ -169,7 +176,7 @@ class Solve:
         num_lcs = max([max_clc_pld, max_clc_eld, max_clc_gld])+1 
 
 
-        np.set_printoptions(precision=1, linewidth=np.inf, suppress=True, formatter={'float': '{: 0.1e}'.format})  
+        np.set_printoptions(precision=1, linewidth=200, suppress=True, formatter={'float': '{: 0.1e}'.format})  
 
         # for each element
         for e in elms:
@@ -279,10 +286,7 @@ class Solve:
         mdl  = self.mdl
         ndof = self.ndof
 
-        if np.ndim(_disps) == 1:
-            disps = np.expand_dims(_disps, axis=1)
-        else:
-            disps = _disps.toarray()
+        disps = _as_dense_disps(_disps)
             
         cnt = 0 # loop counter
         while cnt * ndof < self.num_row:
@@ -291,7 +295,10 @@ class Solve:
             s_row = cid * ndof
             e_row = s_row + ndof
 
-            nd = mdl.FindNodeFromCid(cid) 
+            nd = mdl.FindNodeFromCid(cid)
+            if nd == -1:
+                cnt += 1
+                continue
             nd.disps = disps[s_row:e_row, :]
   
             cnt += 1 
@@ -547,6 +554,13 @@ class Solve:
     
     def CreateLoadMx(self, apply_constraints=True):
 
+        # ALOD / ELOD / GLOD accumulate into e.elds (and related arrays) with +=.
+        # Clear them so a second Solve on the same model does not double-count.
+        for e in self.mdl.elms:
+            e.elds = None
+            e.alds = None
+            e.glds = None
+
         # max_clc_pld  = max(list(map(lambda l: l.clc, self.mdl.lds))) if self.mdl.lds else 0
         # max_clc_eld  = max(list(map(lambda l: l.clc, self.mdl.elds))) if self.mdl.elds else 0
         # max_clc_gld  = max(list(map(lambda l: l.clc, self.mdl.glds))) if self.mdl.glds else 0
@@ -768,6 +782,16 @@ class Solve:
                 self._add_xy_load(lm, n0, col, fx, fy)
                 self._add_xy_load(lm, n1, col, fx, fy)
             elif dl.load_type in ["MASS", "WEIGHT"]:
+                if abs(dl.ax) < common.PRES_ZERO and abs(dl.ay) < common.PRES_ZERO:
+                    if dl.load_type == "WEIGHT":
+                        w_area = dl.weight
+                    else:
+                        w_area = dl.mass * common.GRAVITY
+                    if w_area > common.PRES_ZERO:
+                        for node, fz in self._diaphragm_area_nodal_vertical_loads(dl, by_diap, w_area):
+                            row = node.cid * self.ndof
+                            lm[row + 2, col] += fz
+                    continue
                 px = dl.mass * dl.ax + dl.weight / common.GRAVITY * dl.ax
                 py = dl.mass * dl.ay + dl.weight / common.GRAVITY * dl.ay
                 if abs(px) < common.PRES_ZERO and abs(py) < common.PRES_ZERO:
@@ -827,6 +851,52 @@ class Solve:
             f = poly_area / float(len(nodes))
             for n in nodes:
                 loads.append((n, dl.px * f, dl.py * f))
+        return loads
+
+    def _diaphragm_area_nodal_vertical_loads(self, dl, by_diap, w_area):
+        from diaphragm import dreg_polygon_xy, diaphragm_floor_nodes
+
+        diap = by_diap.get(dl.diap_id)
+        if diap is None:
+            return []
+
+        _, area = dreg_polygon_xy(self.mdl, dl.diap_id)
+        nodes = diaphragm_floor_nodes(self.mdl, dl.diap_id)
+        if area > common.PRES_ZERO and len(nodes) >= 1:
+            fz = -w_area * (area / float(len(nodes)))
+            return [(n, fz) for n in nodes]
+
+        dmems = [m for m in getattr(self.mdl, "dmems", []) if m.diap.id == dl.diap_id]
+        if dmems:
+            loads = []
+            for m in dmems:
+                fz = -w_area * (m.area / 3.0)
+                for n in [m.n0, m.n1, m.n2]:
+                    loads.append((n, fz))
+            return loads
+
+        loads = []
+        for reg in getattr(self.mdl, "dregs", []):
+            if reg.diap_id != dl.diap_id:
+                continue
+            nodes = []
+            for nid in reg.node_ids:
+                n = self.mdl.FindNodeFromId(nid)
+                if n != -1:
+                    nodes.append(n)
+            if len(nodes) < 3:
+                continue
+            poly_area = 0.0
+            for i in range(len(nodes)):
+                n0 = nodes[i]
+                n1 = nodes[(i + 1) % len(nodes)]
+                poly_area += n0.x * n1.y - n0.y * n1.x
+            poly_area = abs(poly_area) * 0.5
+            if poly_area <= common.PRES_ZERO:
+                continue
+            fz = -w_area * (poly_area / float(len(nodes)))
+            for n in nodes:
+                loads.append((n, fz))
         return loads
 
     def _connected_boundary_assoc(self, _e):

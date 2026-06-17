@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 import unittest
@@ -81,7 +82,8 @@ class TestGuiModelJson(unittest.TestCase):
         self.assertAlmostEqual(sup["reacts"]["0"][2], 5.0, places=3)
         self.assertAlmostEqual(sup["reacts"]["0"][4], -10.0, places=3)
         self.assertTrue(len(data.get("reactions", [])) >= 1)
-        self.assertAlmostEqual(data["reactions"][0]["rz"], 5.0, places=3)
+        self.assertAlmostEqual(data["reactions"][0]["tz"], 5.0, places=3)
+        self.assertAlmostEqual(data["reactions"][0]["ry"], -10.0, places=3)
 
     def test_reject_path_outside_project(self):
         raised = False
@@ -213,6 +215,244 @@ class TestGuiApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue("MATE" in r.text)
 
+    def test_api_project_for_sample(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        r = self.client.get(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["found"])
+        self.assertIn("practice_wood_single_story.project.json", body["project_path"])
+        section_ids = [s["id"] for s in body["sections"]]
+        self.assertIn("building", section_ids)
+        self.assertIn("load_conditions", section_ids)
+        load_section = next(s for s in body["sections"] if s["id"] == "load_conditions")
+        labels = [row["label"] for row in load_section["rows"]]
+        self.assertIn("Rt (振動特性係数)", labels)
+        self.assertIn("edit", body)
+        self.assertIn("sections", body["edit"])
+
+    def test_api_project_template_for_missing_sidecar(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416panel.dat"
+        r = self.client.get("/api/project/template", params={"path": path})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertFalse(body["found"])
+        self.assertTrue(body["draft"])
+        self.assertIn("UK_240416panel.project.json", body["project_path"])
+        self.assertEqual(body["raw"]["model"]["dat"], "UK_240416panel.dat")
+        self.assertIn("edit", body)
+        self.assertIn("sections", body["edit"])
+
+    def test_api_project_create_new_sidecar(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        import os
+        import tempfile
+
+        from stb_project import project_path_for_dat
+
+        examples_dir = os.path.join(_STB_ROOT, "examples")
+        fd, dat_path = tempfile.mkstemp(suffix=".dat", dir=examples_dir)
+        os.close(fd)
+        rel_path = "examples/" + os.path.basename(dat_path)
+        project_path = project_path_for_dat(dat_path)
+        try:
+            with open(dat_path, "w", encoding="utf-8") as fh:
+                fh.write("* minimal dat for project create test\n")
+
+            get_r = self.client.get("/api/project", params={"path": rel_path})
+            self.assertEqual(get_r.status_code, 200)
+            self.assertFalse(get_r.json()["found"])
+
+            tpl_r = self.client.get("/api/project/template", params={"path": rel_path})
+            self.assertEqual(tpl_r.status_code, 200)
+            project = tpl_r.json()["raw"]
+            project["building"]["name"] = "GUI Create Test"
+
+            put_r = self.client.put(
+                "/api/project",
+                params={"path": rel_path},
+                json={"project": project},
+            )
+            self.assertEqual(put_r.status_code, 200)
+            self.assertTrue(put_r.json()["view"]["found"])
+            self.assertEqual(
+                put_r.json()["view"]["raw"]["building"]["name"],
+                "GUI Create Test",
+            )
+            self.assertTrue(os.path.isfile(project_path))
+        finally:
+            if os.path.isfile(project_path):
+                os.remove(project_path)
+            if os.path.isfile(dat_path):
+                os.remove(dat_path)
+
+    def test_api_project_save_round_trip(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        get_r = self.client.get(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+        )
+        self.assertEqual(get_r.status_code, 200)
+        project = get_r.json()["raw"]
+        project["building"]["name"] = "GUI Save Test"
+        put_r = self.client.put(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+            json={"project": project},
+        )
+        self.assertEqual(put_r.status_code, 200)
+        saved = put_r.json()["view"]["raw"]["building"]["name"]
+        self.assertEqual(saved, "GUI Save Test")
+        # restore original name
+        project["building"]["name"] = "Practice Wood Single-Story Sample"
+        self.client.put(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+            json={"project": project},
+        )
+
+    def test_api_project_save_empty_grids_placeholder(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        get_r = self.client.get("/api/project", params={"path": path})
+        self.assertEqual(get_r.status_code, 200)
+        project = get_r.json()["raw"]
+        self.assertEqual(project.get("grids"), [])
+        # GUI used to send one blank placeholder row when grids is empty.
+        project["building"]["name"] = "UK GUI Save Test"
+        project["grids"] = [{"name": "", "direction": "x", "coordinate": 0}]
+        put_r = self.client.put(
+            "/api/project",
+            params={"path": path},
+            json={"project": project},
+        )
+        self.assertEqual(put_r.status_code, 400)
+        project["grids"] = []
+        put_r = self.client.put(
+            "/api/project",
+            params={"path": path},
+            json={"project": project},
+        )
+        self.assertEqual(put_r.status_code, 200)
+        saved_name = put_r.json()["view"]["raw"]["building"]["name"]
+        self.assertEqual(saved_name, "UK GUI Save Test")
+        project["building"]["name"] = "UK 240416 Floors 1-3 Diaphragm Sample"
+        self.client.put(
+            "/api/project",
+            params={"path": path},
+            json={"project": project},
+        )
+
+    def test_api_loads_seismic_view(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        r = self.client.get("/api/loads/seismic", params={"path": path})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["kind"], "seismic")
+        self.assertTrue(body["found"])
+        self.assertIn("summary", body)
+        self.assertIn("mass_level_rows", body)
+        self.assertGreater(len(body["mass_level_rows"]), 0)
+        tab_ids = [t["id"] for t in body["tabs"]]
+        self.assertIn("seismic", tab_ids)
+        self.assertIn("wind", tab_ids)
+        wind_tab = next(t for t in body["tabs"] if t["id"] == "wind")
+        self.assertTrue(wind_tab["enabled"])
+        labels = [row["label"] for row in body["summary"]]
+        self.assertIn("C0 (標準せん断力係数)", labels)
+        self.assertIn("Q1（基底せん断力）", labels)
+        self.assertNotIn("V = Ci×ΣWi", labels)
+        self.assertNotIn("ΣQi", labels)
+        row = body["mass_level_rows"][0]
+        self.assertIn("ci", row)
+        self.assertIn("dlod_label", row)
+
+    def test_api_loads_wind_view(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        r = self.client.get("/api/loads/wind", params={"path": path})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["kind"], "wind")
+        self.assertTrue(body["found"])
+        self.assertIn("visual", body)
+        self.assertIn("cases", body["visual"])
+        self.assertGreater(len(body["visual"]["cases"]), 0)
+        self.assertIn("bbox", body["visual"])
+        self.assertIn("surface_rows", body)
+        self.assertGreater(len(body["surface_rows"]), 0)
+        self.assertIn("story_force_rows", body)
+        self.assertGreater(len(body["story_force_rows"]), 0)
+        self.assertIn("diaphragm_rows", body)
+        self.assertGreater(len(body["diaphragm_rows"]), 0)
+        self.assertTrue(body["can_apply_dlod"])
+
+    def test_api_loads_wind_view_missing_project_returns_404(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_ROOF_240420.dat"
+        r = self.client.get("/api/loads/wind", params={"path": path})
+        self.assertEqual(r.status_code, 404, r.text)
+        self.assertIn("Project file not found", r.json().get("detail", ""))
+
+    def test_api_project_save_seismic_rt_default(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        get_r = self.client.get(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+        )
+        self.assertEqual(get_r.status_code, 200)
+        project = copy.deepcopy(get_r.json()["raw"])
+        self.assertNotIn("rt", project["load_conditions"]["seismic"])
+        bad = copy.deepcopy(project)
+        bad["load_conditions"]["seismic"]["rt"] = 0
+        put_r = self.client.put(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+            json={"project": bad},
+        )
+        self.assertEqual(put_r.status_code, 400)
+        good = copy.deepcopy(project)
+        good["building"]["name"] = "RT Default Save Test"
+        put_r = self.client.put(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+            json={"project": good},
+        )
+        self.assertEqual(put_r.status_code, 200)
+        seismic = put_r.json()["view"]["raw"]["load_conditions"]["seismic"]
+        self.assertNotIn("rt", seismic)
+        project["building"]["name"] = "Practice Wood Single-Story Sample"
+        self.client.put(
+            "/api/project",
+            params={"path": "data/practice_wood_single_story.dat"},
+            json={"project": project},
+        )
+
+    def test_api_project_missing_sidecar(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        r = self.client.get(
+            "/api/project",
+            params={"path": "examples/cantilever.dat"},
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertFalse(body["found"])
+
     def test_index_html(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
@@ -227,6 +467,12 @@ class TestGuiApi(unittest.TestCase):
         self.assertIn("selectionPanel", r.text)
         self.assertIn("selectionMarquee", r.text)
         self.assertIn("elemContextMenu", r.text)
+        self.assertIn("btnProject", r.text)
+        self.assertIn("st-icon-256.png", r.text)
+        self.assertNotIn("app-icon", r.text)
+        self.assertIn("manifest.webmanifest", r.text)
+        r_popup = self.client.get("/static/popup.html")
+        self.assertEqual(r_popup.status_code, 200)
 
     def test_gui_open_url(self):
         from stb_gui.server import gui_open_url
@@ -291,12 +537,46 @@ class TestGuiApi(unittest.TestCase):
         if self.client == None:
             self.skipTest("fastapi not installed")
         with unittest.mock.patch("stb_gui.server.threading.Timer") as timer:
-            inst = timer.return_value
-            r = self.client.post("/api/shutdown")
-            self.assertEqual(r.status_code, 200)
-            self.assertTrue(r.json()["ok"])
-            timer.assert_called_once()
-            inst.start.assert_called_once()
+            with unittest.mock.patch("stb_gui.server._terminate_gui_server") as stop:
+                inst = timer.return_value
+                r = self.client.post("/api/shutdown")
+                self.assertEqual(r.status_code, 200)
+                self.assertTrue(r.json()["ok"])
+                timer.assert_called_once()
+                inst.start.assert_called_once()
+                stop.assert_not_called()
+
+    def test_api_heartbeat_returns_ok(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        r = self.client.post("/api/heartbeat")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+
+    def test_api_gui_config_default(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        r = self.client.get("/api/gui-config")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["exit_with_browser"])
+
+    def test_watchdog_does_not_terminate_when_disabled(self):
+        if self.client is None:
+            self.skipTest("fastapi not installed")
+        import time
+        import unittest.mock as mock
+        import stb_gui.server as server_mod
+        from stb_gui.server import _start_gui_client_watchdog
+
+        with mock.patch.object(server_mod, "_GUI_HEARTBEAT_INTERVAL", 0.01), mock.patch.object(
+            server_mod, "_GUI_HEARTBEAT_TIMEOUT", 0.02
+        ), mock.patch.object(server_mod, "_terminate_gui_server") as stop:
+            server_mod._GUI_WATCHDOG_STARTED = False
+            server_mod._GUI_WATCH_CLIENT = False
+            _start_gui_client_watchdog()
+            server_mod._GUI_LAST_HEARTBEAT = time.time() - 1.0
+            time.sleep(0.05)
+            stop.assert_not_called()
 
 
 if __name__ == "__main__":

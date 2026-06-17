@@ -20,6 +20,7 @@ from diaphragm import (
     diap_type_from_code, diap_src_from_code,
     dcon_trgt_from_code, dcon_conn_from_code,
     dlod_type_from_code,
+    ensure_diaphragm_dregs, collect_diaphragm_input_warnings,
 )
 from wood_wall import (
     WoodRatedWall,
@@ -28,6 +29,10 @@ from wood_wall import (
     wwll_model_from_code, wwll_dir_from_code, wwll_layo_from_code,
 )
 import common
+
+
+def _mdl_items(value):
+    return value if value is not None else []
 
 
 def _clean_items(line):
@@ -92,6 +97,7 @@ def ReadLines(_lns):
     wshears = []
     dmem_specs = []
     auto_dmat_ids = set()
+    input_warnings = []
 
     for i in range(len(_lns)):
 
@@ -162,7 +168,7 @@ def ReadLines(_lns):
         elif key == "EJNT":
 
             eid  = int(items[1])
-            jnts = [0.0] * 4
+            jnts: list[float | None] = [0.0] * 4
 
             #for i in range(12):
             for i in range(4):
@@ -300,8 +306,8 @@ def ReadLines(_lns):
             name = str(items[2]).strip()
             model = wwll_model_from_code(items[3])
             multiplier = float(items[4])
-            length = float(items[5])
-            height = float(items[6])
+            length = _opt_float(items, 5)
+            height = _opt_float(items, 6)
             direction = wwll_dir_from_code(items[7])
             ra = _opt_float(items, 8, 1.0 / 120.0)
             n1 = _opt_int(items, 9)
@@ -383,10 +389,12 @@ def ReadLines(_lns):
             glds.append(GLd(lc, gx, gy, gz))
 
         elif key == "LNME":
-            lid   = int(items[1])
-            lname = str(items[2]).strip()
+            from load_case_types import parse_lnme_fields
 
-            lcases.append(Lcase(lid, lname))
+            lid = int(items[1])
+            label = str(items[3]).strip() if len(items) > 3 else ""
+            load_type, label = parse_lnme_fields(items[2], label)
+            lcases.append(Lcase(lid, load_type, label))
 
         elif key == "LCMB":
 
@@ -450,6 +458,22 @@ def ReadLines(_lns):
         ns = [_find_by_id(nds, nid, "NODE") for nid in nids]
         dmems.append(CSTMembrane3(id, diap, ns[0], ns[1], ns[2]))
 
+    input_warnings.extend(collect_diaphragm_input_warnings(diaps, dopns, dcons))
+    dregs, dreg_warnings = ensure_diaphragm_dregs(diaps, dregs, dmems)
+    input_warnings.extend(dreg_warnings)
+
+    by_node = {n.id: n for n in nds}
+    for w in wwalls:
+        if all(v is not None for v in [w.n1, w.n2, w.n3, w.n4]):
+            from wood_wall import order_wwll_corner_node_ids
+            n1, n2, n3, n4, _ = order_wwll_corner_node_ids(
+                [w.n1, w.n2, w.n3, w.n4], by_node
+            )
+            w.n1, w.n2, w.n3, w.n4 = n1, n2, n3, n4
+
+    for w in wwalls:
+        input_warnings.extend(w.resolve_length_height(nds))
+
     for w in wwalls:
         if w.model_requested == WOOD_WALL_MODEL_SHEAR_PANEL:
             w.generate_shear_panel(nds, wshears, dcons)
@@ -461,50 +485,51 @@ def ReadLines(_lns):
     mdl = Mdl(
         nds, elms, ejnts, mats, secs, cons, lds, elds, alds, glds,
         lcases, lcmbs, axes, plts, date_input,
-        dmats, diaps, dregs, dopns, dmems, dcons, dloads, wwalls, wshears
+        dmats, diaps, dregs, dopns, dmems, dcons, dloads, wwalls, wshears,
+        input_warnings
     )
 
     return mdl
 
 def RegisterInputData(_mdl: Mdl):
     
-    nds  = sorted(_mdl.nds,   key=lambda n: n.id)
-    elms = sorted([e for e in _mdl.elms if not getattr(e, "auto_generated", False)], key=lambda e: e.id)
-    ejnts= sorted([e for e in _mdl.ejnts if not getattr(e, "auto_generated", False)], key=lambda e: e.eid)
-    mats = sorted([m for m in _mdl.mats if not getattr(m, "auto_generated", False)], key=lambda m: m.id)
-    secs = sorted([s for s in _mdl.secs if not getattr(s, "auto_generated", False)], key=lambda s: s.id)
-    dmats= sorted(_mdl.dmats, key=lambda m: m.id)
-    diaps= sorted(_mdl.diaps, key=lambda d: d.id)
-    dregs= list(_mdl.dregs)
-    dopns= list(_mdl.dopns)
-    dmems= sorted(_mdl.dmems, key=lambda m: m.id)
-    dcons= [dc for dc in list(getattr(_mdl, "dcons", [])) if not getattr(dc, "auto_generated", False)]
-    dloads = sorted(getattr(_mdl, "dloads", []), key=lambda dl: (dl.diap_id, dl.lc, dl.load_type))
-    wwalls = sorted(getattr(_mdl, "wwalls", []), key=lambda w: w.id)
-    cons = sorted(_mdl.cons,  key=lambda c: c.nid)
+    nds  = sorted(_mdl_items(_mdl.nds),   key=lambda n: n.id)
+    elms = sorted([e for e in _mdl_items(_mdl.elms) if not getattr(e, "auto_generated", False)], key=lambda e: e.id)
+    ejnts= sorted([e for e in _mdl_items(_mdl.ejnts) if not getattr(e, "auto_generated", False)], key=lambda e: e.eid)
+    mats = sorted([m for m in _mdl_items(_mdl.mats) if not getattr(m, "auto_generated", False)], key=lambda m: m.id)
+    secs = sorted([s for s in _mdl_items(_mdl.secs) if not getattr(s, "auto_generated", False)], key=lambda s: s.id)
+    dmats= sorted(_mdl_items(_mdl.dmats), key=lambda m: m.id)
+    diaps= sorted(_mdl_items(_mdl.diaps), key=lambda d: d.id)
+    dregs= list(_mdl_items(_mdl.dregs))
+    dopns= list(_mdl_items(_mdl.dopns))
+    dmems= sorted(_mdl_items(_mdl.dmems), key=lambda m: m.id)
+    dcons= [dc for dc in _mdl_items(_mdl.dcons) if not getattr(dc, "auto_generated", False)]
+    dloads = sorted(_mdl_items(_mdl.dloads), key=lambda dl: (dl.diap_id, dl.lc, dl.load_type))
+    wwalls = sorted(_mdl_items(_mdl.wwalls), key=lambda w: w.id)
+    cons = sorted(_mdl_items(_mdl.cons),  key=lambda c: c.nid)
 
-    lds_w_o_combi = [l for l in _mdl.lds if not l.combi]
+    lds_w_o_combi = [l for l in _mdl_items(_mdl.lds) if not l.combi]
     lds  = sorted(lds_w_o_combi,   key=lambda l: l.nid)
 
-    elds_w_o_combi = [l for l in _mdl.elds if not l.combi]
+    elds_w_o_combi = [l for l in _mdl_items(_mdl.elds) if not l.combi]
     elds = sorted(elds_w_o_combi,  key=lambda l: l.eid)
 
-    alds = sorted(_mdl.alds,  key=lambda l: l.lc)
+    alds = sorted(_mdl_items(_mdl.alds),  key=lambda l: l.lc)
 
-    glds_w_o_combi = [l for l in _mdl.glds if not l.combi]
+    glds_w_o_combi = [l for l in _mdl_items(_mdl.glds) if not l.combi]
     glds = sorted(glds_w_o_combi,  key=lambda g: g.lc)
 
-    lcases = sorted(_mdl.lcases, key=lambda l: l.lc)
-    lcmbs = sorted(_mdl.lcmbs, key=lambda l: l.lc)
-    axes = sorted(_mdl.axes,  key=lambda a: a.id)
-    plts = sorted(_mdl.plts,  key=lambda p: p.id)
+    lcases = sorted(_mdl_items(_mdl.lcases), key=lambda l: l.lc)
+    lcmbs = sorted(_mdl_items(_mdl.lcmbs), key=lambda l: l.lc)
+    axes = sorted(_mdl_items(_mdl.axes),  key=lambda a: a.id)
+    plts = sorted(_mdl_items(_mdl.plts),  key=lambda p: p.id)
     
     lns  = ""
 
     ## header
     lns += "# --- HEADER INPUT ---\n"
     lns += "\n"
-    lns += "# DATE OF INPUT DATA: " + _mdl.date_input 
+    lns += "# DATE OF INPUT DATA: " + str(_mdl.date_input or "")
     lns += "\n"
     lns += "# NUM. OF MATERIALS: " + str(len(mats)) + "\n"
     lns += "# NUM. OF DIAPHRAGM MATERIALS: " + str(len(dmats)) + "\n"
@@ -570,13 +595,17 @@ def RegisterInputData(_mdl: Mdl):
     lns += "#   SRC:  0=DMAT  1=TIMBER_FLOOR  2=TIMBER_ROOF\n"
     lns += "#   MAG/ID: SRC=0 -> DMAT ID, SRC=1/2 -> multiplier\n"
     lns += "#   T, HMAX: (mm)   RA: (rad)\n"
+    lns += "#   HMAX is optional metadata only (not used by the current solver).\n"
     for d in diaps:
         lns += d.OutputDiapInfo()
     lns += "\n"
 
     lns += "# --- DIAPHRAGM OUTER POLYGON(DREG) ---\n"
     lns += "#    DIAP ID,  NODE1,  NODE2,  NODE3, ...\n"
+    lns += "#   Optional when DMEM is supplied; outer boundary is derived from DMEM if omitted.\n"
     for r in dregs:
+        if getattr(r, "auto_generated", False):
+            continue
         lns += "DREG, {0: >6}".format(r.diap_id)
         for nid in r.node_ids:
             lns += ", {0: >6}".format(nid)
@@ -585,6 +614,7 @@ def RegisterInputData(_mdl: Mdl):
 
     lns += "# --- DIAPHRAGM OPENING(DOPN) ---\n"
     lns += "#    DIAP ID,  NODE1,  NODE2,  NODE3, ...\n"
+    lns += "#   Parsed only; opening cut-outs are not applied in the current solver.\n"
     for o in dopns:
         lns += "DOPN, {0: >6}".format(o.diap_id)
         for nid in o.node_ids:
@@ -600,6 +630,7 @@ def RegisterInputData(_mdl: Mdl):
 
     lns += "# --- DIAPHRAGM CONNECTION(DCON) ---\n"
     lns += "#    DIAP, TRGT,    ID, CONN,   TOL, SPACING\n"
+    lns += "#   SPACING is optional metadata only (not used by the current MPC generator).\n"
     lns += "#   TRGT: 0=AUTO  1=ELEM  2=NODE\n"
     lns += "#   CONN: 0=RIGID  1=OPEN\n"
     for dc in dcons:
@@ -618,7 +649,7 @@ def RegisterInputData(_mdl: Mdl):
     lns += "#         ID,     NAME, MODEL,    M,      L,      H, DIR,       RA, N1, N2, N3, N4, DIAP, LAYO\n"
     lns += "#   MODEL: 0=BRACE  1=PANEL  2=MEMBRANE(reserved)\n"
     lns += "#   DIR: 0=X  1=Y    LAYO: 0=SINGLE  1=X-BRACE\n"
-    lns += "#   M: multiplier   L,H: (m)   RA: (rad)\n"
+    lns += "#   M: multiplier   L,H: (m, optional; derived from N1..N4 when blank)   RA: (rad)\n"
     for w in wwalls:
         lns += w.output_info()
     lns += "\n"
@@ -644,7 +675,8 @@ def RegisterInputData(_mdl: Mdl):
 
     ## load name
     lns += "# --- LOAD NAME(LNME) ---\n"
-    lns += "#       LC,     NAME\n"
+    lns += "#       LC,   TYPE,     LABEL\n"
+    lns += "#   TYPE: 1=DL  2=LL  3=LL(E)  4=S  5=W  6=E  7=CUSTOM(label required)\n"
     for l in lcases:
         lns += l.OutputLnameInfo()
     lns += "\n"
@@ -716,16 +748,19 @@ def RegisterInputData(_mdl: Mdl):
 
 def RegisterResultData(_mdl: Mdl):
 
-    nds  = sorted(_mdl.nds,  key=lambda n: n.id)
-    elms = sorted(_mdl.elms, key=lambda e: e.id)
+    nds  = sorted(_mdl_items(_mdl.nds),  key=lambda n: n.id)
+    elms = sorted(_mdl_items(_mdl.elms), key=lambda e: e.id)
     #mats = sorted(_mdl.mats, key=lambda m: m.id)
-    secs = sorted(_mdl.secs, key=lambda s: s.id)
+    secs = sorted(_mdl_items(_mdl.secs), key=lambda s: s.id)
     #cons = sorted(_mdl.cons, key=lambda c: c.nid)
     #lds  = sorted(_mdl.lds,  key=lambda l: l.nid)
     #elds = sorted(_mdl.elds, key=lambda l: l.eid)
     #glds = sorted(_mdl.glds, key=lambda g: g.lc)
 
-    lcs  = sorted(_mdl.lcs)
+    model_lcs = _mdl_items(_mdl.lcs)
+    lcs  = sorted(model_lcs)
+    model_cons = _mdl_items(_mdl.cons)
+    model_dmems = _mdl_items(_mdl.dmems)
 
     lns  = ""
 
@@ -744,7 +779,7 @@ def RegisterResultData(_mdl: Mdl):
     # lns += "\n"
 
     lns += "# --- HEADER OUTPUT --- \n" 
-    lns += "# DATE OF ANALYSIS: " + _mdl.date_analysis + "\n\n"
+    lns += "# DATE OF ANALYSIS: " + str(_mdl.date_analysis or "") + "\n\n"
 
     ## section properties
     lns += "# --- SECTION PROPS ---\n"
@@ -778,7 +813,7 @@ def RegisterResultData(_mdl: Mdl):
         # lc : loadcase
         # clc: computational loadcase id 
 
-        clc = _mdl.lcs.index(lc) 
+        clc = model_lcs.index(lc) 
         for n in nds: 
             ds = n.disps[:, clc]
             props = ["NDSP", 
@@ -796,14 +831,14 @@ def RegisterResultData(_mdl: Mdl):
 
     ## reaction forces
     lns += "# --- REACTION FORCE ---\n"
-    lns += "#        LC,  NODE,        RX,        RY,        RZ,       RMX,       RMY,       RMZ\n"
+    lns += "#        LC,  NODE,        TX,        TY,        TZ,        RX,        RY,        RZ\n"
     lns += "#                         (kN)       (kN)       (kN)      (kNm)      (kNm)      (kNm)\n"
     
-    for i in range(len(_mdl.lcs)): 
-        lc   = _mdl.lcs[i]
+    for i in range(len(model_lcs)): 
+        lc   = model_lcs[i]
         #csts = list(filter(lambda l: l.lc == lc, _))
 
-        for c in _mdl.cons:
+        for c in model_cons:
             nid   = c.nd.id
             rs    = c.nd.reacts[i] # [lc][vals]
             props = ["REAC",
@@ -830,7 +865,7 @@ def RegisterResultData(_mdl: Mdl):
         # lc : loadcase
         # clc: computational loadcase id 
 
-        clc = _mdl.lcs.index(lc) 
+        clc = model_lcs.index(lc) 
         for e in elms: 
             ef = e.forces[:, clc]
 
@@ -864,13 +899,13 @@ def RegisterResultData(_mdl: Mdl):
     lns += "\n"
 
     ## membrane element strains, stresses and membrane forces
-    if getattr(_mdl, "dmems", None):
+    if model_dmems:
         lns += "# --- MEMBRANE ELEMENT STRESS ---\n"
         lns += "#        LC,  DMEM,       EXX,       EYY,      GXY,        SX,        SY,       TXY,        NX,        NY,       NXY\n"
         lns += "#                           (-)       (-)       (-)   (N/mm2)   (N/mm2)   (N/mm2)    (kN/m)    (kN/m)    (kN/m)\n"
         for lc in lcs:
-            clc = _mdl.lcs.index(lc)
-            for m in _mdl.dmems:
+            clc = model_lcs.index(lc)
+            for m in model_dmems:
                 if m.strains is None or m.stresses is None or m.mforces is None:
                     continue
                 strain = m.strains[:, clc]
