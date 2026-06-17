@@ -7,9 +7,10 @@ _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _STB_ROOT not in sys.path:
     sys.path.insert(0, _STB_ROOT)
 
-from stb_engine import run_from_file
+from stb_engine import parse_input, read_input_file, run_from_file
 from stb_project import (
     ProjectSchemaError,
+    apply_load_combinations_to_model,
     load_project_file,
     load_project_for_dat,
     project_path_for_dat,
@@ -164,6 +165,71 @@ class TestProjectSchema(unittest.TestCase):
         self.assertAlmostEqual(s.height_m, 8.6)
         self.assertAlmostEqual(s.steel_ratio_alpha, 0.25)
         self.assertAlmostEqual(s.tc, 0.6)
+
+    def test_load_combinations_round_trip(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {"ci": 0.2},
+            "load_combinations": [
+                {
+                    "load_case": 10,
+                    "name": "L+S",
+                    "duration": "SHORT_TERM",
+                    "factors": [1.0, 0.7],
+                    "load_cases": [1, 2],
+                }
+            ],
+        }
+
+        project = validate_project_dict(data)
+        combo = project.load_conditions.load_combinations[0]
+        self.assertEqual(combo.load_case, 10)
+        self.assertEqual(combo.duration, "SHORT_TERM")
+        self.assertEqual(combo.factors, (1.0, 0.7))
+        reparsed = validate_project_dict(project.to_dict())
+        self.assertEqual(reparsed.load_conditions.load_combinations[0], combo)
+
+    def test_load_combinations_reject_mismatched_terms(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {"ci": 0.2},
+            "load_combinations": [
+                {
+                    "load_case": 10,
+                    "name": "bad",
+                    "duration": "LONG_TERM",
+                    "factors": [1.0, 0.7],
+                    "load_cases": [1],
+                }
+            ],
+        }
+
+        with self.assertRaises(ProjectSchemaError):
+            validate_project_dict(data)
+
+    def test_apply_project_load_combinations_to_model(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {"ci": 0.2},
+            "load_combinations": [
+                {
+                    "load_case": 10,
+                    "name": "PX",
+                    "duration": "LONG_TERM",
+                    "factors": [2.0],
+                    "load_cases": [0],
+                }
+            ],
+        }
+        project = validate_project_dict(data)
+        mdl = parse_input(read_input_file(os.path.join(_STB_ROOT, "data", "input01.dat")))
+
+        applied = apply_load_combinations_to_model(mdl, project)
+
+        self.assertTrue(applied)
+        self.assertEqual(mdl.lcmbs[0].lc, 10)
+        self.assertEqual(mdl.lcmbs[0].duration, "LONG_TERM")
+        self.assertTrue(any(l.lc == 10 and l.combi for l in mdl.lds))
 
     def test_to_dict_round_trip(self):
         project = validate_project_dict(_minimal_project())

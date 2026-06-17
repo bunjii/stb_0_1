@@ -241,7 +241,37 @@
         }
       ],
       "member_loads": []
-    }
+    },
+    "load_combinations": [
+      {
+        "load_case": 11,
+        "name": "LT1",
+        "duration": "LONG_TERM",
+        "factors": [
+          1.0,
+          1.0
+        ],
+        "load_cases": [
+          0,
+          2
+        ]
+      },
+      {
+        "load_case": 21,
+        "name": "ST1(EX+)",
+        "duration": "SHORT_TERM",
+        "factors": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "load_cases": [
+          0,
+          2,
+          1
+        ]
+      }
+    ]
   },
   "report": {
     "title": "UK 3-Story Diaphragm Seismic Sample",

@@ -277,6 +277,8 @@ def write_model_file(rel_path, text):
     """Write model text to data/ or examples/. Returns normalized relative path."""
 
     rel = normalize_model_relpath(rel_path)
+    if rel is None:
+        raise ValueError("Model path is required")
     if not _model_dir_allowed(rel):
         raise ValueError("Model path must be a .dat file under data/ or examples/")
     full = os.path.join(project_root(), rel.replace("/", os.sep))

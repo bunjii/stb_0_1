@@ -923,7 +923,7 @@ html[data-theme="dark"] .btn-disp-contour-auto:hover {
 
 html[data-theme="light"],
 html[data-theme="light"] body {
-  background: #f4f6fb;
+  background: #f4f5f7;
   color: #1f2937;
   accent-color: #3559d6;
 }

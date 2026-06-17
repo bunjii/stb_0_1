@@ -31,11 +31,12 @@ class Lcase:
         return record_line("LNME", fmts, values) + "\n"
 
 class Lcmb:
-    def __init__(self, _lc, _name, _fcs, _lcs):
-        self.lc  = _lc
-        self.name = _name
-        self.fcs = _fcs # factors
-        self.lcs = _lcs # lcases
+    def __init__(self, _lc, _name, _fcs, _lcs, _duration="LONG_TERM"):
+        self.lc = int(_lc)
+        self.name = str(_name)
+        self.fcs = [float(f) for f in _fcs] # factors
+        self.lcs = [int(lc) for lc in _lcs] # lcases
+        self.duration = str(_duration or "LONG_TERM").strip().upper()
 
     def OutputLcmbInfo(self):
 

@@ -1,5 +1,6 @@
 from stb_project.schema import (
     ALLOWED_BASE_MASS_POLICIES,
+    ALLOWED_LOAD_COMBINATION_DURATIONS,
     ALLOWED_MASS_ROLES,
     ALLOWED_ROUGHNESS_CATEGORIES,
     ALLOWED_WIND_DIAPHRAGM_INPUT_MODES,
@@ -8,6 +9,7 @@ from stb_project.schema import (
     DEFAULT_WIND_DIAPHRAGM_INPUT_MODE,
     DEFAULT_WIND_SURFACE_ROLE,
     DEFAULT_BASE_MASS_POLICY,
+    DEFAULT_LOAD_COMBINATION_DURATION,
     DEFAULT_PROJECT_SUFFIX,
     DEFAULT_SEISMIC_RT,
     DEFAULT_SEISMIC_TC,
@@ -28,6 +30,7 @@ from stb_project.schema import (
     DiaphragmAssignment,
     GridLine,
     LoadConditionSettings,
+    LoadCombinationSettings,
     RoughnessParams,
     SeismicDirectionSettings,
     SeismicLoadSettings,
@@ -64,5 +67,10 @@ from stb_project.schema import (
     load_project_for_dat,
     project_path_for_dat,
     validate_project_dict,
+)
+from stb_project.load_combinations import (
+    apply_load_combinations_to_model,
+    apply_project_load_combinations_to_dat,
+    build_lcmb_block,
 )
 

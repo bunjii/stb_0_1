@@ -11,6 +11,7 @@ from stb_project import (
     DEFAULT_SEISMIC_TC,
     ProjectDefinition,
     ProjectSchemaError,
+    apply_project_load_combinations_to_dat,
     effective_seismic_ci,
     load_project_for_dat,
     project_path_for_dat,
@@ -96,6 +97,8 @@ def save_project_json_for_model(dat_relpath: str, raw: dict) -> Dict[str, Any]:
     with open(project_path, "w", encoding="utf-8") as fh:
         json.dump(project.to_dict(), fh, indent=2, ensure_ascii=False)
         fh.write("\n")
+
+    apply_project_load_combinations_to_dat(full, project)
 
     return load_project_view_for_model(dat_relpath)
 

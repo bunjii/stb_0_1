@@ -1309,3 +1309,12 @@ DLOD,     20,    6,    0,        0.0, 0.08882947544023646
 DLOD,     10,    7,    0,       -0.0, -0.20344400620586078
 DLOD,     20,    7,    0,       -0.0, -0.08882947544023646
 # --- END WIND DLOD (auto) ---
+
+# --- LOAD COMBINATION(LCMB) ---
+#       LC,     NAME,   FC1,   LC1,   FC2,   LC2,   FC3,   LC3,...
+# --- PROJECT LCMB (auto) ---
+LCMB,   11,      LT1,   1.0,     0,   1.0,     2
+# LCMB_DURATION, 11, LONG_TERM
+LCMB,   21, ST1(EX+),   1.0,     0,   1.0,     2,   1.0,     1
+# LCMB_DURATION, 21, SHORT_TERM
+# --- END PROJECT LCMB (auto) ---

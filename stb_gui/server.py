@@ -263,6 +263,7 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             full = resolve_model_path(path)
             data = save_project_json_for_model(path, project)
             invalidate_model_session(full)
+            invalidate_solved_model_cache(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:

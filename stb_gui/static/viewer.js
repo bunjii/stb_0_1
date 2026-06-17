@@ -366,6 +366,7 @@ let supportGizmoEntries = [];
 let reactionForceEntries = [];
 let nodeLabelEntries = [];
 let elemLabelEntries = [];
+let forceLabelEntries = [];
 let _nodeLabelLeaderMat = null;
 let currentModelPath = null;
 const inputEditors = new Map();
@@ -378,7 +379,7 @@ const SECTION_SOLID_MAX_ELEMENTS = 2500;
 
 const THEME_RENDER_COLORS = {
   light: {
-    background: 0xe1dee4,
+    background: 0xf4f5f7,
     element: 0x333333,
     node: 0x333333,
     membraneEdge: 0x616161,
@@ -2933,6 +2934,7 @@ function animate() {
   updateReactionForceDisplay();
   updateNodeLabelPositions();
   updateElemLabelPositions();
+  updateForceLabelPositions();
   renderer.render(scene, camera);
 }
 
@@ -4576,6 +4578,75 @@ function updateElemLabelPositions() {
   if (!camera || !renderer || elemLabelEntries.length === 0) return;
   for (const entry of elemLabelEntries) {
     updateElemLabelEntry(entry, camera, renderer);
+  }
+}
+
+function computeForceLabelPlacement(diagramPt, axisPt, camera, renderer) {
+  const width = renderer.domElement.clientWidth;
+  const height = renderer.domElement.clientHeight;
+  const leaderStart = diagramPt.clone();
+  if (width < 1 || height < 1) {
+    const out = diagramPt.clone().sub(axisPt);
+    if (out.lengthSq() < 1e-12) out.set(0, 1, 0);
+    else out.normalize();
+    return {
+      labelPos: diagramPt.clone().addScaledVector(out, worldLengthForScreenPixels(28, diagramPt, camera, renderer) || 0.05),
+      leaderStart: leaderStart,
+    };
+  }
+
+  _ndcScratch.copy(diagramPt).project(camera);
+  const ndcZ = _ndcScratch.z;
+  _ndcP0.copy(axisPt).project(camera);
+
+  let sx = _ndcScratch.x - _ndcP0.x;
+  let sy = _ndcScratch.y - _ndcP0.y;
+  const sLen = Math.hypot(sx, sy);
+  if (sLen < 1e-8) {
+    sx = 20 / width * 2;
+    sy = 24 / height * 2;
+  } else {
+    sx /= sLen;
+    sy /= sLen;
+  }
+
+  const labelPx = 30;
+  _labelNdc.set(
+    _ndcScratch.x + (sx * labelPx / width) * 2,
+    _ndcScratch.y + (sy * labelPx / height) * 2,
+    ndcZ
+  );
+  _leaderEnd.copy(_labelNdc).unproject(camera);
+
+  return { labelPos: _leaderEnd.clone(), leaderStart: leaderStart };
+}
+
+function updateForceLabelEntry(entry, camera, renderer) {
+  const placement = computeForceLabelPlacement(
+    entry.diagramPt,
+    entry.axisPt,
+    camera,
+    renderer
+  );
+  entry.sprite.position.copy(placement.labelPos);
+  const leaderEnd = labelLeaderEnd(
+    placement.labelPos,
+    placement.leaderStart,
+    entry.sprite,
+    camera,
+    renderer
+  );
+  const pos = entry.line.geometry.attributes.position;
+  pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
+  pos.setXYZ(1, leaderEnd.x, leaderEnd.y, leaderEnd.z);
+  pos.needsUpdate = true;
+  entry.line.geometry.computeBoundingSphere();
+}
+
+function updateForceLabelPositions() {
+  if (!camera || !renderer || forceLabelEntries.length === 0) return;
+  for (const entry of forceLabelEntries) {
+    updateForceLabelEntry(entry, camera, renderer);
   }
 }
 
@@ -6903,22 +6974,40 @@ function addForceStemAndSpline(stemPts, splinePts, group) {
   }
 }
 
-function addForceValueLabel(text, point, model, group) {
-  const span = modelSpan(model);
+function addForceValueLabelWithLeader(text, diagramPt, axisPt, span, group) {
   const sprite = makeTextSprite(text, span, {
-    bg: "rgba(0, 71, 171, " + ALPHA.forceValueBg + ")",
-    fg: "#ffffff",
-    pad: 6,
     scaleFactor: forceLabelScaleFactor(),
+    bg: null,
+    fg: colorHex(COLORS.nodeLabel),
   });
   sprite.renderOrder = 20;
-  sprite.position.copy(point);
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(6, 3));
+  const line = new THREE.Line(lineGeo, nodeLabelLeaderMaterial());
+  line.frustumCulled = false;
+  line.renderOrder = 19;
+  const entry = {
+    diagramPt: diagramPt.clone(),
+    axisPt: axisPt.clone(),
+    sprite: sprite,
+    line: line,
+  };
+  updateForceLabelEntry(entry, camera, renderer);
   group.add(sprite);
+  group.add(line);
+  forceLabelEntries.push(entry);
+}
+
+function anchorDiagramValue(rawValue, rawMid, rawEnd, targetMid, targetEnd, t) {
+  const midCorrection = (targetMid - rawMid) * 4 * t * (1 - t);
+  const endCorrection = (targetEnd - rawEnd) * (2 * t * t - t);
+  return rawValue + midCorrection + endCorrection;
 }
 
 function buildForceDiagrams(model) {
   clearGroup(forceGroup);
   clearGroup(forceLabelGroup);
+  forceLabelEntries = [];
 
   const forceId = parseInt(el.forceSelect.value, 10) || 0;
   const lcKey = el.lcSelect.value;
@@ -6968,10 +7057,11 @@ function buildForceDiagrams(model) {
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: ni, pt: splinePts[0] },
-        { val: nXc, pt: mp },
-        { val: nj, pt: splinePts[splinePts.length - 1] },
+        { val: ni, pt: splinePts[0], axisPt: p0 },
+        { val: nXc, pt: mp, axisPt: pMid },
+        { val: nj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 2) {
       const vy = new THREE.Vector3().fromArray(e.vy);
@@ -6991,10 +7081,11 @@ function buildForceDiagrams(model) {
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: qyi, pt: splinePts[0] },
-        { val: qXc, pt: mp },
-        { val: qyj, pt: splinePts[splinePts.length - 1] },
+        { val: qyi, pt: splinePts[0], axisPt: p0 },
+        { val: qXc, pt: mp, axisPt: pMid },
+        { val: qyj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 3) {
       const vz = new THREE.Vector3().fromArray(e.vz);
@@ -7014,10 +7105,11 @@ function buildForceDiagrams(model) {
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: qzi, pt: splinePts[0] },
-        { val: qXc, pt: mp },
-        { val: qzj, pt: splinePts[splinePts.length - 1] },
+        { val: qzi, pt: splinePts[0], axisPt: p0 },
+        { val: qXc, pt: mp, axisPt: pMid },
+        { val: qzj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 5) {
       let vz = new THREE.Vector3().fromArray(e.vz);
@@ -7025,7 +7117,9 @@ function buildForceDiagrams(model) {
       const wzi = lds[2], wzj = lds[5];
       const qzi = f[2], myi = f[4], myj = f[10];
       const wXc = wzi + (wzj - wzi) * 0.5;
-      const mXc = myi + qzi * 0.5 * e.len + (1 / 6) * (wzi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXcCalc = myi + qzi * 0.5 * e.len + (1 / 6) * (wzi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXc = Number.isFinite(f[12]) ? f[12] : mXcCalc;
+      const mEndCalc = myi + qzi * e.len + (1 / 6) * (wzi + 2 * wzj) * e.len * e.len;
       const mp = new THREE.Vector3().lerpVectors(p0, p1, 0.5).addScaledVector(vz, -dispFac * mXc);
 
       for (let i = 0; i <= divNum; i++) {
@@ -7033,15 +7127,17 @@ function buildForceDiagrams(model) {
         const x = t * e.len;
         const pt = new THREE.Vector3().lerpVectors(p0, p1, t);
         const wX = wzi + (wzj - wzi) * t;
-        const mX = myi + qzi * x + (1 / 6) * (wzi + 2 * wX) * x * x;
+        const mRaw = myi + qzi * x + (1 / 6) * (wzi + 2 * wX) * x * x;
+        const mX = anchorDiagramValue(mRaw, mXcCalc, mEndCalc, mXc, myj, t);
         const ptF = pt.clone().addScaledVector(vz, -dispFac * mX);
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: myi, pt: splinePts[0] },
-        { val: mXc, pt: mp },
-        { val: myj, pt: splinePts[splinePts.length - 1] },
+        { val: myi, pt: splinePts[0], axisPt: p0 },
+        { val: mXc, pt: mp, axisPt: pMid },
+        { val: myj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     } else if (forceId === 6) {
       let vy = new THREE.Vector3().fromArray(e.vy);
@@ -7049,7 +7145,9 @@ function buildForceDiagrams(model) {
       const wyi = lds[1], wyj = lds[4];
       const qyi = f[1], mzi = f[5], mzj = f[11];
       const wXc = wyi + (wyj - wyi) * 0.5;
-      const mXc = mzi - qyi * 0.5 * e.len - (1 / 6) * (wyi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXcCalc = mzi - qyi * 0.5 * e.len - (1 / 6) * (wyi + 2 * wXc) * (0.5 * e.len) ** 2;
+      const mXc = Number.isFinite(f[13]) ? f[13] : mXcCalc;
+      const mEndCalc = mzi - qyi * e.len - (1 / 6) * (wyi + 2 * wyj) * e.len * e.len;
       const mp = new THREE.Vector3().lerpVectors(p0, p1, 0.5).addScaledVector(vy, dispFac * mXc);
 
       for (let i = 0; i <= divNum; i++) {
@@ -7057,22 +7155,31 @@ function buildForceDiagrams(model) {
         const x = t * e.len;
         const pt = new THREE.Vector3().lerpVectors(p0, p1, t);
         const wX = wyi + (wyj - wyi) * t;
-        const mX = mzi - qyi * x - (1 / 6) * (wyi + 2 * wX) * x * x;
+        const mRaw = mzi - qyi * x - (1 / 6) * (wyi + 2 * wX) * x * x;
+        const mX = anchorDiagramValue(mRaw, mXcCalc, mEndCalc, mXc, mzj, t);
         const ptF = pt.clone().addScaledVector(vy, dispFac * mX);
         stemPts.push(pt.x, pt.y, pt.z, ptF.x, ptF.y, ptF.z);
         splinePts.push(ptF);
       }
+      const pMid = new THREE.Vector3().lerpVectors(p0, p1, 0.5);
       labels.push(
-        { val: mzi, pt: splinePts[0] },
-        { val: mXc, pt: mp },
-        { val: mzj, pt: splinePts[splinePts.length - 1] },
+        { val: mzi, pt: splinePts[0], axisPt: p0 },
+        { val: mXc, pt: mp, axisPt: pMid },
+        { val: mzj, pt: splinePts[splinePts.length - 1], axisPt: p1 },
       );
     }
 
     addForceStemAndSpline(stemPts, splinePts, forceGroup);
     if (showValues) {
+      const span = modelSpan(model);
       for (const item of labels) {
-        addForceValueLabel(formatForceValue(item.val), item.pt, model, forceLabelGroup);
+        addForceValueLabelWithLeader(
+          formatForceValue(item.val),
+          item.pt,
+          item.axisPt,
+          span,
+          forceLabelGroup
+        );
       }
     }
   }
@@ -7451,6 +7558,18 @@ function parseCsvInts(text) {
   });
 }
 
+function parseCsvNumbers(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+    const n = Number(s);
+    if (!Number.isFinite(n)) {
+      throw new Error("数値リストの形式が不正です: " + text);
+    }
+    return n;
+  });
+}
+
 function formatCsvInts(values) {
   if (!values || !values.length) return "";
   return values.join(", ");
@@ -7468,6 +7587,9 @@ function parseProjectFieldValue(type, raw, path) {
   }
   if (type === "csv_int") {
     return parseCsvInts(text);
+  }
+  if (type === "csv_number") {
+    return parseCsvNumbers(text);
   }
   if (type === "bool") {
     return text === "true" || text === "1" || text === "はい";
@@ -7515,6 +7637,10 @@ function parseProjectTableCellValue(type, raw) {
     if (!text) return [];
     return parseCsvInts(text);
   }
+  if (type === "csv_number") {
+    if (!text) return [];
+    return parseCsvNumbers(text);
+  }
   if (type === "bool") {
     return text === "true" || text === "1" || text === "はい";
   }
@@ -7530,7 +7656,7 @@ function shouldIncludeProjectTableRow(row, columns) {
   if (keyColumn.type === "number" || keyColumn.type === "optional_int") {
     return value != null && value !== "" && Number.isFinite(Number(value));
   }
-  if (keyColumn.type === "csv_int") {
+  if (keyColumn.type === "csv_int" || keyColumn.type === "csv_number") {
     return Array.isArray(value) && value.length > 0;
   }
   return String(value ?? "").trim() !== "";
@@ -7609,6 +7735,9 @@ function formatProjectFieldValue(type, value) {
   if (type === "csv_int") {
     return formatCsvInts(value);
   }
+  if (type === "csv_number") {
+    return formatCsvInts(value);
+  }
   if (type === "bool") {
     return value ? "true" : "false";
   }
@@ -7632,7 +7761,7 @@ function renderProjectFieldInput(field, inputId) {
     let html = "<select class=\"proj-input\" data-path=\"" + escapeHtml(field.path) + "\" data-type=\"select\" id=\"" + inputId + "\">";
     for (const opt of field.options || []) {
       html += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(field.value) ? " selected" : "") + ">"
-        + escapeHtml(opt) + "</option>";
+        + escapeHtml(projectOptionLabel(field, opt)) + "</option>";
     }
     html += "</select>" + hint;
     return html;
@@ -7654,18 +7783,26 @@ function projectTableCellTdClass(col) {
   return " proj-cell-text";
 }
 
+function projectOptionLabel(def, opt) {
+  const labels = def && def.option_labels;
+  if (labels && Object.prototype.hasOwnProperty.call(labels, opt)) {
+    return labels[opt];
+  }
+  return opt;
+}
+
 function renderProjectEditTableCellHtml(col, cellId, val) {
-  if (col.type === "csv_int") {
+  if (col.type === "csv_int" || col.type === "csv_number") {
     const cellValue = formatCsvInts(val);
     return "<input class=\"proj-cell-input proj-cell-text\" type=\"text\" data-col=\""
-      + escapeHtml(col.path) + "\" data-type=\"csv_int\" id=\"" + cellId + "\" value=\""
+      + escapeHtml(col.path) + "\" data-type=\"" + escapeHtml(col.type) + "\" id=\"" + cellId + "\" value=\""
       + escapeHtml(cellValue) + "\">";
   }
   if (col.type === "select") {
     let select = "<select class=\"proj-cell-input\" data-col=\"" + escapeHtml(col.path) + "\" data-type=\"select\" id=\"" + cellId + "\">";
     for (const opt of col.options || []) {
       select += "<option value=\"" + escapeHtml(opt) + "\"" + (String(opt) === String(val) ? " selected" : "") + ">"
-        + escapeHtml(opt) + "</option>";
+        + escapeHtml(projectOptionLabel(col, opt)) + "</option>";
     }
     select += "</select>";
     return select;
@@ -8316,7 +8453,7 @@ function initTextDocumentWindow(w, text, title, pdfName, saveName) {
     doc.title = title;
     const titleEl = doc.querySelector("header.doc-title");
     if (titleEl) titleEl.textContent = title;
-    const pre = doc.querySelector("pre");
+    const pre = doc.querySelector("pre.doc-content") || doc.querySelector("pre");
     if (pre) pre.textContent = text;
     return;
   }
@@ -8326,18 +8463,19 @@ function initTextDocumentWindow(w, text, title, pdfName, saveName) {
   doc.write("<title>");
   doc.write(title);
   doc.write("</title><style>");
-  doc.write("body{margin:0;background:#1e1e24;color:#e8e6ed;}");
+  doc.write("html,body{height:100%;margin:0;}");
+  doc.write("body{display:flex;flex-direction:column;overflow:hidden;background:#1e1e24;color:#e8e6ed;}");
   doc.write("pre,body{font-family:'Liberation Mono','DejaVu Sans Mono','Nimbus Mono PS','Courier New',Courier,monospace;}");
-  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}");
+  doc.write(".toolbar{padding:8px 12px;background:#252530;border-bottom:1px solid #3a3a48;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0;}");
   doc.write(".toolbar button{background:#e1dee4;color:#111;border:none;border-radius:4px;padding:6px 12px;font-weight:600;cursor:pointer;}");
-  doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;}");
-  doc.write("pre{margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
+  doc.write("header.doc-title{padding:8px 12px;font-weight:600;border-bottom:1px solid #3a3a48;font-size:13px;flex-shrink:0;}");
+  doc.write("pre.doc-content{flex:1 1 auto;min-height:0;margin:0;padding:12px;font-size:11px;line-height:1.2;white-space:pre;overflow:auto;}");
   doc.write("@page{size:A4 landscape;margin:10mm;}");
   doc.write("@media print{");
   doc.write(".no-print{display:none !important;}");
-  doc.write("html,body{background:#fff;color:#000;margin:0;padding:0;}");
+  doc.write("html,body{height:auto;overflow:visible;background:#fff;color:#000;margin:0;padding:0;}");
   doc.write("header.doc-title{display:none;}");
-  doc.write("pre{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;}");
+  doc.write("pre.doc-content{padding:0;margin:0;font-size:6pt;line-height:1.15;white-space:pre;overflow:visible;flex:none;min-height:auto;}");
   doc.write("}");
   doc.write("</style></head><body>");
   doc.write("<div class=\"toolbar no-print\">");
@@ -8346,9 +8484,9 @@ function initTextDocumentWindow(w, text, title, pdfName, saveName) {
   doc.write("</div>");
   doc.write("<header class=\"doc-title\">");
   doc.write(title);
-  doc.write("</header><pre></pre></body></html>");
+  doc.write("</header><pre class=\"doc-content\"></pre></body></html>");
   doc.close();
-  doc.querySelector("pre").textContent = text;
+  (doc.querySelector("pre.doc-content") || doc.querySelector("pre")).textContent = text;
   doc.getElementById("btnSaveTxt").onclick = function () {
     const blob = new Blob([w.__stbTextDocContent], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -9299,7 +9437,7 @@ function normalizeUiTheme(theme) {
 }
 
 function uiThemeMetaColor(theme) {
-  return theme === "light" ? "#f4f6fb" : "#1a1a22";
+  return theme === "light" ? "#f4f5f7" : "#1a1a22";
 }
 
 function applyRenderTheme(theme) {

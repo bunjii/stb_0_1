@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from stb_project.schema import (
     ALLOWED_BASE_MASS_POLICIES,
+    ALLOWED_LOAD_COMBINATION_DURATIONS,
     ALLOWED_MEMBER_KINDS,
     ALLOWED_REPORT_FORMATS,
     ALLOWED_REPORT_MODES,
@@ -24,6 +25,7 @@ from stb_project import ProjectDefinition, effective_seismic_ci
 
 def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
     seismic = project.load_conditions.seismic
+    load_combinations = project.load_conditions.load_combinations
     ci_eff = effective_seismic_ci(seismic) if (seismic.ci > 0 and seismic.rt is not None) else None
     wind = project.load_conditions.wind
     wood = project.design_checks.wood
@@ -264,6 +266,40 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
                     "value": wood.allowable_stresses.tension,
                 },
             ],
+        },
+        {
+            "id": "load_combinations",
+            "title": "荷重組合せ",
+            "table": {
+                "path": "load_conditions.load_combinations",
+                "label": "荷重組合せ",
+                "columns": [
+                    {"path": "load_case", "label": "LC", "type": "number"},
+                    {"path": "name", "label": "名称", "type": "text"},
+                    {
+                        "path": "duration",
+                        "label": "区分",
+                        "type": "select",
+                        "options": list(ALLOWED_LOAD_COMBINATION_DURATIONS),
+                        "option_labels": {
+                            "LONG_TERM": "長期",
+                            "SHORT_TERM": "短期",
+                        },
+                    },
+                    {"path": "factors", "label": "係数 (カンマ区切り)", "type": "csv_number"},
+                    {"path": "load_cases", "label": "元LC (カンマ区切り)", "type": "csv_int"},
+                ],
+                "rows": [
+                    {
+                        "load_case": c.load_case,
+                        "name": c.name,
+                        "duration": c.duration,
+                        "factors": list(c.factors),
+                        "load_cases": list(c.load_cases),
+                    }
+                    for c in load_combinations
+                ],
+            },
         },
         {
             "id": "wind",

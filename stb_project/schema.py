@@ -47,6 +47,8 @@ ALLOWED_WIND_SURFACE_ROLES = ("WINDWARD", "LEEWARD", "SIDE", "ROOF", "PARAPET")
 DEFAULT_WIND_PRESSURE_MODE = "BUILDING_HEIGHT_UNIFORM"
 DEFAULT_WIND_DIAPHRAGM_INPUT_MODE = "DIAPHRAGM_DIRECT"
 DEFAULT_WIND_SURFACE_ROLE = "WINDWARD"
+ALLOWED_LOAD_COMBINATION_DURATIONS = ("LONG_TERM", "SHORT_TERM")
+DEFAULT_LOAD_COMBINATION_DURATION = "LONG_TERM"
 
 ROUGHNESS_ZB = {"I": 5.0, "II": 5.0, "III": 5.0, "IV": 10.0}
 ROUGHNESS_ZG = {"I": 250.0, "II": 350.0, "III": 450.0, "IV": 550.0}
@@ -189,6 +191,27 @@ PROJECT_JSON_SCHEMA = {
                         "properties": {
                             "id": {"type": "integer"},
                             "story": {"type": "string"},
+                        },
+                    },
+                },
+                "load_combinations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["load_case", "name", "duration", "factors", "load_cases"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "load_case": {"type": "integer"},
+                            "name": {"type": "string"},
+                            "duration": {"enum": list(ALLOWED_LOAD_COMBINATION_DURATIONS)},
+                            "factors": {
+                                "type": "array",
+                                "items": {"type": "number"},
+                            },
+                            "load_cases": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                            },
                         },
                     },
                 },
@@ -439,6 +462,15 @@ class WindLoadSettings:
     cases: Tuple[WindLoadCaseSettings, ...] = ()
     surfaces: Tuple[WindSurfaceSettings, ...] = ()
     member_loads: Tuple[WindMemberLoadPlaceholder, ...] = ()
+
+
+@dataclass(frozen=True)
+class LoadCombinationSettings:
+    load_case: int
+    name: str
+    duration: str
+    factors: Tuple[float, ...]
+    load_cases: Tuple[int, ...]
 
 
 def normalize_roughness_category(value: str) -> str:
@@ -692,6 +724,7 @@ class LoadConditionSettings:
     diaphragms: Tuple[DiaphragmAssignment, ...] = ()
     seismic_masses: Tuple[SeismicMassEntry, ...] = ()
     wind: WindLoadSettings = field(default_factory=WindLoadSettings)
+    load_combinations: Tuple[LoadCombinationSettings, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -767,6 +800,16 @@ class ProjectDefinition:
                     for entry in self.load_conditions.seismic_masses
                 ] if self.load_conditions.seismic_masses else [],
                 "wind": _wind_settings_to_dict(self.load_conditions.wind),
+                "load_combinations": [
+                    {
+                        "load_case": c.load_case,
+                        "name": c.name,
+                        "duration": c.duration,
+                        "factors": list(c.factors),
+                        "load_cases": list(c.load_cases),
+                    }
+                    for c in self.load_conditions.load_combinations
+                ],
             },
             "report": {
                 "title": self.report.title,
@@ -780,6 +823,25 @@ class ProjectDefinition:
 
 
 def _seismic_settings_to_dict(seismic: SeismicLoadSettings):
+    if (
+        seismic.ci == 0.0
+        and seismic.c0 is None
+        and seismic.z is None
+        and seismic.rt is None
+        and seismic.design_period_s is None
+        and seismic.height_m is None
+        and abs(seismic.steel_ratio_alpha - DEFAULT_SEISMIC_STEEL_RATIO_ALPHA) <= 1.0e-12
+        and abs(seismic.tc - DEFAULT_SEISMIC_TC) <= 1.0e-12
+        and seismic.base_level is None
+        and seismic.base_elevation is None
+        and seismic.base_mass_policy == DEFAULT_BASE_MASS_POLICY
+        and seismic.dead_load_lc is None
+        and seismic.live_load_lc is None
+        and seismic.live_load_factor == 0.0
+        and not seismic.directions
+    ):
+        return {}
+
     out = {
         "ci": seismic.ci,
         "dead_load_lc": seismic.dead_load_lc,
@@ -1301,13 +1363,54 @@ def _wind_settings_to_dict(wind: WindLoadSettings):
 
 def _parse_load_conditions(raw):
     _require_type(raw, dict, "project.load_conditions")
-    _reject_unknown(raw, ["seismic", "diaphragms", "seismic_masses", "wind"], "project.load_conditions")
+    _reject_unknown(
+        raw,
+        ["seismic", "diaphragms", "seismic_masses", "wind", "load_combinations"],
+        "project.load_conditions",
+    )
+    seismic_raw = raw.get("seismic")
     return LoadConditionSettings(
-        seismic=_parse_seismic_load_settings(raw.get("seismic", {})),
+        seismic=_parse_seismic_load_settings(seismic_raw) if seismic_raw else SeismicLoadSettings(),
         diaphragms=tuple(_parse_diaphragm_assignments(raw.get("diaphragms", []))),
         seismic_masses=tuple(_parse_seismic_mass_entries(raw.get("seismic_masses", []))),
         wind=_parse_wind_load_settings(raw.get("wind", {})),
+        load_combinations=tuple(_parse_load_combinations(raw.get("load_combinations", []))),
     )
+
+
+def _parse_load_combinations(raw):
+    _require_type(raw, list, "project.load_conditions.load_combinations")
+    seen = set()
+    out = []
+    for idx, item in enumerate(raw):
+        path = "project.load_conditions.load_combinations[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(item, ["load_case", "name", "duration", "factors", "load_cases"], path)
+        load_case = int(_required_number(item, "load_case", path))
+        if load_case in seen:
+            raise ProjectSchemaError(path + " duplicates load_case " + str(load_case))
+        seen.add(load_case)
+        factors = tuple(
+            float(v) for v in _parse_number_list(_required(item, "factors", path), path + ".factors")
+        )
+        load_cases = tuple(
+            _parse_int_list(_required(item, "load_cases", path), path + ".load_cases")
+        )
+        if len(factors) == 0:
+            raise ProjectSchemaError(path + ".factors must not be empty")
+        if len(factors) != len(load_cases):
+            raise ProjectSchemaError(path + ".factors and .load_cases must have the same length")
+        duration = _required_string(item, "duration", path).strip().upper()
+        if duration not in ALLOWED_LOAD_COMBINATION_DURATIONS:
+            raise ProjectSchemaError(path + ".duration is not supported: " + duration)
+        out.append(LoadCombinationSettings(
+            load_case=load_case,
+            name=_required_string(item, "name", path),
+            duration=duration,
+            factors=factors,
+            load_cases=load_cases,
+        ))
+    return out
 
 
 def _parse_seismic_load_settings(raw):
@@ -1522,6 +1625,16 @@ def _parse_int_list(raw, path):
         if type(item) is not int:
             raise ProjectSchemaError(path + "[" + str(idx) + "] must be an integer")
         values.append(item)
+    return values
+
+
+def _parse_number_list(raw, path):
+    _require_type(raw, list, path)
+    values = []
+    for idx, item in enumerate(raw):
+        if type(item) not in (int, float):
+            raise ProjectSchemaError(path + "[" + str(idx) + "] must be a number")
+        values.append(float(item))
     return values
 
 
