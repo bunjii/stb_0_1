@@ -537,10 +537,10 @@ def create_dmem(
     node_ids: list[int],
     dmem_id: int | None = None,
 ) -> tuple[str, list[str]]:
-    if len(node_ids) != 3:
-        raise ValueError("create_dmem requires exactly 3 node ids")
-    nodes = [int(n) for n in node_ids]
-    if len(set(nodes)) != 3:
+    nodes = sorted({int(n) for n in node_ids})
+    if len(nodes) < 3:
+        raise ValueError("create_dmem requires at least 3 node ids")
+    if len(set(nodes)) != len(nodes):
         raise ValueError("DMEM nodes must be distinct")
 
     lines = text.splitlines()
@@ -554,18 +554,95 @@ def create_dmem(
     if diap not in known_diaps:
         raise ValueError("Unknown DIAP id: {0}".format(diap))
 
+    if len(nodes) == 3:
+        return _create_single_dmem(lines, diap, nodes, dmem_id)
+
+    from stb_gui.dmem_triangulate import (
+        elem_adjacency_for_nodes,
+        triangulate_node_selection,
+    )
+
+    coords3d = _node_coords_map(lines)
+    elem_adj = elem_adjacency_for_nodes(lines, set(nodes))
+    triangles = triangulate_node_selection(coords3d, nodes, elem_adj=elem_adj)
+    return _create_dmem_triangles(lines, diap, triangles, dmem_id)
+
+
+def _create_single_dmem(
+    lines: list[str],
+    diap_id: int,
+    nodes: list[int],
+    dmem_id: int | None,
+) -> tuple[str, list[str]]:
     new_id = int(dmem_id) if dmem_id is not None else _next_dmem_id(lines)
     if new_id in _existing_dmem_ids(lines):
         raise ValueError("DMEM id {0} already exists".format(new_id))
-
     n1, n2, n3 = nodes
-    new_line = _format_dmem_line(new_id, diap, n1, n2, n3)
+    new_line = _format_dmem_line(new_id, diap_id, n1, n2, n3)
     out = _insert_dmem_lines(lines, [new_line])
     return _ensure_trailing_newline("\n".join(out)), [
         "Created DMEM {0} for DIAP {1} (nodes {2}, {3}, {4}).".format(
-            new_id, diap, n1, n2, n3
+            new_id, diap_id, n1, n2, n3
         )
     ]
+
+
+def _existing_dmem_triangles_for_diap(lines: list[str], diap_id: int) -> set[tuple[int, int, int]]:
+    out: set[tuple[int, int, int]] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if not rec or rec[0] != "DMEM":
+            continue
+        parts = rec[1]
+        if int(parts[2]) != diap_id:
+            continue
+        tri = tuple(sorted(int(parts[i]) for i in (3, 4, 5)))
+        out.add(tri)
+    return out
+
+
+def _create_dmem_triangles(
+    lines: list[str],
+    diap_id: int,
+    triangles: list[tuple[int, int, int]],
+    dmem_id: int | None,
+) -> tuple[str, list[str]]:
+    existing = _existing_dmem_triangles_for_diap(lines, diap_id)
+    next_id = int(dmem_id) if dmem_id is not None else _next_dmem_id(lines)
+    used_ids = _existing_dmem_ids(lines)
+    new_lines: list[str] = []
+    warnings: list[str] = []
+    created = 0
+    skipped = 0
+    for n1, n2, n3 in triangles:
+        key = tuple(sorted((n1, n2, n3)))
+        if key in existing:
+            skipped += 1
+            continue
+        while next_id in used_ids:
+            next_id += 1
+        new_lines.append(_format_dmem_line(next_id, diap_id, n1, n2, n3))
+        used_ids.add(next_id)
+        existing.add(key)
+        warnings.append(
+            "Created DMEM {0} for DIAP {1} (nodes {2}, {3}, {4}).".format(
+                next_id, diap_id, n1, n2, n3
+            )
+        )
+        next_id += 1
+        created += 1
+    if created == 0:
+        raise ValueError("All candidate DMEM triangles already exist for DIAP {0}".format(diap_id))
+    if skipped:
+        warnings.append("Skipped {0} triangle(s) that already exist on DIAP {1}.".format(skipped, diap_id))
+    warnings.insert(
+        0,
+        "Created {0} DMEM element(s) for DIAP {1} from {2} selected node(s).".format(
+            created, diap_id, len({n for tri in triangles for n in tri})
+        ),
+    )
+    out = _insert_dmem_lines(lines, new_lines)
+    return _ensure_trailing_newline("\n".join(out)), warnings
 
 
 def _node_coords_map(lines: list[str]) -> dict[int, tuple[float, float, float]]:

@@ -182,6 +182,35 @@ DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
         with self.assertRaises(ValueError):
             create_dmem(DIAPHRAGM_SAMPLE, 10, [1, 1, 2])
 
+    def test_create_dmem_mesh_from_rectangular_nodes(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 1.0, 0.0, 3.0
+NODE, 3, 0.0, 1.0, 3.0
+NODE, 4, 1.0, 1.0, 3.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+"""
+        out, warnings = create_dmem(sample, 10, [1, 2, 3, 4])
+        self.assertRegex(out, r"DMEM,\s+1001,\s+10,")
+        self.assertRegex(out, r"DMEM,\s+1002,\s+10,")
+        self.assertEqual(len([ln for ln in out.splitlines() if ln.lstrip().startswith("DMEM,")]), 2)
+        validate_dat_text(out)
+        self.assertTrue(any("Created 2 DMEM element(s)" in w for w in warnings))
+
+    def test_create_dmem_mesh_skips_existing_triangles(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 1.0, 0.0, 3.0
+NODE, 3, 0.0, 1.0, 3.0
+NODE, 4, 1.0, 1.0, 3.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+DMEM, 1001, 10, 1, 2, 4
+"""
+        out, warnings = create_dmem(sample, 10, [1, 2, 3, 4])
+        self.assertEqual(len([ln for ln in out.splitlines() if ln.lstrip().startswith("DMEM,")]), 2)
+        validate_dat_text(out)
+        self.assertTrue(any("Skipped 1 triangle" in w for w in warnings))
+
     def test_delete_dmem(self):
         out, warnings = delete_dmem(DIAPHRAGM_SAMPLE, [1001])
         self.assertNotIn("DMEM, 1001,", out)

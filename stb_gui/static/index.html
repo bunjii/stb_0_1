@@ -83,7 +83,7 @@
         <div id="contextMenuDiapHint" class="context-menu-hint"></div>
       </div>
       <div id="contextMenuDmemCreate" class="context-menu-group">
-        <div class="context-menu-label">Create DMEM (3 nodes)</div>
+        <div class="context-menu-label">Create DMEM (3+ nodes)</div>
         <div class="context-menu-field-row">
           <select id="contextMenuDmemCreateDiap" class="context-menu-input"></select>
           <button type="button" class="context-menu-item context-menu-inline" data-action="create-dmem">Create</button>
@@ -303,10 +303,21 @@
         <div class="panel-section-title">Pick target</div>
         <div class="pick-mode-toggle" role="radiogroup" aria-label="Pick target">
           <button type="button" id="pickModeNode" class="pick-mode-btn active" data-pick-mode="node" aria-pressed="true">Nodes</button>
-          <button type="button" id="pickModeElement" class="pick-mode-btn" data-pick-mode="element" aria-pressed="false">Elements</button>
+          <button type="button" id="pickModeMember" class="pick-mode-btn" data-pick-mode="member" aria-pressed="false">Members</button>
+          <button type="button" id="pickModeDiaphragm" class="pick-mode-btn" data-pick-mode="diaphragm" aria-pressed="false">Diaphragm</button>
+          <button type="button" id="pickModeWall" class="pick-mode-btn" data-pick-mode="wall" aria-pressed="false">Wall</button>
         </div>
       </section>
-      <p id="pickModeHint" class="panel-hint">Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <p id="pickModeHint" class="panel-hint">Node mode: click or drag to pick nodes. Ctrl+click toggles. 3+ nodes → DMEM mesh, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <section id="pickDmemCreateOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">New DMEM (selected nodes)</div>
+        <label class="panel-row">
+          <span>DIAP</span>
+          <select id="pickDmemCreateDiap"></select>
+        </label>
+        <p id="pickDmemCreateHint" class="panel-hint"></p>
+        <button type="button" id="btnPickDmemCreate" class="btn-block btn-secondary">Create DMEM mesh</button>
+      </section>
       <section id="pickWrwCreateOptions" class="panel-section pick-options-section" hidden>
         <div class="panel-section-title">New WRW (4 nodes)</div>
         <label class="panel-row">

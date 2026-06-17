@@ -233,13 +233,19 @@ const el = {
   selectionPanelTitle: document.getElementById("selectionPanelTitle"),
   btnSelectionCollapse: document.getElementById("btnSelectionCollapse"),
   pickModeNode: document.getElementById("pickModeNode"),
-  pickModeElement: document.getElementById("pickModeElement"),
+  pickModeMember: document.getElementById("pickModeMember"),
+  pickModeDiaphragm: document.getElementById("pickModeDiaphragm"),
+  pickModeWall: document.getElementById("pickModeWall"),
   pickModeHint: document.getElementById("pickModeHint"),
   selectionSummary: document.getElementById("selectionSummary"),
   selectionList: document.getElementById("selectionList"),
   btnClearSelection: document.getElementById("btnClearSelection"),
   pickWrwCreateOptions: document.getElementById("pickWrwCreateOptions"),
   pickWrwCreateModel: document.getElementById("pickWrwCreateModel"),
+  pickDmemCreateOptions: document.getElementById("pickDmemCreateOptions"),
+  pickDmemCreateDiap: document.getElementById("pickDmemCreateDiap"),
+  pickDmemCreateHint: document.getElementById("pickDmemCreateHint"),
+  btnPickDmemCreate: document.getElementById("btnPickDmemCreate"),
   pickWrwEditOptions: document.getElementById("pickWrwEditOptions"),
   pickWrwEditModel: document.getElementById("pickWrwEditModel"),
   pickNodeSupportOptions: document.getElementById("pickNodeSupportOptions"),
@@ -331,6 +337,7 @@ let currentModel = null;
 let selectionModeActive = false;
 let pickSubMode = "node";
 const PICK_SUB_MODE_STORAGE_KEY = "stb_gui_pick_sub_mode";
+const PICK_SUB_MODES = ["node", "member", "diaphragm", "wall"];
 let distanceModeActive = false;
 let distanceNodeIds = [];
 let distanceMeters = null;
@@ -620,12 +627,15 @@ function setSelectionMode(active) {
   updateSelectionPanelVisibility();
 }
 
+function normalizePickSubMode(mode) {
+  if (mode === "element") return "member";
+  return PICK_SUB_MODES.includes(mode) ? mode : "node";
+}
+
 function loadPickSubMode() {
   try {
     const stored = localStorage.getItem(PICK_SUB_MODE_STORAGE_KEY);
-    if (stored === "node" || stored === "element") {
-      pickSubMode = stored;
-    }
+    if (stored) pickSubMode = normalizePickSubMode(stored);
   } catch (e) { /* ignore */ }
 }
 
@@ -640,15 +650,23 @@ function clearSelectionForOtherPickSubMode(mode) {
     selectedElementIds.clear();
     selectedDmemIds.clear();
     selectedWrwIds.clear();
-  } else {
+  } else if (mode === "member") {
     selectedNodeIds.clear();
     selectedDmemIds.clear();
     selectedWrwIds.clear();
+  } else if (mode === "diaphragm") {
+    selectedNodeIds.clear();
+    selectedElementIds.clear();
+    selectedWrwIds.clear();
+  } else if (mode === "wall") {
+    selectedNodeIds.clear();
+    selectedElementIds.clear();
+    selectedDmemIds.clear();
   }
 }
 
 function setPickSubMode(mode, opts) {
-  const next = mode === "element" ? "element" : "node";
+  const next = normalizePickSubMode(mode);
   const clearOther = !(opts && opts.keepSelection);
   if (pickSubMode === next) {
     updatePickModeUI();
@@ -664,34 +682,60 @@ function setPickSubMode(mode, opts) {
   updatePickModeUI();
 }
 
-function updatePickModeUI() {
-  const isNode = pickSubMode === "node";
-  if (el.pickModeNode) {
-    el.pickModeNode.classList.toggle("active", isNode);
-    el.pickModeNode.setAttribute("aria-pressed", isNode ? "true" : "false");
+function pickModeTitle(mode) {
+  if (mode === "member") return "Pick — Members";
+  if (mode === "diaphragm") return "Pick — Diaphragm";
+  if (mode === "wall") return "Pick — Wall";
+  return "Pick — Nodes";
+}
+
+function pickModeHintText(mode) {
+  if (mode === "member") {
+    return "Member mode: click or drag to pick frame elements (ELEM). Ctrl+click toggles. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.";
   }
-  if (el.pickModeElement) {
-    el.pickModeElement.classList.toggle("active", !isNode);
-    el.pickModeElement.setAttribute("aria-pressed", !isNode ? "true" : "false");
+  if (mode === "diaphragm") {
+    return "Diaphragm mode: click or drag to pick DMEM panels. Membrane display must be on. Ctrl+click toggles. Right-click = edit menu.";
+  }
+  if (mode === "wall") {
+    return "Wall mode: click or drag to pick WRW panels. Wood wall display must be on. Ctrl+click toggles. Right-click = edit menu.";
+  }
+  return "Node mode: click or drag to pick nodes. Ctrl+click toggles. 3+ nodes → DMEM mesh, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.";
+}
+
+function updatePickModeUI() {
+  const mode = pickSubMode;
+  const isNode = mode === "node";
+  const pickButtons = [
+    { el: el.pickModeNode, id: "node" },
+    { el: el.pickModeMember, id: "member" },
+    { el: el.pickModeDiaphragm, id: "diaphragm" },
+    { el: el.pickModeWall, id: "wall" },
+  ];
+  for (const btn of pickButtons) {
+    if (!btn.el) continue;
+    const active = mode === btn.id;
+    btn.el.classList.toggle("active", active);
+    btn.el.setAttribute("aria-pressed", active ? "true" : "false");
   }
   if (el.selectionPanelTitle) {
-    el.selectionPanelTitle.textContent = isNode ? "Pick — Nodes" : "Pick — Elements";
+    el.selectionPanelTitle.textContent = pickModeTitle(mode);
   }
   if (el.pickModeHint) {
-    el.pickModeHint.textContent = isNode
-      ? "Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears."
-      : "Element mode: click or drag to pick elements. Ctrl+click toggles. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.";
+    el.pickModeHint.textContent = pickModeHintText(mode);
   }
   if (el.pickWrwCreateOptions) {
     el.pickWrwCreateOptions.hidden = !isNode;
   }
+  if (el.pickDmemCreateOptions) {
+    el.pickDmemCreateOptions.hidden = !isNode;
+  }
   if (el.pickNodeSupportOptions && !isNode) {
     el.pickNodeSupportOptions.hidden = true;
   }
-  if (el.pickWrwEditOptions && !isNode) {
+  if (el.pickWrwEditOptions && mode !== "wall") {
     el.pickWrwEditOptions.hidden = true;
   }
-  if (isNode) {
+  if (isNode || mode === "wall") {
     updatePickWrwOptions();
   }
 }
@@ -1219,8 +1263,21 @@ function pickTargetForMode(px, py) {
     const nodeId = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
     return nodeId == null ? null : { kind: "node", id: nodeId };
   }
-  const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestElem != null) return Object.assign({ kind: "elem" }, bestElem);
+  if (pickSubMode === "member") {
+    const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
+    if (bestElem != null) return Object.assign({ kind: "elem" }, bestElem);
+    return null;
+  }
+  if (pickSubMode === "diaphragm") {
+    const bestDmem = pickMembraneAtScreen(px, py, SELECTION_PICK_PX);
+    if (bestDmem != null) return Object.assign({ kind: "dmem" }, bestDmem);
+    return null;
+  }
+  if (pickSubMode === "wall") {
+    const bestWrw = pickWoodWallAtScreen(px, py, SELECTION_PICK_PX);
+    if (bestWrw != null) return Object.assign({ kind: "wrw" }, bestWrw);
+    return null;
+  }
   return null;
 }
 
@@ -1734,13 +1791,38 @@ function finishSelectionDrag(ev) {
     return;
   }
 
-  const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  if (elemIds.length === 0) {
-    if (!extend) clearSelection();
+  if (pickSubMode === "member") {
+    const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    if (elemIds.length === 0) {
+      if (!extend) clearSelection();
+      return;
+    }
+    if (extend) addPickSelection([], elemIds, [], []);
+    else replacePickSelection([], elemIds, [], []);
     return;
   }
-  if (extend) addPickSelection([], elemIds, [], []);
-  else replacePickSelection([], elemIds, [], []);
+
+  if (pickSubMode === "diaphragm") {
+    const dmemIds = membranesInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    if (dmemIds.length === 0) {
+      if (!extend) clearSelection();
+      return;
+    }
+    if (extend) addPickSelection([], [], dmemIds, []);
+    else replacePickSelection([], [], dmemIds, []);
+    return;
+  }
+
+  if (pickSubMode === "wall") {
+    const wrwIds = woodWallsInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    if (wrwIds.length === 0) {
+      if (!extend) clearSelection();
+      return;
+    }
+    if (extend) addPickSelection([], [], [], wrwIds);
+    else replacePickSelection([], [], [], wrwIds);
+    return;
+  }
 }
 
 function initSelectionInteraction() {
@@ -1840,6 +1922,36 @@ function findDmemIdByNodes(diapId, nodeIds) {
   return null;
 }
 
+function parseCreatedDmemIdsFromWarnings(warnings) {
+  const ids = [];
+  for (const w of warnings || []) {
+    const m = String(w).match(/^Created DMEM (\d+) for DIAP/);
+    if (m) ids.push(parseInt(m[1], 10));
+  }
+  return ids;
+}
+
+function canCreateDmemFromNodePick() {
+  const diaps = currentModel ? (currentModel.diaphragms || []) : [];
+  return pickSubMode === "node"
+    && selectedNodeIds.size >= 3
+    && selectedElementIds.size === 0
+    && selectedDmemIds.size === 0
+    && selectedWrwIds.size === 0
+    && diaps.length > 0;
+}
+
+function requestCreateDmemMesh(diapId) {
+  if (!canCreateDmemFromNodePick()) return;
+  const ids = selectedNodeIdList();
+  const count = ids.length;
+  const msg = count === 3
+    ? "Create DMEM on DIAP " + diapId + " with nodes " + ids.join(", ") + "?"
+    : "Create DMEM mesh on DIAP " + diapId + " from " + count + " nodes (auto triangulation)?";
+  if (!window.confirm(msg)) return;
+  applyModelEdit({ action: "create_dmem", diap_id: diapId });
+}
+
 function findWrwIdByNodes(nodeIds) {
   if (!currentModel) return null;
   const sorted = nodeIds.slice().sort(function (a, b) { return a - b; });
@@ -1877,21 +1989,26 @@ function populateWrwCreateDiapSelect() {
 }
 
 function populateDmemCreateDiapSelect() {
-  if (!el.contextMenuDmemCreateDiap || !currentModel) return;
-  const sel = el.contextMenuDmemCreateDiap;
-  const prev = sel.value;
-  sel.innerHTML = "";
+  const targets = [el.contextMenuDmemCreateDiap, el.pickDmemCreateDiap];
+  if (!currentModel) return;
   const diaps = currentModel.diaphragms || [];
-  for (const d of diaps) {
-    const opt = document.createElement("option");
-    opt.value = String(d.id);
-    let label = "DIAP " + d.id;
-    if (d.name) label += " — " + d.name;
-    opt.textContent = label;
-    sel.appendChild(opt);
-  }
-  if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
-    sel.value = prev;
+  for (const sel of targets) {
+    if (!sel) continue;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const d of diaps) {
+      const opt = document.createElement("option");
+      opt.value = String(d.id);
+      let label = "DIAP " + d.id;
+      if (d.name) label += " — " + d.name;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+    if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+      sel.value = prev;
+    } else if (sel.options.length) {
+      sel.selectedIndex = 0;
+    }
   }
 }
 
@@ -2073,6 +2190,21 @@ function applyConsChange(fixed) {
 
 function updatePickWrwOptions() {
   const nodePickMode = pickSubMode === "node";
+  if (el.pickDmemCreateOptions) {
+    const showDmem = canCreateDmemFromNodePick();
+    el.pickDmemCreateOptions.hidden = !showDmem;
+    if (showDmem) {
+      populateDmemCreateDiapSelect();
+      if (el.pickDmemCreateHint) {
+        const count = selectedNodeIds.size;
+        el.pickDmemCreateHint.textContent = count === 3
+          ? "Nodes " + selectedNodeIdList().join(", ") + " → one triangle"
+          : count + " nodes → auto triangulation inside the picked region";
+      }
+    } else if (el.pickDmemCreateHint) {
+      el.pickDmemCreateHint.textContent = "";
+    }
+  }
   if (el.pickWrwCreateOptions) {
     const showCreate = nodePickMode && selectedNodeIds.size === 4
       && selectedElementIds.size === 0 && selectedDmemIds.size === 0
@@ -2080,7 +2212,7 @@ function updatePickWrwOptions() {
     el.pickWrwCreateOptions.hidden = !showCreate;
   }
   if (el.pickWrwEditOptions) {
-    const showEdit = nodePickMode && selectedWrwIds.size > 0
+    const showEdit = pickSubMode === "wall" && selectedWrwIds.size > 0
       && selectedNodeIds.size === 0 && selectedElementIds.size === 0
       && selectedDmemIds.size === 0;
     el.pickWrwEditOptions.hidden = !showEdit;
@@ -2265,16 +2397,15 @@ function showContextMenu(clientX, clientY) {
     }
   }
   if (el.contextMenuDmemCreate) {
-    const diaps = currentModel ? (currentModel.diaphragms || []) : [];
-    const canCreate = nodeCount === 3 && elemCount === 0 && dmemCount === 0
-      && wrwCount === 0 && diaps.length > 0;
+    const canCreate = canCreateDmemFromNodePick();
     el.contextMenuDmemCreate.hidden = !canCreate;
     if (canCreate) {
       populateDmemCreateDiapSelect();
       if (el.contextMenuDmemCreateHint) {
         const ids = selectedNodeIdList();
-        el.contextMenuDmemCreateHint.textContent =
-          "Nodes " + ids.join(", ") + " → triangle";
+        el.contextMenuDmemCreateHint.textContent = ids.length === 3
+          ? "Nodes " + ids.join(", ") + " → triangle"
+          : ids.length + " nodes → auto triangulation";
       }
     } else if (el.contextMenuDmemCreateHint) {
       el.contextMenuDmemCreateHint.textContent = "";
@@ -2466,7 +2597,7 @@ async function applyModelEdit(extra) {
       node_ids: selectedNodeIdList(),
     };
   } else if (extra.action === "create_dmem") {
-    if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
+    if (selectedNodeIds.size < 3 || selectedElementIds.size > 0
       || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
     const diapId = parseInt(extra.diap_id, 10);
     if (!isFinite(diapId)) return;
@@ -2571,11 +2702,18 @@ async function applyModelEdit(extra) {
       keepCamera: true,
     });
     if (createdDmem) {
-      const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
-      if (newId != null) {
-        replacePickSelection([], [], [newId], []);
+      const createdIds = parseCreatedDmemIdsFromWarnings(body.warnings);
+      if (createdIds.length > 1) {
+        replacePickSelection([], [], createdIds, []);
+      } else if (createdIds.length === 1) {
+        replacePickSelection([], [], createdIds, []);
       } else {
-        clearSelection();
+        const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
+        if (newId != null) {
+          replacePickSelection([], [], [newId], []);
+        } else {
+          clearSelection();
+        }
       }
     } else if (createdWrw) {
       const newId = findWrwIdByNodes(payload.node_ids);
@@ -2679,9 +2817,8 @@ function initContextMenu() {
       return;
     }
     if (action === "create-dmem") {
-      if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
-        || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
-        window.alert("Pick exactly 3 nodes (no elements / DMEM / WRW) to create a DMEM triangle.");
+      if (!canCreateDmemFromNodePick()) {
+        window.alert("Pick at least 3 nodes (no elements / DMEM / WRW) to create DMEM.");
         return;
       }
       const diapRaw = el.contextMenuDmemCreateDiap ? el.contextMenuDmemCreateDiap.value : "";
@@ -2690,12 +2827,7 @@ function initContextMenu() {
         window.alert("Select a DIAP for the new DMEM.");
         return;
       }
-      const ids = selectedNodeIdList();
-      const ok = window.confirm(
-        "Create DMEM on DIAP " + diapId + " with nodes " + ids.join(", ") + "?"
-      );
-      if (!ok) return;
-      applyModelEdit({ action: "create_dmem", diap_id: diapId });
+      requestCreateDmemMesh(diapId);
       return;
     }
     if (action === "create-wrw") {
@@ -2773,6 +2905,17 @@ function initContextMenu() {
         el.pickWrwCreateModel.value = el.contextMenuWrwCreateModel.value;
       }
       setPickWrwCreateModelValue(el.contextMenuWrwCreateModel.value);
+    });
+  }
+  if (el.btnPickDmemCreate) {
+    el.btnPickDmemCreate.addEventListener("click", function () {
+      const raw = el.pickDmemCreateDiap ? el.pickDmemCreateDiap.value : "";
+      const diapId = parseInt(raw, 10);
+      if (!isFinite(diapId)) {
+        window.alert("Select a DIAP for the new DMEM.");
+        return;
+      }
+      requestCreateDmemMesh(diapId);
     });
   }
   if (el.btnPickWrwApplyModel) {
@@ -9303,10 +9446,28 @@ document.addEventListener("keydown", (ev) => {
       setPickSubMode("node");
       return;
     }
+    if (ev.key === "m" || ev.key === "M") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("member");
+      return;
+    }
     if (ev.key === "e" || ev.key === "E") {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
       ev.preventDefault();
-      setPickSubMode("element");
+      setPickSubMode("member");
+      return;
+    }
+    if (ev.key === "i" || ev.key === "I") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("diaphragm");
+      return;
+    }
+    if (ev.key === "w" || ev.key === "W") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("wall");
       return;
     }
   }
@@ -9341,9 +9502,19 @@ if (el.pickModeNode) {
     setPickSubMode("node");
   });
 }
-if (el.pickModeElement) {
-  el.pickModeElement.addEventListener("click", () => {
-    setPickSubMode("element");
+if (el.pickModeMember) {
+  el.pickModeMember.addEventListener("click", () => {
+    setPickSubMode("member");
+  });
+}
+if (el.pickModeDiaphragm) {
+  el.pickModeDiaphragm.addEventListener("click", () => {
+    setPickSubMode("diaphragm");
+  });
+}
+if (el.pickModeWall) {
+  el.pickModeWall.addEventListener("click", () => {
+    setPickSubMode("wall");
   });
 }
 
