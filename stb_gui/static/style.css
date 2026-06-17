@@ -198,7 +198,7 @@ html, body {
 }
 
 .wind-legend-flow {
-  color: #7060a8;
+  color: #5a48a8;
 }
 
 .viewer-info-overlay {
@@ -701,6 +701,36 @@ select.context-menu-input {
   line-height: 1.35;
 }
 
+.pick-mode-section {
+  margin-bottom: 0.55rem;
+}
+
+.pick-mode-toggle {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.pick-mode-btn {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  font-size: 12px;
+  border: 1px solid #4a4a58;
+  border-radius: 4px;
+  background: #1a1a22;
+  color: #c9cdd3;
+  cursor: pointer;
+}
+
+.pick-mode-btn:hover {
+  background: #252530;
+}
+
+.pick-mode-btn.active {
+  background: #3d4f6a;
+  border-color: #5a7aaa;
+  color: #fff;
+}
+
 .pick-options-section {
   margin-bottom: 0.6rem;
   padding-bottom: 0.5rem;
@@ -986,9 +1016,26 @@ html[data-theme="light"] .btn-icon:hover {
 
 html[data-theme="light"] .panel-section,
 html[data-theme="light"] .pick-options-section,
+html[data-theme="light"] .pick-mode-section,
 html[data-theme="light"] .context-menu-title,
 html[data-theme="light"] .context-menu-group {
   border-color: #e2e8f0;
+}
+
+html[data-theme="light"] .pick-mode-btn {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+html[data-theme="light"] .pick-mode-btn:hover {
+  background: #eef2f7;
+}
+
+html[data-theme="light"] .pick-mode-btn.active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e3a8a;
 }
 
 html[data-theme="light"] .panel-section-title,

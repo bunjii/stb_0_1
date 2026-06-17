@@ -27,7 +27,7 @@ const COLORS = {
   force: 0x4D829E,
   windWindward: 0xe08040,
   windLeeward: 0x4080c0,
-  windFlow: 0xc8b8ff,
+  windFlow: 0x5a48a8,
   windStoryForce: 0x8fd4a0,
   windFootprint: 0x5a5a68,
 };
@@ -228,7 +228,11 @@ const el = {
   selectionMarquee: document.getElementById("selectionMarquee"),
   selectionPanel: document.getElementById("selectionPanel"),
   selectionPanelHeader: document.getElementById("selectionPanelHeader"),
+  selectionPanelTitle: document.getElementById("selectionPanelTitle"),
   btnSelectionCollapse: document.getElementById("btnSelectionCollapse"),
+  pickModeNode: document.getElementById("pickModeNode"),
+  pickModeElement: document.getElementById("pickModeElement"),
+  pickModeHint: document.getElementById("pickModeHint"),
   selectionSummary: document.getElementById("selectionSummary"),
   selectionList: document.getElementById("selectionList"),
   btnClearSelection: document.getElementById("btnClearSelection"),
@@ -321,6 +325,8 @@ let windGroup, windLabelGroup;
 let uiTheme = "dark";
 let currentModel = null;
 let selectionModeActive = false;
+let pickSubMode = "node";
+const PICK_SUB_MODE_STORAGE_KEY = "stb_gui_pick_sub_mode";
 let distanceModeActive = false;
 let distanceNodeIds = [];
 let distanceMeters = null;
@@ -354,6 +360,12 @@ const SELECTION_NODE_PICK_PX = 14;
 const SELECTION_DRAG_MIN_PX = 4;
 const SELECTION_LIST_LIMIT = 80;
 const MAX_EDIT_UNDO = 50;
+const WIND_FLOW_SURFACE_GAP_RATIO = 0.06;
+const WIND_FLOW_ARROW_LEN_RATIO = 0.12;
+const WIND_FLOW_LABEL_PAD_RATIO = 0.035;
+const WIND_FLOW_MIN_SURFACE_GAP_M = 0.35;
+const WIND_FLOW_MIN_ARROW_LEN_M = 0.22;
+const WIND_FLOW_MIN_LABEL_PAD_M = 0.1;
 let editUndoStack = [];
 let editRedoStack = [];
 let editHistoryBusy = false;
@@ -600,7 +612,84 @@ function setSelectionMode(active) {
     el.btnToggleSelect.classList.toggle("active", selectionModeActive);
   }
   applyViewerInteractionControls();
+  updatePickModeUI();
   updateSelectionPanelVisibility();
+}
+
+function loadPickSubMode() {
+  try {
+    const stored = localStorage.getItem(PICK_SUB_MODE_STORAGE_KEY);
+    if (stored === "node" || stored === "element") {
+      pickSubMode = stored;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function savePickSubMode() {
+  try {
+    localStorage.setItem(PICK_SUB_MODE_STORAGE_KEY, pickSubMode);
+  } catch (e) { /* ignore */ }
+}
+
+function clearSelectionForOtherPickSubMode(mode) {
+  if (mode === "node") {
+    selectedElementIds.clear();
+    selectedDmemIds.clear();
+    selectedWrwIds.clear();
+  } else {
+    selectedNodeIds.clear();
+    selectedDmemIds.clear();
+    selectedWrwIds.clear();
+  }
+}
+
+function setPickSubMode(mode, opts) {
+  const next = mode === "element" ? "element" : "node";
+  const clearOther = !(opts && opts.keepSelection);
+  if (pickSubMode === next) {
+    updatePickModeUI();
+    return;
+  }
+  pickSubMode = next;
+  if (clearOther) {
+    clearSelectionForOtherPickSubMode(next);
+    updateSelectionHighlight();
+    updateSelectionPanel();
+  }
+  savePickSubMode();
+  updatePickModeUI();
+}
+
+function updatePickModeUI() {
+  const isNode = pickSubMode === "node";
+  if (el.pickModeNode) {
+    el.pickModeNode.classList.toggle("active", isNode);
+    el.pickModeNode.setAttribute("aria-pressed", isNode ? "true" : "false");
+  }
+  if (el.pickModeElement) {
+    el.pickModeElement.classList.toggle("active", !isNode);
+    el.pickModeElement.setAttribute("aria-pressed", !isNode ? "true" : "false");
+  }
+  if (el.selectionPanelTitle) {
+    el.selectionPanelTitle.textContent = isNode ? "Pick — Nodes" : "Pick — Elements";
+  }
+  if (el.pickModeHint) {
+    el.pickModeHint.textContent = isNode
+      ? "Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears."
+      : "Element mode: click or drag to pick elements. Ctrl+click toggles. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.";
+  }
+  if (el.pickWrwCreateOptions) {
+    el.pickWrwCreateOptions.hidden = !isNode;
+  }
+  if (el.pickNodeSupportOptions && !isNode) {
+    el.pickNodeSupportOptions.hidden = true;
+  }
+  if (el.pickWrwEditOptions && !isNode) {
+    el.pickWrwEditOptions.hidden = true;
+  }
+  if (isNode) {
+    updatePickWrwOptions();
+  }
 }
 
 function clearDistanceMeasurement() {
@@ -1121,6 +1210,16 @@ function pickNodeAtScreen(px, py, thresholdPx) {
   return bestNode;
 }
 
+function pickTargetForMode(px, py) {
+  if (pickSubMode === "node") {
+    const nodeId = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
+    return nodeId == null ? null : { kind: "node", id: nodeId };
+  }
+  const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
+  if (bestElem != null) return Object.assign({ kind: "elem" }, bestElem);
+  return null;
+}
+
 function pickTargetAtScreen(px, py) {
   if (!currentModel) return null;
   const bestNode = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
@@ -1391,7 +1490,7 @@ function elementEfrcOutBlock(model, elemId, lcKey) {
 
 function updateSelectionPanelVisibility() {
   if (!el.selectionPanel) return;
-  const show = selectionModeActive && hasPickSelection();
+  const show = selectionModeActive;
   el.selectionPanel.classList.toggle("hidden", !show);
 }
 
@@ -1611,7 +1710,7 @@ function finishSelectionDrag(ev) {
   const extend = !!(ev.ctrlKey || ev.metaKey);
 
   if (Math.hypot(dx, dy) < SELECTION_DRAG_MIN_PX) {
-    const picked = pickTargetAtScreen(end.x, end.y);
+    const picked = pickTargetForMode(end.x, end.y);
     if (picked == null) {
       if (!extend) clearSelection();
     } else {
@@ -1620,16 +1719,24 @@ function finishSelectionDrag(ev) {
     return;
   }
 
+  if (pickSubMode === "node") {
+    const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    if (nodeIds.length === 0) {
+      if (!extend) clearSelection();
+      return;
+    }
+    if (extend) addPickSelection(nodeIds, [], [], []);
+    else replacePickSelection(nodeIds, [], [], []);
+    return;
+  }
+
   const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  const dmemIds = membranesInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  const wrwIds = woodWallsInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  if (elemIds.length === 0 && nodeIds.length === 0 && dmemIds.length === 0 && wrwIds.length === 0) {
+  if (elemIds.length === 0) {
     if (!extend) clearSelection();
     return;
   }
-  if (extend) addPickSelection(nodeIds, elemIds, dmemIds, wrwIds);
-  else replacePickSelection(nodeIds, elemIds, dmemIds, wrwIds);
+  if (extend) addPickSelection([], elemIds, [], []);
+  else replacePickSelection([], elemIds, [], []);
 }
 
 function initSelectionInteraction() {
@@ -1961,14 +2068,15 @@ function applyConsChange(fixed) {
 }
 
 function updatePickWrwOptions() {
+  const nodePickMode = pickSubMode === "node";
   if (el.pickWrwCreateOptions) {
-    const showCreate = selectedNodeIds.size === 4
+    const showCreate = nodePickMode && selectedNodeIds.size === 4
       && selectedElementIds.size === 0 && selectedDmemIds.size === 0
       && selectedWrwIds.size === 0;
     el.pickWrwCreateOptions.hidden = !showCreate;
   }
   if (el.pickWrwEditOptions) {
-    const showEdit = selectedWrwIds.size > 0
+    const showEdit = nodePickMode && selectedWrwIds.size > 0
       && selectedNodeIds.size === 0 && selectedElementIds.size === 0
       && selectedDmemIds.size === 0;
     el.pickWrwEditOptions.hidden = !showEdit;
@@ -1978,7 +2086,7 @@ function updatePickWrwOptions() {
     }
   }
   if (el.pickNodeSupportOptions) {
-    const showSupport = selectedNodeIds.size > 0
+    const showSupport = nodePickMode && selectedNodeIds.size > 0
       && selectedElementIds.size === 0 && selectedDmemIds.size === 0
       && selectedWrwIds.size === 0;
     el.pickNodeSupportOptions.hidden = !showSupport;
@@ -5364,6 +5472,63 @@ function windFlowDirection3(flow) {
   return dir.normalize();
 }
 
+function windSurfaceQuadCenter(corners) {
+  const c = new THREE.Vector3();
+  for (let i = 0; i < corners.length; i++) {
+    c.add(corners[i]);
+  }
+  return c.multiplyScalar(1 / corners.length);
+}
+
+function windWindwardFaceCenter(bbox, windCase, zFallback) {
+  const cx = 0.5 * (bbox.x_min + bbox.x_max);
+  const cy = 0.5 * (bbox.y_min + bbox.y_max);
+  let zMid = zFallback;
+  const surfaces = windCase.surfaces || [];
+  if (surfaces.length) {
+    let zb = Infinity;
+    let zt = -Infinity;
+    for (const s of surfaces) {
+      zb = Math.min(zb, Number(s.z_bottom) || 0);
+      zt = Math.max(zt, Number(s.z_top) || 0);
+    }
+    if (isFinite(zb) && isFinite(zt)) zMid = 0.5 * (zb + zt);
+  }
+  const face = String(windCase.windward_face || "").toUpperCase();
+  const anchor = new THREE.Vector3(cx, cy, zMid);
+  if (face === "X_MIN") anchor.set(bbox.x_min, cy, zMid);
+  else if (face === "X_MAX") anchor.set(bbox.x_max, cy, zMid);
+  else if (face === "Y_MIN") anchor.set(cx, bbox.y_min, zMid);
+  else if (face === "Y_MAX") anchor.set(cx, bbox.y_max, zMid);
+  return anchor;
+}
+
+function windWindwardFlowLayout(bbox, windCase, span, zFallback) {
+  const flowDir = windFlowDirection3(windCase.flow);
+  const upwindDir = flowDir.clone().negate();
+  const surfaceGap = Math.max(span * WIND_FLOW_SURFACE_GAP_RATIO, WIND_FLOW_MIN_SURFACE_GAP_M);
+  const arrowLen = Math.max(span * WIND_FLOW_ARROW_LEN_RATIO, WIND_FLOW_MIN_ARROW_LEN_M);
+  const labelPad = Math.max(span * WIND_FLOW_LABEL_PAD_RATIO, WIND_FLOW_MIN_LABEL_PAD_M);
+
+  let faceCenter = null;
+  for (const s of windCase.surfaces || []) {
+    if (s.surface_role !== "WINDWARD") continue;
+    const corners = windWallCorners(bbox, s);
+    if (!corners) continue;
+    faceCenter = windSurfaceQuadCenter(corners);
+    break;
+  }
+  if (!faceCenter) {
+    faceCenter = windWindwardFaceCenter(bbox, windCase, zFallback);
+  }
+
+  // Head sits surfaceGap upwind of the windward face plane; tail and label are further upwind.
+  const flowHead = faceCenter.clone().addScaledVector(upwindDir, surfaceGap);
+  const flowTail = flowHead.clone().addScaledVector(upwindDir, arrowLen);
+  const labelPos = flowTail.clone().addScaledVector(upwindDir, labelPad);
+  return { flowDir, upwindDir, flowTail, flowHead, labelPos, arrowLen, surfaceGap };
+}
+
 function windWallCorners(bbox, surface) {
   const zb = Number(surface.z_bottom);
   const zt = Number(surface.z_top);
@@ -5509,27 +5674,27 @@ function drawWindOverlay(model, visual, windCase, span) {
   });
   if (model.bounds) zTop = Math.max(zTop, model.bounds[5]);
 
-  const flowLen = Math.max(span * 0.42, 0.5);
-  const flowOrigin = new THREE.Vector3(cx, cy, zTop + span * 0.06);
-  const flowTail = flowOrigin.clone().addScaledVector(flowDir, -flowLen * 0.35);
-  const flowHead = flowOrigin.clone().addScaledVector(flowDir, flowLen * 0.65);
+  const zMidFallback = 0.5 * (zGround + zTop);
+  const flowLayout = windWindwardFlowLayout(bbox, windCase, span, zMidFallback);
   addDirectedArrow(
-    flowTail,
-    flowHead,
+    flowLayout.flowTail,
+    flowLayout.flowHead,
     windGroup,
     COLORS.windFlow,
-    loadLineWidthPx() * 1.15,
-    1.0,
-    8,
+    loadLineWidthPx() * 0.95,
+    0.8,
+    20,
     true
   );
   const flowLabel = makeTextSprite(windCase.direction_label || "Wind", span, {
-    scaleFactor: loadLabelScaleFactor() * 0.95,
-    bg: "rgba(112, 96, 168, 0.82)",
+    scaleFactor: loadLabelScaleFactor() * 0.72,
+    bg: "rgba(90, 72, 168, 1.0)",
     fg: "#ffffff",
+    opaque: true,
+    transparent: false,
   });
-  flowLabel.position.copy(flowHead).addScaledVector(flowDir, span * 0.02);
-  flowLabel.renderOrder = 18;
+  flowLabel.position.copy(flowLayout.labelPos);
+  flowLabel.renderOrder = 21;
   windLabelGroup.add(flowLabel);
 
   const maxF = Math.max(
@@ -8888,6 +9053,7 @@ async function loadSelectedModel(solve, options) {
 
 async function bootstrap() {
   loadPickWrwCreateModel();
+  loadPickSubMode();
   initUiTheme();
   initThree();
   initDisplayPrefs();
@@ -8905,6 +9071,7 @@ async function bootstrap() {
     autoVisibility: true,
   });
   updateSelectionPanelVisibility();
+  updatePickModeUI();
   initDraggablePanel({
     panel: el.resultsPanel,
     header: el.resultsPanelHeader,
@@ -8988,6 +9155,21 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
 
+  if (selectionModeActive) {
+    if (ev.key === "n" || ev.key === "N") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("node");
+      return;
+    }
+    if (ev.key === "e" || ev.key === "E") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      setPickSubMode("element");
+      return;
+    }
+  }
+
   if (ev.key === "d" || ev.key === "D") {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     ev.preventDefault();
@@ -9010,6 +9192,17 @@ el.btnToggleAxes.addEventListener("click", () => {
 if (el.btnToggleSelect) {
   el.btnToggleSelect.addEventListener("click", () => {
     setSelectionMode(!selectionModeActive);
+  });
+}
+
+if (el.pickModeNode) {
+  el.pickModeNode.addEventListener("click", () => {
+    setPickSubMode("node");
+  });
+}
+if (el.pickModeElement) {
+  el.pickModeElement.addEventListener("click", () => {
+    setPickSubMode("element");
   });
 }
 
