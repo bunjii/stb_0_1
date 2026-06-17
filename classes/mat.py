@@ -19,6 +19,7 @@ class Mat:
         self.fy    = _fy
 
         self.cid   =  None
+        self.auto_generated = False
 
     def OutputMatInfo(self):
 

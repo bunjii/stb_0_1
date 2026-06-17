@@ -31,6 +31,10 @@ from wood_wall import (
 import common
 
 
+def _mdl_items(value):
+    return value if value is not None else []
+
+
 def _clean_items(line):
     return [item.strip() for item in line.split(',')]
 
@@ -164,7 +168,7 @@ def ReadLines(_lns):
         elif key == "EJNT":
 
             eid  = int(items[1])
-            jnts = [0.0] * 4
+            jnts: list[float | None] = [0.0] * 4
 
             #for i in range(12):
             for i in range(4):
@@ -489,43 +493,43 @@ def ReadLines(_lns):
 
 def RegisterInputData(_mdl: Mdl):
     
-    nds  = sorted(_mdl.nds,   key=lambda n: n.id)
-    elms = sorted([e for e in _mdl.elms if not getattr(e, "auto_generated", False)], key=lambda e: e.id)
-    ejnts= sorted([e for e in _mdl.ejnts if not getattr(e, "auto_generated", False)], key=lambda e: e.eid)
-    mats = sorted([m for m in _mdl.mats if not getattr(m, "auto_generated", False)], key=lambda m: m.id)
-    secs = sorted([s for s in _mdl.secs if not getattr(s, "auto_generated", False)], key=lambda s: s.id)
-    dmats= sorted(_mdl.dmats, key=lambda m: m.id)
-    diaps= sorted(_mdl.diaps, key=lambda d: d.id)
-    dregs= list(_mdl.dregs)
-    dopns= list(_mdl.dopns)
-    dmems= sorted(_mdl.dmems, key=lambda m: m.id)
-    dcons= [dc for dc in list(getattr(_mdl, "dcons", [])) if not getattr(dc, "auto_generated", False)]
-    dloads = sorted(getattr(_mdl, "dloads", []), key=lambda dl: (dl.diap_id, dl.lc, dl.load_type))
-    wwalls = sorted(getattr(_mdl, "wwalls", []), key=lambda w: w.id)
-    cons = sorted(_mdl.cons,  key=lambda c: c.nid)
+    nds  = sorted(_mdl_items(_mdl.nds),   key=lambda n: n.id)
+    elms = sorted([e for e in _mdl_items(_mdl.elms) if not getattr(e, "auto_generated", False)], key=lambda e: e.id)
+    ejnts= sorted([e for e in _mdl_items(_mdl.ejnts) if not getattr(e, "auto_generated", False)], key=lambda e: e.eid)
+    mats = sorted([m for m in _mdl_items(_mdl.mats) if not getattr(m, "auto_generated", False)], key=lambda m: m.id)
+    secs = sorted([s for s in _mdl_items(_mdl.secs) if not getattr(s, "auto_generated", False)], key=lambda s: s.id)
+    dmats= sorted(_mdl_items(_mdl.dmats), key=lambda m: m.id)
+    diaps= sorted(_mdl_items(_mdl.diaps), key=lambda d: d.id)
+    dregs= list(_mdl_items(_mdl.dregs))
+    dopns= list(_mdl_items(_mdl.dopns))
+    dmems= sorted(_mdl_items(_mdl.dmems), key=lambda m: m.id)
+    dcons= [dc for dc in _mdl_items(_mdl.dcons) if not getattr(dc, "auto_generated", False)]
+    dloads = sorted(_mdl_items(_mdl.dloads), key=lambda dl: (dl.diap_id, dl.lc, dl.load_type))
+    wwalls = sorted(_mdl_items(_mdl.wwalls), key=lambda w: w.id)
+    cons = sorted(_mdl_items(_mdl.cons),  key=lambda c: c.nid)
 
-    lds_w_o_combi = [l for l in _mdl.lds if not l.combi]
+    lds_w_o_combi = [l for l in _mdl_items(_mdl.lds) if not l.combi]
     lds  = sorted(lds_w_o_combi,   key=lambda l: l.nid)
 
-    elds_w_o_combi = [l for l in _mdl.elds if not l.combi]
+    elds_w_o_combi = [l for l in _mdl_items(_mdl.elds) if not l.combi]
     elds = sorted(elds_w_o_combi,  key=lambda l: l.eid)
 
-    alds = sorted(_mdl.alds,  key=lambda l: l.lc)
+    alds = sorted(_mdl_items(_mdl.alds),  key=lambda l: l.lc)
 
-    glds_w_o_combi = [l for l in _mdl.glds if not l.combi]
+    glds_w_o_combi = [l for l in _mdl_items(_mdl.glds) if not l.combi]
     glds = sorted(glds_w_o_combi,  key=lambda g: g.lc)
 
-    lcases = sorted(_mdl.lcases, key=lambda l: l.lc)
-    lcmbs = sorted(_mdl.lcmbs, key=lambda l: l.lc)
-    axes = sorted(_mdl.axes,  key=lambda a: a.id)
-    plts = sorted(_mdl.plts,  key=lambda p: p.id)
+    lcases = sorted(_mdl_items(_mdl.lcases), key=lambda l: l.lc)
+    lcmbs = sorted(_mdl_items(_mdl.lcmbs), key=lambda l: l.lc)
+    axes = sorted(_mdl_items(_mdl.axes),  key=lambda a: a.id)
+    plts = sorted(_mdl_items(_mdl.plts),  key=lambda p: p.id)
     
     lns  = ""
 
     ## header
     lns += "# --- HEADER INPUT ---\n"
     lns += "\n"
-    lns += "# DATE OF INPUT DATA: " + _mdl.date_input 
+    lns += "# DATE OF INPUT DATA: " + str(_mdl.date_input or "")
     lns += "\n"
     lns += "# NUM. OF MATERIALS: " + str(len(mats)) + "\n"
     lns += "# NUM. OF DIAPHRAGM MATERIALS: " + str(len(dmats)) + "\n"
@@ -744,16 +748,19 @@ def RegisterInputData(_mdl: Mdl):
 
 def RegisterResultData(_mdl: Mdl):
 
-    nds  = sorted(_mdl.nds,  key=lambda n: n.id)
-    elms = sorted(_mdl.elms, key=lambda e: e.id)
+    nds  = sorted(_mdl_items(_mdl.nds),  key=lambda n: n.id)
+    elms = sorted(_mdl_items(_mdl.elms), key=lambda e: e.id)
     #mats = sorted(_mdl.mats, key=lambda m: m.id)
-    secs = sorted(_mdl.secs, key=lambda s: s.id)
+    secs = sorted(_mdl_items(_mdl.secs), key=lambda s: s.id)
     #cons = sorted(_mdl.cons, key=lambda c: c.nid)
     #lds  = sorted(_mdl.lds,  key=lambda l: l.nid)
     #elds = sorted(_mdl.elds, key=lambda l: l.eid)
     #glds = sorted(_mdl.glds, key=lambda g: g.lc)
 
-    lcs  = sorted(_mdl.lcs)
+    model_lcs = _mdl_items(_mdl.lcs)
+    lcs  = sorted(model_lcs)
+    model_cons = _mdl_items(_mdl.cons)
+    model_dmems = _mdl_items(_mdl.dmems)
 
     lns  = ""
 
@@ -772,7 +779,7 @@ def RegisterResultData(_mdl: Mdl):
     # lns += "\n"
 
     lns += "# --- HEADER OUTPUT --- \n" 
-    lns += "# DATE OF ANALYSIS: " + _mdl.date_analysis + "\n\n"
+    lns += "# DATE OF ANALYSIS: " + str(_mdl.date_analysis or "") + "\n\n"
 
     ## section properties
     lns += "# --- SECTION PROPS ---\n"
@@ -806,7 +813,7 @@ def RegisterResultData(_mdl: Mdl):
         # lc : loadcase
         # clc: computational loadcase id 
 
-        clc = _mdl.lcs.index(lc) 
+        clc = model_lcs.index(lc) 
         for n in nds: 
             ds = n.disps[:, clc]
             props = ["NDSP", 
@@ -827,11 +834,11 @@ def RegisterResultData(_mdl: Mdl):
     lns += "#        LC,  NODE,        TX,        TY,        TZ,        RX,        RY,        RZ\n"
     lns += "#                         (kN)       (kN)       (kN)      (kNm)      (kNm)      (kNm)\n"
     
-    for i in range(len(_mdl.lcs)): 
-        lc   = _mdl.lcs[i]
+    for i in range(len(model_lcs)): 
+        lc   = model_lcs[i]
         #csts = list(filter(lambda l: l.lc == lc, _))
 
-        for c in _mdl.cons:
+        for c in model_cons:
             nid   = c.nd.id
             rs    = c.nd.reacts[i] # [lc][vals]
             props = ["REAC",
@@ -858,7 +865,7 @@ def RegisterResultData(_mdl: Mdl):
         # lc : loadcase
         # clc: computational loadcase id 
 
-        clc = _mdl.lcs.index(lc) 
+        clc = model_lcs.index(lc) 
         for e in elms: 
             ef = e.forces[:, clc]
 
@@ -892,13 +899,13 @@ def RegisterResultData(_mdl: Mdl):
     lns += "\n"
 
     ## membrane element strains, stresses and membrane forces
-    if getattr(_mdl, "dmems", None):
+    if model_dmems:
         lns += "# --- MEMBRANE ELEMENT STRESS ---\n"
         lns += "#        LC,  DMEM,       EXX,       EYY,      GXY,        SX,        SY,       TXY,        NX,        NY,       NXY\n"
         lns += "#                           (-)       (-)       (-)   (N/mm2)   (N/mm2)   (N/mm2)    (kN/m)    (kN/m)    (kN/m)\n"
         for lc in lcs:
-            clc = _mdl.lcs.index(lc)
-            for m in _mdl.dmems:
+            clc = model_lcs.index(lc)
+            for m in model_dmems:
                 if m.strains is None or m.stresses is None or m.mforces is None:
                     continue
                 strain = m.strains[:, clc]

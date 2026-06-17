@@ -35,6 +35,7 @@ class EJnt:
         self.Rzi = None #_jnts[1]
         self.Ryj = None #_jnts[2]
         self.Rzj = None #_jnts[3]
+        self.auto_generated = False
 
     def OutputElmJntInfo(self):
 

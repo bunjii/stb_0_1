@@ -19,6 +19,7 @@ class Sec:
         self.dims = _dims
 
         self.cid  =  None
+        self.auto_generated = False
 
         self.CalcSectionProps()
         # A, J, Iy, Iz, Wy, Wz, iy, iz

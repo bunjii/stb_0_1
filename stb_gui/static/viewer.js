@@ -200,6 +200,7 @@ const el = {
   chkMaterial: document.getElementById("chkMaterial"),
   chkSection: document.getElementById("chkSection"),
   chkSectionSolids: document.getElementById("chkSectionSolids"),
+  btnExportSectionSolidsDxf: document.getElementById("btnExportSectionSolidsDxf"),
   chkMembrane: document.getElementById("chkMembrane"),
   chkMembraneEdge: document.getElementById("chkMembraneEdge"),
   chkWoodWall: document.getElementById("chkWoodWall"),
@@ -330,6 +331,8 @@ let selectedWrwIds = new Set();
 let selectionDrag = null;
 const _worldProj = new THREE.Vector3();
 const _ndcScratch = new THREE.Vector3();
+const _ndcP0 = new THREE.Vector3();
+const _ndcP1 = new THREE.Vector3();
 const _viewPosScratch = new THREE.Vector3();
 const _gizmoCenterScratch = new THREE.Vector3();
 const _screenDirScratch = new THREE.Vector3();
@@ -342,6 +345,9 @@ const REACTION_TRANS_AXES = [
 ];
 const _leaderStart = new THREE.Vector3();
 const _leaderEnd = new THREE.Vector3();
+const _leaderDir = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
 const _labelNdc = new THREE.Vector3();
 const SELECTION_PICK_PX = 10;
 const SELECTION_NODE_PICK_PX = 14;
@@ -359,6 +365,7 @@ let dispContourScaleKey = null;
 let supportGizmoEntries = [];
 let reactionForceEntries = [];
 let nodeLabelEntries = [];
+let elemLabelEntries = [];
 let _nodeLabelLeaderMat = null;
 let currentModelPath = null;
 const inputEditors = new Map();
@@ -2925,6 +2932,7 @@ function animate() {
   updateSupportGizmoPositions();
   updateReactionForceDisplay();
   updateNodeLabelPositions();
+  updateElemLabelPositions();
   renderer.render(scene, camera);
 }
 
@@ -3559,6 +3567,268 @@ function sectionSolidEndpointMismatch(p0, p1, basis, length) {
   return end.distanceToSquared(p1) > tol * tol;
 }
 
+const _sectionSolidExportMaterial = new THREE.MeshBasicMaterial();
+
+function forEachSectionSolidMesh(model, visitor, options) {
+  if (!model || !Array.isArray(model.elements) || typeof visitor !== "function") return 0;
+  const opts = options || {};
+  const lc = opts.lc != null ? opts.lc : (el.lcSelect ? el.lcSelect.value : 1);
+  const defFac = opts.defFac != null ? opts.defFac : 0;
+  const deformed = !!opts.deformed;
+  if (deformed) return 0;
+
+  const nm = nodeMap(model);
+  const sectionById = modelSectionMap(model);
+  let count = 0;
+
+  for (const e of model.elements) {
+    const n0 = nm[e.n0];
+    const n1 = nm[e.n1];
+    if (!n0 || !n1) continue;
+    const sec = sectionById[e.section_id];
+    const dims = sectionDimsMeters(sec);
+    if (!sec || !dims) continue;
+
+    const p0u = nodePosition(n0, model, lc, defFac, false);
+    const p1u = nodePosition(n1, model, lc, defFac, false);
+    const axis = p1u.clone().sub(p0u);
+    const len = axis.length();
+    if (len < 1e-8) continue;
+
+    const geo = sectionSolidGeometry(sec.type, dims);
+    if (!geo) continue;
+
+    const basis = elementBasisVectors(e, p0u, p1u);
+    if (sectionSolidEndpointMismatch(p0u, p1u, basis, len)) continue;
+
+    const rot = new THREE.Matrix4().makeBasis(basis.vx, basis.vy, basis.vz);
+    const q = new THREE.Quaternion().setFromRotationMatrix(rot);
+    const mesh = new THREE.Mesh(geo, _sectionSolidExportMaterial);
+    mesh.position.copy(p0u);
+    mesh.quaternion.copy(q);
+    mesh.scale.set(len, 1, 1);
+    mesh.updateMatrixWorld(true);
+    visitor(mesh, e, sec);
+    count += 1;
+  }
+  return count;
+}
+
+function meshWorldTriangles(mesh, layerName) {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  if (!pos) return [];
+  const matrix = mesh.matrixWorld;
+  const index = geo.index;
+  const out = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+
+  function pushTri(i0, i1, i2) {
+    a.fromBufferAttribute(pos, i0).applyMatrix4(matrix);
+    b.fromBufferAttribute(pos, i1).applyMatrix4(matrix);
+    c.fromBufferAttribute(pos, i2).applyMatrix4(matrix);
+    out.push({
+      layer: layerName,
+      x1: a.x, y1: a.y, z1: a.z,
+      x2: b.x, y2: b.y, z2: b.z,
+      x3: c.x, y3: c.y, z3: c.z,
+    });
+  }
+
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      pushTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+    }
+  } else {
+    for (let i = 0; i < pos.count; i += 3) {
+      pushTri(i, i + 1, i + 2);
+    }
+  }
+  return out;
+}
+
+function collectSectionSolidTriangles(model) {
+  const triangles = [];
+  let meshCount = 0;
+  forEachSectionSolidMesh(model, function (mesh, elem) {
+    triangles.push.apply(triangles, meshWorldTriangles(mesh, "E" + elem.id));
+    meshCount += 1;
+  });
+  return { triangles: triangles, meshCount: meshCount };
+}
+
+function dxfLine(code, value) {
+  return String(code) + "\r\n" + String(value) + "\r\n";
+}
+
+function dxfNum(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  return n.toFixed(6).replace(/-0\.000000$/, "0.000000");
+}
+
+function dxfBounds(triangles) {
+  let xmin = Infinity;
+  let ymin = Infinity;
+  let zmin = Infinity;
+  let xmax = -Infinity;
+  let ymax = -Infinity;
+  let zmax = -Infinity;
+  triangles.forEach(function (tri) {
+    [
+      [tri.x1, tri.y1, tri.z1],
+      [tri.x2, tri.y2, tri.z2],
+      [tri.x3, tri.y3, tri.z3],
+    ].forEach(function (p) {
+      xmin = Math.min(xmin, p[0]);
+      ymin = Math.min(ymin, p[1]);
+      zmin = Math.min(zmin, p[2]);
+      xmax = Math.max(xmax, p[0]);
+      ymax = Math.max(ymax, p[1]);
+      zmax = Math.max(zmax, p[2]);
+    });
+  });
+  if (!Number.isFinite(xmin)) {
+    return { xmin: 0, ymin: 0, zmin: 0, xmax: 1, ymax: 1, zmax: 1 };
+  }
+  return { xmin: xmin, ymin: ymin, zmin: zmin, xmax: xmax, ymax: ymax, zmax: zmax };
+}
+
+function buildSectionSolidsDxf(triangles) {
+  const layers = { "0": true };
+  triangles.forEach(function (tri) {
+    layers[tri.layer] = true;
+  });
+  const layerNames = Object.keys(layers).sort();
+  const b = dxfBounds(triangles);
+
+  let out = "";
+  out += dxfLine(999, "Structural Toolbox section solids");
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "HEADER");
+  out += dxfLine(9, "$ACADVER");
+  out += dxfLine(1, "AC1009");
+  out += dxfLine(9, "$INSBASE");
+  out += dxfLine(10, "0.0");
+  out += dxfLine(20, "0.0");
+  out += dxfLine(30, "0.0");
+  out += dxfLine(9, "$EXTMIN");
+  out += dxfLine(10, dxfNum(b.xmin));
+  out += dxfLine(20, dxfNum(b.ymin));
+  out += dxfLine(30, dxfNum(b.zmin));
+  out += dxfLine(9, "$EXTMAX");
+  out += dxfLine(10, dxfNum(b.xmax));
+  out += dxfLine(20, dxfNum(b.ymax));
+  out += dxfLine(30, dxfNum(b.zmax));
+  out += dxfLine(0, "ENDSEC");
+
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "TABLES");
+  out += dxfLine(0, "TABLE");
+  out += dxfLine(2, "LTYPE");
+  out += dxfLine(70, 1);
+  out += dxfLine(0, "LTYPE");
+  out += dxfLine(2, "CONTINUOUS");
+  out += dxfLine(70, 64);
+  out += dxfLine(3, "Solid line");
+  out += dxfLine(72, 65);
+  out += dxfLine(73, 0);
+  out += dxfLine(40, "0.0");
+  out += dxfLine(0, "ENDTAB");
+  out += dxfLine(0, "TABLE");
+  out += dxfLine(2, "LAYER");
+  out += dxfLine(70, layerNames.length);
+  layerNames.forEach(function (name) {
+    out += dxfLine(0, "LAYER");
+    out += dxfLine(2, name);
+    out += dxfLine(70, 64);
+    out += dxfLine(62, 7);
+    out += dxfLine(6, "CONTINUOUS");
+  });
+  out += dxfLine(0, "ENDTAB");
+  out += dxfLine(0, "TABLE");
+  out += dxfLine(2, "STYLE");
+  out += dxfLine(70, 0);
+  out += dxfLine(0, "ENDTAB");
+  out += dxfLine(0, "ENDSEC");
+
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "BLOCKS");
+  out += dxfLine(0, "ENDSEC");
+
+  out += dxfLine(0, "SECTION");
+  out += dxfLine(2, "ENTITIES");
+  triangles.forEach(function (tri) {
+    out += dxfLine(0, "3DFACE");
+    out += dxfLine(8, tri.layer);
+    out += dxfLine(10, dxfNum(tri.x1));
+    out += dxfLine(20, dxfNum(tri.y1));
+    out += dxfLine(30, dxfNum(tri.z1));
+    out += dxfLine(11, dxfNum(tri.x2));
+    out += dxfLine(21, dxfNum(tri.y2));
+    out += dxfLine(31, dxfNum(tri.z2));
+    out += dxfLine(12, dxfNum(tri.x3));
+    out += dxfLine(22, dxfNum(tri.y3));
+    out += dxfLine(32, dxfNum(tri.z3));
+    out += dxfLine(13, dxfNum(tri.x3));
+    out += dxfLine(23, dxfNum(tri.y3));
+    out += dxfLine(33, dxfNum(tri.z3));
+  });
+  out += dxfLine(0, "ENDSEC");
+  out += dxfLine(0, "EOF");
+  return out;
+}
+
+function sectionSolidDxfFilename() {
+  const path = currentModelPath || "model.dat";
+  const base = path.replace(/^.*[\\/]/, "").replace(/\.dat$/i, "") || "model";
+  return base + "_section_solids.dxf";
+}
+
+function downloadTextFile(filename, text, mimeType) {
+  const blob = new Blob([text], { type: mimeType || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+}
+
+function exportSectionSolidsDxf() {
+  if (!currentModel) {
+    window.alert("モデルが読み込まれていません。");
+    return;
+  }
+  if (el.status) el.status.textContent = "Section solid DXF を生成中…";
+  if (el.btnExportSectionSolidsDxf) el.btnExportSectionSolidsDxf.disabled = true;
+
+  window.setTimeout(function () {
+    try {
+      const result = collectSectionSolidTriangles(currentModel);
+      if (!result.meshCount) {
+        window.alert("DXF に書き出せる section solid がありません（断面形状未対応、または部材がありません）。");
+        return;
+      }
+      const dxf = buildSectionSolidsDxf(result.triangles);
+      downloadTextFile(sectionSolidDxfFilename(), dxf, "application/dxf");
+      if (el.status) {
+        el.status.textContent = "DXF 出力: " + result.meshCount + " 部材, "
+          + result.triangles.length + " 面 (" + sectionSolidDxfFilename() + ")";
+      }
+    } catch (ex) {
+      window.alert("DXF 出力エラー: " + ex.message);
+      if (el.status) el.status.textContent = "DXF 出力エラー";
+    } finally {
+      if (el.btnExportSectionSolidsDxf) el.btnExportSectionSolidsDxf.disabled = !currentModel;
+    }
+  }, 0);
+}
+
 function elementBasisVectors(e, p0, p1) {
   const vx = p1.clone().sub(p0).normalize();
   if (e && Array.isArray(e.vy) && Array.isArray(e.vz)) {
@@ -3630,6 +3900,7 @@ function buildModelScene(model) {
   supportGizmoEntries = [];
   reactionForceEntries = [];
   nodeLabelEntries = [];
+  elemLabelEntries = [];
 
   enrichModelReactions(model);
 
@@ -3700,6 +3971,12 @@ function buildModelScene(model) {
       opacity: solidOpacity,
       side: THREE.DoubleSide,
     });
+    forEachSectionSolidMesh(model, function (mesh) {
+      mesh.material = mat;
+      mesh.renderOrder = 2;
+      modelGroup.add(mesh);
+    }, { lc: lc, defFac: 0, deformed: false });
+
     for (const e of model.elements) {
       const n0 = nm[e.n0];
       const n1 = nm[e.n1];
@@ -3714,27 +3991,16 @@ function buildModelScene(model) {
       }
       const p0u = nodePosition(n0, model, lc, defFac, false);
       const p1u = nodePosition(n1, model, lc, defFac, false);
-      const axis = p1u.clone().sub(p0u);
-      const len = axis.length();
-      if (len < 1e-8) continue;
       const geo = sectionSolidGeometry(sec.type, dims);
       if (!geo) {
         linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
         continue;
       }
       const basis = elementBasisVectors(e, p0u, p1u);
+      const len = p0u.distanceTo(p1u);
       if (sectionSolidEndpointMismatch(p0u, p1u, basis, len)) {
         linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
-        continue;
       }
-      const rot = new THREE.Matrix4().makeBasis(basis.vx, basis.vy, basis.vz);
-      const q = new THREE.Quaternion().setFromRotationMatrix(rot);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.copy(p0u);
-      mesh.quaternion.copy(q);
-      mesh.scale.set(len, 1, 1);
-      mesh.renderOrder = 2;
-      modelGroup.add(mesh);
     }
     if (linePts.length > 0) {
       addWideLineSegmentsFromPts(
@@ -3986,21 +4252,49 @@ function buildModelScene(model) {
     const p1 = nodePosition(n1, model, lc, defFac, deformed);
 
     if (showElemLabels) {
-      const p = offsetLabelPoint(elemPointAlong(p0, p1, 0.55), p0, p1, 0);
-      addElemLabel(String(e.id), p, span, elemLabelScale, labelGroup, LABEL_BG.elem, false);
+      addElemLabelWithLeader(
+        String(e.id),
+        elemPointAlong(p0, p1, 0.55),
+        p0,
+        p1,
+        1,
+        span,
+        elemLabelScale,
+        labelGroup,
+        LABEL_BG.elem,
+        false
+      );
     }
     if (showMaterial) {
       const text = elementMaterialText(e);
       if (text) {
-        const p = offsetLabelPoint(elemPointAlong(p0, p1, 0.67), p0, p1, 1);
-        addElemLabel(text, p, span, materialLabelScale, labelGroup, LABEL_BG.material);
+        addElemLabelWithLeader(
+          text,
+          elemPointAlong(p0, p1, 0.67),
+          p0,
+          p1,
+          1,
+          span,
+          materialLabelScale,
+          labelGroup,
+          LABEL_BG.material
+        );
       }
     }
     if (showSection) {
       const text = elementSectionText(e);
       if (text) {
-        const p = elemPointAlong(p0, p1, 0.25);
-        addElemLabel(text, p, span, sectionLabelScale, labelGroup, LABEL_BG.section);
+        addElemLabelWithLeader(
+          text,
+          elemPointAlong(p0, p1, 0.25),
+          p0,
+          p1,
+          -1,
+          span,
+          sectionLabelScale,
+          labelGroup,
+          LABEL_BG.section
+        );
       }
     }
   }
@@ -4127,10 +4421,11 @@ function nodeLabelLeaderMaterial() {
 function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
   const width = renderer.domElement.clientWidth;
   const height = renderer.domElement.clientHeight;
+  const leaderStart = nodePos.clone();
   if (width < 1 || height < 1) {
     return {
       labelPos: nodePos.clone().add(new THREE.Vector3(0, nodeMarkerSize(model) * 0.8, 0)),
-      leaderStart: nodePos.clone(),
+      leaderStart: leaderStart,
     };
   }
 
@@ -4143,15 +4438,7 @@ function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
 
   _ndcScratch.copy(nodePos).project(camera);
 
-  const edgePx = nodeRadiusPx + 2;
-  _labelNdc.set(
-    _ndcScratch.x + (sx * edgePx / width) * 2,
-    _ndcScratch.y + (sy * edgePx / height) * 2,
-    _ndcScratch.z
-  );
-  _leaderStart.copy(_labelNdc).unproject(camera);
-
-  const labelPx = nodeRadiusPx + 18;
+  const labelPx = nodeRadiusPx + 24;
   _labelNdc.set(
     _ndcScratch.x + (sx * labelPx / width) * 2,
     _ndcScratch.y + (sy * labelPx / height) * 2,
@@ -4159,15 +4446,22 @@ function computeNodeLabelPlacement(nodePos, model, camera, renderer) {
   );
   _leaderEnd.copy(_labelNdc).unproject(camera);
 
-  return { labelPos: _leaderEnd.clone(), leaderStart: _leaderStart.clone() };
+  return { labelPos: _leaderEnd.clone(), leaderStart: leaderStart };
 }
 
 function updateNodeLabelEntry(entry, model, camera, renderer) {
   const placement = computeNodeLabelPlacement(entry.nodePos, model, camera, renderer);
   entry.sprite.position.copy(placement.labelPos);
+  const leaderEnd = labelLeaderEnd(
+    placement.labelPos,
+    placement.leaderStart,
+    entry.sprite,
+    camera,
+    renderer
+  );
   const pos = entry.line.geometry.attributes.position;
   pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
-  pos.setXYZ(1, placement.labelPos.x, placement.labelPos.y, placement.labelPos.z);
+  pos.setXYZ(1, leaderEnd.x, leaderEnd.y, leaderEnd.z);
   pos.needsUpdate = true;
   entry.line.geometry.computeBoundingSphere();
 }
@@ -4176,6 +4470,112 @@ function updateNodeLabelPositions() {
   if (!camera || !renderer || !currentModel || nodeLabelEntries.length === 0) return;
   for (const entry of nodeLabelEntries) {
     updateNodeLabelEntry(entry, currentModel, camera, renderer);
+  }
+}
+
+function computeElemLabelPlacement(anchorPos, p0, p1, camera, renderer, side) {
+  const width = renderer.domElement.clientWidth;
+  const height = renderer.domElement.clientHeight;
+  const sign = side >= 0 ? 1 : -1;
+  const leaderStart = anchorPos.clone();
+  if (width < 1 || height < 1) {
+    return {
+      labelPos: offsetLabelPoint(anchorPos, p0, p1, sign),
+      leaderStart: leaderStart,
+    };
+  }
+
+  _ndcScratch.copy(anchorPos).project(camera);
+  const ndcZ = _ndcScratch.z;
+  _ndcP0.copy(p0).project(camera);
+  _ndcP1.copy(p1).project(camera);
+
+  let edx = _ndcP1.x - _ndcP0.x;
+  let edy = _ndcP1.y - _ndcP0.y;
+  const edLen = Math.hypot(edx, edy);
+  if (edLen < 1e-8) {
+    edx = 20 / width * 2;
+    edy = 24 / height * 2;
+  } else {
+    edx /= edLen;
+    edy /= edLen;
+  }
+
+  let sx = -edy * sign;
+  let sy = edx * sign;
+  const sLen = Math.hypot(sx, sy) || 1;
+  sx /= sLen;
+  sy /= sLen;
+
+  const labelPx = 28;
+  _labelNdc.set(
+    _ndcScratch.x + (sx * labelPx / width) * 2,
+    _ndcScratch.y + (sy * labelPx / height) * 2,
+    ndcZ
+  );
+  _leaderEnd.copy(_labelNdc).unproject(camera);
+
+  return { labelPos: _leaderEnd.clone(), leaderStart: leaderStart };
+}
+
+function worldLengthForScreenPixels(px, worldPos, camera, renderer) {
+  if (px <= 0) return 0;
+  const width = renderer.domElement.clientWidth;
+  if (width < 1) return 0;
+  _ndcScratch.copy(worldPos).project(camera);
+  const ndcZ = _ndcScratch.z;
+  _labelNdc.set(_ndcScratch.x + (px / width) * 2, _ndcScratch.y, ndcZ);
+  _leaderStart.copy(_labelNdc).unproject(camera);
+  return worldPos.distanceTo(_leaderStart);
+}
+
+function spriteExtentAlongDirection(sprite, worldDir, camera) {
+  const halfW = sprite.scale.x * 0.5;
+  const halfH = sprite.scale.y * 0.5;
+  _camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  _camUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+  const d = worldDir.lengthSq() > 1e-12 ? worldDir.clone().normalize() : _camRight;
+  return halfW * Math.abs(d.dot(_camRight)) + halfH * Math.abs(d.dot(_camUp));
+}
+
+function labelLeaderEnd(labelCenter, leaderStart, sprite, camera, renderer) {
+  _leaderDir.subVectors(labelCenter, leaderStart);
+  const dist = _leaderDir.length();
+  if (dist < 1e-8) return labelCenter.clone();
+  _leaderDir.divideScalar(dist);
+  const inset = spriteExtentAlongDirection(sprite, _leaderDir, camera);
+  const gap = worldLengthForScreenPixels(3, labelCenter, camera, renderer);
+  return labelCenter.clone().addScaledVector(_leaderDir, -(inset + gap));
+}
+
+function updateElemLabelEntry(entry, camera, renderer) {
+  const placement = computeElemLabelPlacement(
+    entry.anchorPos,
+    entry.p0,
+    entry.p1,
+    camera,
+    renderer,
+    entry.side
+  );
+  entry.sprite.position.copy(placement.labelPos);
+  const leaderEnd = labelLeaderEnd(
+    placement.labelPos,
+    placement.leaderStart,
+    entry.sprite,
+    camera,
+    renderer
+  );
+  const pos = entry.line.geometry.attributes.position;
+  pos.setXYZ(0, placement.leaderStart.x, placement.leaderStart.y, placement.leaderStart.z);
+  pos.setXYZ(1, leaderEnd.x, leaderEnd.y, leaderEnd.z);
+  pos.needsUpdate = true;
+  entry.line.geometry.computeBoundingSphere();
+}
+
+function updateElemLabelPositions() {
+  if (!camera || !renderer || elemLabelEntries.length === 0) return;
+  for (const entry of elemLabelEntries) {
+    updateElemLabelEntry(entry, camera, renderer);
   }
 }
 
@@ -6176,6 +6576,34 @@ function addElemLabel(text, point, span, scaleFactor, group, bg, transparent) {
   sprite.position.copy(point);
   sprite.renderOrder = 15;
   group.add(sprite);
+}
+
+function addElemLabelWithLeader(text, anchorPos, p0, p1, side, span, scaleFactor, group, bg, transparent) {
+  const sprite = makeTextSprite(text, span, {
+    bg: bg || LABEL_BG.elem,
+    fg: "#ffffff",
+    pad: 4,
+    scaleFactor: scaleFactor,
+    transparent: transparent !== false,
+  });
+  sprite.renderOrder = 16;
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(6, 3));
+  const line = new THREE.Line(lineGeo, nodeLabelLeaderMaterial());
+  line.frustumCulled = false;
+  line.renderOrder = 15;
+  const entry = {
+    anchorPos: anchorPos.clone(),
+    p0: p0.clone(),
+    p1: p1.clone(),
+    side: side,
+    sprite: sprite,
+    line: line,
+  };
+  updateElemLabelEntry(entry, camera, renderer);
+  group.add(sprite);
+  group.add(line);
+  elemLabelEntries.push(entry);
 }
 
 function addAnnotationLabel(text, point, dir, span, scaleFactor, group, bg) {
@@ -8576,6 +9004,9 @@ if (el.chkSectionSolids) {
     onResultsDisplayChanged();
     if (currentModel) rebuildScene();
   });
+}
+if (el.btnExportSectionSolidsDxf) {
+  el.btnExportSectionSolidsDxf.addEventListener("click", exportSectionSolidsDxf);
 }
 if (el.chkMembrane) {
   el.chkMembrane.addEventListener("change", () => {

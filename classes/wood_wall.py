@@ -298,15 +298,25 @@ class WoodRatedWall:
 
         return warnings
 
+    def _require_dims(self) -> tuple[float, float]:
+        if self.length is None or self.height is None:
+            raise ValueError(
+                "WOOD_RATED_WALL {0} length/height not resolved; "
+                "call resolve_length_height first".format(self.id)
+            )
+        return self.length, self.height
+
     @property
     def qa_kN(self):
         # Qa = 1.96 * m * L  [kN]
-        return 1.96 * self.multiplier * self.length
+        length, _ = self._require_dims()
+        return 1.96 * self.multiplier * length
 
     @property
     def delta(self):
         # Delta = RA * H [m]
-        return self.reference_drift * self.height
+        _, height = self._require_dims()
+        return self.reference_drift * height
 
     @property
     def k_n_per_m(self):
@@ -315,11 +325,13 @@ class WoodRatedWall:
 
     @property
     def diagonal_length(self):
-        return math.sqrt(self.length ** 2 + self.height ** 2)
+        length, height = self._require_dims()
+        return math.sqrt(length ** 2 + height ** 2)
 
     def equivalent_brace_ea(self, brace_count=1):
-        d = self.diagonal_length
-        ea_total = self.k_n_per_m * d ** 3 / max(self.length ** 2, common.PRES_ZERO)
+        length, height = self._require_dims()
+        d = math.sqrt(length ** 2 + height ** 2)
+        ea_total = self.k_n_per_m * d ** 3 / max(length ** 2, common.PRES_ZERO)
         return ea_total / max(brace_count, 1)
 
     def output_info(self):

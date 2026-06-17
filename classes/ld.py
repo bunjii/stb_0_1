@@ -23,7 +23,7 @@ class Lcase:
     def OutputLnameInfo(self):
         from dat_format import record_line
 
-        values = [self.lc, self.load_type]
+        values: list[int | str] = [self.lc, self.load_type]
         fmts = [">6", ">4"]
         if self.load_type == LC_TYPE_CUSTOM or self.label:
             values.append(self.label)

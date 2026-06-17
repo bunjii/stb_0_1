@@ -194,10 +194,10 @@ class DiaphragmMaterial:
         self.alpha = _alpha
         self.cid = None
         self.source = "DMAT"
-        self.multiplier = None
-        self.reference_drift = None
-        self.equivalent_gt = None
-        self.equivalent_thickness = None
+        self.multiplier: float | None = None
+        self.reference_drift: float | None = None
+        self.equivalent_gt: float | None = None
+        self.equivalent_thickness: float | None = None
 
     @property
     def nuyx(self):
@@ -416,6 +416,7 @@ class DiaphragmConnection:
         self.tolerance = _tolerance
         self.constraint_spacing = _constraint_spacing
         self.spring_properties = _spring_properties
+        self.auto_generated = False
 
     def OutputDConInfo(self):
         values = [
@@ -1090,9 +1091,12 @@ class CSTMembrane3:
         self.coords2d = np.array([[x1, y1], [x2, y2], [x3, y3]], dtype=np.float64)
 
     def CalcBMatrix(self):
-        x1, y1 = self.coords2d[0]
-        x2, y2 = self.coords2d[1]
-        x3, y3 = self.coords2d[2]
+        coords2d = self.coords2d
+        if coords2d is None:
+            raise RuntimeError("DMEM {0} coords2d is not initialized".format(self.id))
+        x1, y1 = coords2d[0]
+        x2, y2 = coords2d[1]
+        x3, y3 = coords2d[2]
 
         det2A = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1)
         if abs(det2A) < common.PRES_ZERO:
@@ -1126,11 +1130,20 @@ class CSTMembrane3:
             self.ek = np.zeros((6, 6), dtype=np.float64)
             self.ekG = np.zeros((9, 9), dtype=np.float64)
             return
+        B = self.B
+        T = self.T
+        if B is None or T is None:
+            raise RuntimeError("DMEM {0} B/T matrices are not initialized".format(self.id))
         self.D = self.diap.mat.DRotated(self.diap.theta)
-        self.ek = self.diap.t * self.area * (self.B.T @ self.D @ self.B)
-        self.ekG = self.T.T @ self.ek @ self.T
+        self.ek = self.diap.t * self.area * (B.T @ self.D @ B)
+        self.ekG = T.T @ self.ek @ T
 
     def CalcResults(self, num_lcs):
+        T = self.T
+        B = self.B
+        D = self.D
+        if T is None or B is None or D is None:
+            raise RuntimeError("DMEM {0} matrices are not initialized".format(self.id))
         self.strains = np.zeros((3, num_lcs), dtype=np.float64)
         self.stresses = np.zeros((3, num_lcs), dtype=np.float64)
         self.mforces = np.zeros((3, num_lcs), dtype=np.float64)
@@ -1139,9 +1152,9 @@ class CSTMembrane3:
             ug = np.zeros(9, dtype=np.float64)
             for j, n in enumerate([self.n0, self.n1, self.n2]):
                 ug[3 * j:3 * j + 3] = n.disps[0:3, i]
-            ul = self.T @ ug
-            strain = self.B @ ul
-            stress = self.D @ strain
+            ul = T @ ug
+            strain = B @ ul
+            stress = D @ strain
             self.strains[:, i] = strain
             self.stresses[:, i] = stress
             self.mforces[:, i] = stress * self.diap.t

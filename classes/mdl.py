@@ -1,9 +1,12 @@
 from cons import Cons
 import numpy as np
 import copy
+from typing import Literal
 
 from ejnt import EJnt
 from axis import Axis
+from elm import Elm1D
+from nd import Nd
 import ld
 import common
 import math
@@ -37,21 +40,21 @@ class Mdl:
                  _wshears = None,
                  _input_warnings = None):
 
-        self.nds        = _nds
-        self.elms       = _elms
-        self.ejnts      = _ejnts
-        self.mats       = _mats
-        self.secs       = _secs
-        self.cons       = _cons
+        self.nds        = _nds if _nds is not None else []
+        self.elms       = _elms if _elms is not None else []
+        self.ejnts      = _ejnts if _ejnts is not None else []
+        self.mats       = _mats if _mats is not None else []
+        self.secs       = _secs if _secs is not None else []
+        self.cons       = _cons if _cons is not None else []
         #self.inilds     = _lds
-        self.lds        = _lds #.copy()
-        self.elds       = _elds
-        self.glds       = _glds
-        self.axes       = _axes
-        self.plts       = _plts
-        self.lcases     = _lcases # added 250104
-        self.lcmbs      = _lcmbs  # added 250104
-        self.alds       = _alds   # added 250113
+        self.lds        = _lds if _lds is not None else []
+        self.elds       = _elds if _elds is not None else []
+        self.glds       = _glds if _glds is not None else []
+        self.axes       = _axes if _axes is not None else []
+        self.plts       = _plts if _plts is not None else []
+        self.lcases     = _lcases if _lcases is not None else []
+        self.lcmbs      = _lcmbs if _lcmbs is not None else []
+        self.alds       = _alds if _alds is not None else []
         self.dmats      = _dmats if _dmats is not None else []
         self.diaps      = _diaps if _diaps is not None else []
         self.dregs      = _dregs if _dregs is not None else []
@@ -212,7 +215,9 @@ class Mdl:
 
         for j in jnts:
 
-            e = self.FindElemFromEid(j.eid) 
+            e = self.FindElemFromEid(j.eid)
+            if e == -1:
+                continue
 
             if j.ryi == None:   j.Ryi = e.sec.mat.E * e.sec.Iy 
             else:               j.Ryi = j.ryi * e.len
@@ -341,7 +346,7 @@ class Mdl:
 
         return
 
-    def FindNodeFromId(self, _id):
+    def FindNodeFromId(self, _id) -> Nd | Literal[-1]:
 
         nd = list(filter(lambda n: n.id == _id, self.nds))
         if nd:
@@ -349,7 +354,7 @@ class Mdl:
         else:
             return -1
     
-    def FindNodeFromCid(self, _cid):
+    def FindNodeFromCid(self, _cid) -> Nd | Literal[-1]:
 
         nd = list(filter(lambda n: n.cid == _cid, self.nds))
         if nd:
@@ -357,7 +362,7 @@ class Mdl:
         else:
             return -1
 
-    def FindElemFromEid(self, _eid):
+    def FindElemFromEid(self, _eid) -> Elm1D | Literal[-1]:
 
         elm = list(filter(lambda e: e.id == _eid, self.elms))
         if elm:

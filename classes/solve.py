@@ -1,6 +1,7 @@
 import nd, elm, mat, sec, cons, common, mdl, io
 from ld import PLd, ALd, ELd, Lcase, Lcmb
 import copy
+import math
 import numpy as np
 import datetime
 
@@ -25,8 +26,8 @@ class Solve:
         
         self.mdl     = _mdl 
         self.ndof    = 6
-        self.num_row = None
-        self.num_lcs = None
+        self.num_row = 0
+        self.num_lcs = 0
 
         self.kG_orig =  None
 
@@ -64,10 +65,7 @@ class Solve:
                 # x = np.linalg.solve(kG, lm)
 
         if T is not None:
-            if np.ndim(x) == 1:
-                x = T @ x
-            else:
-                x = T @ x
+            x = T @ np.asarray(x)
         
         self.SetNodalDisps(x) 
         self.CalcElemForces()
@@ -137,6 +135,8 @@ class Solve:
     def CalcReactions(self, _disps):
 
         kG_orig = self.kG_orig
+        if kG_orig is None:
+            return
 
         U = _as_dense_disps(_disps)
 
@@ -176,7 +176,7 @@ class Solve:
         num_lcs = max([max_clc_pld, max_clc_eld, max_clc_gld])+1 
 
 
-        np.set_printoptions(precision=1, linewidth=np.inf, suppress=True, formatter={'float': '{: 0.1e}'.format})  
+        np.set_printoptions(precision=1, linewidth=200, suppress=True, formatter={'float': '{: 0.1e}'.format})  
 
         # for each element
         for e in elms:
@@ -295,7 +295,10 @@ class Solve:
             s_row = cid * ndof
             e_row = s_row + ndof
 
-            nd = mdl.FindNodeFromCid(cid) 
+            nd = mdl.FindNodeFromCid(cid)
+            if nd == -1:
+                cnt += 1
+                continue
             nd.disps = disps[s_row:e_row, :]
   
             cnt += 1 

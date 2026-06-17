@@ -237,9 +237,12 @@
         <label class="panel-check">
           <input type="checkbox" id="chkSection"> Section
         </label>
-        <label class="panel-check">
-          <input type="checkbox" id="chkSectionSolids"> Section solids
-        </label>
+        <div class="panel-check-row">
+          <label class="panel-check panel-check-compact">
+            <input type="checkbox" id="chkSectionSolids"> Section solids
+          </label>
+          <button type="button" id="btnExportSectionSolidsDxf" class="btn-panel-inline" title="Export section solid mesh to DXF (undeformed)">DXF export</button>
+        </div>
         <div class="panel-check-row">
           <label class="panel-check panel-check-compact">
             <input type="checkbox" id="chkMembrane" checked> Diaphragm members
