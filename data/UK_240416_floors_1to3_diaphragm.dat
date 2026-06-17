@@ -957,6 +957,7 @@ EJNT, 434,      ,      , 1E-06, 1E-06,
 EJNT, 435, 1E-06, 1E-06,      ,      ,
 EJNT, 436,      ,      , 1E-06, 1E-06,
 EJNT, 437, 1E-06, 1E-06,      ,      ,
+EJNT, 57, 0, 0, 0, 0
 
 # --- GRAVITY LOAD(GLOD) ---
 # GLOD,   LC,         GX,         GY,         GZ

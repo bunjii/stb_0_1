@@ -45,7 +45,7 @@ const ALPHA = {
   labelReactionMoment: 1.0,
   labelDefaultBg: 1.0,
   forceValueBg: 1.0,
-  elementGhost: 1.0,
+  elementGhost: 0.18,
   membraneFill: 0.32,
   membraneEdge: 0.9,
   woodWallFill: 0.35,
@@ -3339,10 +3339,12 @@ function addDispContourLineSegments(positions, colors, group) {
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
       linewidth: 1,
+      depthTest: false,
+      depthWrite: false,
     });
     const lines = new THREE.LineSegments(geo, mat);
     lines.frustumCulled = false;
-    lines.renderOrder = 12;
+    lines.renderOrder = 31;
     group.add(lines);
     return;
   }
@@ -3355,7 +3357,7 @@ function addDispContourLineSegments(positions, colors, group) {
     const g = (colors[base + 1] + colors[base + 4]) * 0.5;
     const b = (colors[base + 2] + colors[base + 5]) * 0.5;
     const hex = (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
-    addWideLineSegmentsFromPts(pts, hex, group, 12, lineW);
+    addWideLineSegmentsFromPts(pts, hex, group, 31, lineW, ALPHA.opaque, "overlay");
   }
 }
 
@@ -4073,9 +4075,10 @@ function buildModelScene(model) {
         linePtsDef,
         COLORS.deform,
         modelGroup,
-        3,
+        30,
         elementLineWidthPx(),
-        ALPHA.opaque
+        ALPHA.opaque,
+        "overlay"
       );
     }
   }
@@ -5017,14 +5020,16 @@ function addWideLineSegmentsFromPts(pts, color, group, renderOrder, lineWidthPx,
   const geo = new LineSegmentsGeometry();
   geo.setPositions(pts);
   const useOpaque = opaque === true;
+  const useOverlay = opaque === "overlay";
+  const isTransparent = useOverlay || (!useOpaque && opacity != null && opacity < ALPHA.opaque);
   const mat = new LineMaterial({
     color: color,
     linewidth: lineWidthPx,
     worldUnits: false,
-    transparent: useOpaque ? false : (opacity != null && opacity < ALPHA.opaque),
+    transparent: isTransparent,
     opacity: useOpaque ? 1 : (opacity != null ? opacity : ALPHA.opaque),
-    depthTest: useOpaque ? false : true,
-    depthWrite: useOpaque ? false : true,
+    depthTest: (useOpaque || useOverlay) ? false : true,
+    depthWrite: (useOpaque || useOverlay) ? false : !isTransparent,
   });
   const w = el.viewport.clientWidth || 1;
   const h = el.viewport.clientHeight || 1;
