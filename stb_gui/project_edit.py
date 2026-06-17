@@ -126,7 +126,7 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
                     "path": "load_conditions.seismic.ci",
                     "label": "Ci (入力)",
                     "type": "number",
-                    "value": seismic.ci,
+                    "value": seismic.ci if seismic.ci > 0 else "",
                     "hint": "Z×C0 相当（Rt 除く）",
                 },
                 {

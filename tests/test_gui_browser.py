@@ -47,6 +47,7 @@ class TestGuiBrowser(unittest.TestCase):
                 "--user-data-dir=" + profile,
                 "--no-first-run",
                 "--no-default-browser-check",
+                "--start-maximized",
             ])
             mock_open.assert_not_called()
 
@@ -62,7 +63,16 @@ class TestGuiBrowser(unittest.TestCase):
             "--user-data-dir=" + profile,
             "--no-first-run",
             "--no-default-browser-check",
+            "--start-maximized",
         ])
+
+    def test_chromium_launch_can_disable_start_maximized(self):
+        profile = "/tmp/stb-chromium-profile"
+        with mock.patch("stb_gui.browser.platform.system", return_value="Windows"), \
+             mock.patch("stb_gui.browser._chromium_profile_dir", return_value=profile), \
+             mock.patch.dict(os.environ, {"STB_GUI_START_MAXIMIZED": "0"}, clear=False):
+            cmd = _browser_launch_cmd(r"C:\Edge\msedge.exe", "edge", "http://127.0.0.1:8765/")
+        self.assertNotIn("--start-maximized", cmd)
 
     def test_linux_chromium_defaults_to_x11_on_wayland(self):
         profile = "/tmp/stb-chromium-profile"

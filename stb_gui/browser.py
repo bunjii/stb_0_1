@@ -57,12 +57,20 @@ def _chromium_profile_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".config", "structural-toolbox-gui")
 
 
+def _gui_start_maximized() -> bool:
+    val = os.environ.get("STB_GUI_START_MAXIMIZED", "1").strip().lower()
+    return val not in ("0", "false", "no", "off")
+
+
 def _chromium_common_args() -> List[str]:
-    return [
+    args = [
         "--user-data-dir=" + _chromium_profile_dir(),
         "--no-first-run",
         "--no-default-browser-check",
     ]
+    if _gui_start_maximized():
+        args.append("--start-maximized")
+    return args
 
 
 def _linux_chromium_extra_args() -> List[str]:
@@ -274,9 +282,16 @@ def _windows_default_browser_from_webbrowser() -> Optional[Tuple[str, str]]:
     return exe, _browser_kind(exe, os.path.basename(exe))
 
 
+def _macos_chromium_app_args(url: str) -> List[str]:
+    args = ["--app=" + url, "--app-id=" + STB_APP_ID]
+    if _gui_start_maximized():
+        args.append("--start-maximized")
+    return args
+
+
 def _macos_new_window(url: str) -> bool:
     for app in ("Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"):
-        if _spawn(["open", "-na", app, "--args", "--app=" + url, "--app-id=" + STB_APP_ID]):
+        if _spawn(["open", "-na", app, "--args", *_macos_chromium_app_args(url)]):
             return True
     if _spawn(["open", "-na", "Firefox", "--args", "-new-window", url]):
         return True

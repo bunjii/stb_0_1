@@ -18,7 +18,11 @@ from stb_gui.loads_view import (
 )
 from stb_gui.model_session import invalidate_model_session
 from stb_loads.equilibrium import invalidate_solved_model_cache
-from stb_gui.project_view import load_project_view_for_model, save_project_json_for_model
+from stb_gui.project_view import (
+    build_new_project_template_view,
+    load_project_view_for_model,
+    save_project_json_for_model,
+)
 from stb_gui.model_json import (
     project_root,
     list_model_files,
@@ -245,6 +249,19 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         try:
             resolve_model_path(path)
             data = load_project_view_for_model(path)
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        except OSError as ex:
+            _raise_os_error(ex)
+        return JSONResponse(data)
+
+    @app.get("/api/project/template")
+    def api_project_template(
+        path: str = Query(..., description="Relative path to .dat under project root"),
+    ):
+        try:
+            resolve_model_path(path)
+            data = build_new_project_template_view(path)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:

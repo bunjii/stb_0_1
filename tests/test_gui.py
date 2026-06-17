@@ -235,6 +235,64 @@ class TestGuiApi(unittest.TestCase):
         self.assertIn("edit", body)
         self.assertIn("sections", body["edit"])
 
+    def test_api_project_template_for_missing_sidecar(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416panel.dat"
+        r = self.client.get("/api/project/template", params={"path": path})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertFalse(body["found"])
+        self.assertTrue(body["draft"])
+        self.assertIn("UK_240416panel.project.json", body["project_path"])
+        self.assertEqual(body["raw"]["model"]["dat"], "UK_240416panel.dat")
+        self.assertIn("edit", body)
+        self.assertIn("sections", body["edit"])
+
+    def test_api_project_create_new_sidecar(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        import os
+        import tempfile
+
+        from stb_project import project_path_for_dat
+
+        examples_dir = os.path.join(_STB_ROOT, "examples")
+        fd, dat_path = tempfile.mkstemp(suffix=".dat", dir=examples_dir)
+        os.close(fd)
+        rel_path = "examples/" + os.path.basename(dat_path)
+        project_path = project_path_for_dat(dat_path)
+        try:
+            with open(dat_path, "w", encoding="utf-8") as fh:
+                fh.write("* minimal dat for project create test\n")
+
+            get_r = self.client.get("/api/project", params={"path": rel_path})
+            self.assertEqual(get_r.status_code, 200)
+            self.assertFalse(get_r.json()["found"])
+
+            tpl_r = self.client.get("/api/project/template", params={"path": rel_path})
+            self.assertEqual(tpl_r.status_code, 200)
+            project = tpl_r.json()["raw"]
+            project["building"]["name"] = "GUI Create Test"
+
+            put_r = self.client.put(
+                "/api/project",
+                params={"path": rel_path},
+                json={"project": project},
+            )
+            self.assertEqual(put_r.status_code, 200)
+            self.assertTrue(put_r.json()["view"]["found"])
+            self.assertEqual(
+                put_r.json()["view"]["raw"]["building"]["name"],
+                "GUI Create Test",
+            )
+            self.assertTrue(os.path.isfile(project_path))
+        finally:
+            if os.path.isfile(project_path):
+                os.remove(project_path)
+            if os.path.isfile(dat_path):
+                os.remove(dat_path)
+
     def test_api_project_save_round_trip(self):
         if self.client == None:
             self.skipTest("fastapi not installed")

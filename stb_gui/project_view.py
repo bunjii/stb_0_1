@@ -11,6 +11,7 @@ from stb_project import (
     DEFAULT_SEISMIC_TC,
     ProjectDefinition,
     ProjectSchemaError,
+    SCHEMA_VERSION,
     apply_project_load_combinations_to_dat,
     effective_seismic_ci,
     load_project_for_dat,
@@ -48,6 +49,90 @@ def project_relpath_for_model(dat_relpath: str) -> Optional[str]:
     return rel
 
 
+def default_project_dict_for_dat(dat_relpath: str) -> Dict[str, Any]:
+    """Return a minimal valid project.json payload for a .dat model."""
+
+    dat_relpath = normalize_model_relpath(dat_relpath)
+    if not dat_relpath:
+        raise ValueError("Model path is empty")
+    dat_name = os.path.basename(dat_relpath)
+    stem = os.path.splitext(dat_name)[0] or dat_name
+    return {
+        "schema": SCHEMA_VERSION,
+        "model": {"dat": dat_name},
+        "building": {
+            "name": stem,
+            "location": "",
+            "use": "",
+            "structure": "",
+            "calculation_route": "",
+            "designer": {
+                "name": "",
+                "qualification": "",
+                "license_number": "",
+                "contact": "",
+            },
+        },
+        "grids": [],
+        "stories": [],
+        "member_classes": [],
+        "design_checks": {
+            "wood": {
+                "enabled": False,
+                "load_cases": [],
+                "deflection_limit_ratio": 0.0,
+                "allowable_stresses": {
+                    "bending": 0.0,
+                    "shear": 0.0,
+                    "compression": 0.0,
+                    "tension": 0.0,
+                },
+            },
+        },
+        "report": {
+            "title": stem,
+            "mode": "practice",
+            "language": "ja",
+            "format": "markdown",
+            "include_manual_items": True,
+            "include_warnings": True,
+        },
+    }
+
+
+def build_new_project_template_view(dat_relpath: str) -> Dict[str, Any]:
+    """Editable project view payload for a model without a sidecar file."""
+
+    dat_relpath = normalize_model_relpath(dat_relpath)
+    raw = default_project_dict_for_dat(dat_relpath)
+    project = validate_project_dict(raw)
+    project_rel = project_relpath_for_model(dat_relpath) or ""
+    title_name = project.building.name or os.path.splitext(os.path.basename(dat_relpath))[0]
+    return {
+        "found": False,
+        "draft": True,
+        "dat_path": dat_relpath,
+        "project_path": project_rel,
+        "title": title_name + " — project.json (新規)",
+        "sections": [
+            {
+                "id": "new",
+                "title": "新規 project.json",
+                "rows": [
+                    {"label": "保存先", "value": project_rel},
+                    {"label": "解析ファイル", "value": project.dat_path},
+                    {
+                        "label": "説明",
+                        "value": "内容を編集して「保存」で project.json を作成します。",
+                    },
+                ],
+            }
+        ],
+        "edit": build_project_edit_form(project),
+        "raw": project.to_dict(),
+    }
+
+
 def load_project_view_for_model(dat_relpath: str) -> Dict[str, Any]:
     dat_relpath = normalize_model_relpath(dat_relpath)
     full = resolve_model_path(dat_relpath)
@@ -71,7 +156,7 @@ def load_project_view_for_model(dat_relpath: str) -> Dict[str, Any]:
                         },
                         {
                             "label": "説明",
-                            "value": "この .dat に対応する project.json が見つかりません。",
+                            "value": "この .dat に対応する project.json が見つかりません。「新規作成」から作成できます。",
                         },
                     ],
                 }

@@ -98,6 +98,53 @@ class TestProjectSchema(unittest.TestCase):
             "LUMP_TO_ABOVE_DIAPHRAGM",
         )
 
+    def test_seismic_empty_base_mass_policy_uses_default(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "ci": 0.2,
+                "base_mass_policy": "",
+            }
+        }
+        project = validate_project_dict(data)
+        self.assertEqual(
+            project.load_conditions.seismic.base_mass_policy,
+            "LUMP_TO_ABOVE_DIAPHRAGM",
+        )
+
+    def test_seismic_metadata_without_ci_is_valid(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "base_mass_policy": "IGNORE_AT_BASE",
+                "base_level": "1",
+            }
+        }
+        project = validate_project_dict(data)
+        self.assertEqual(project.load_conditions.seismic.ci, 0.0)
+        self.assertEqual(
+            project.load_conditions.seismic.base_mass_policy,
+            "IGNORE_AT_BASE",
+        )
+
+    def test_seismic_directions_require_positive_ci_or_c0(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "ci": 0.0,
+                "directions": [
+                    {
+                        "name": "X+",
+                        "axis": "x",
+                        "load_case": 1,
+                        "sign": 1,
+                    }
+                ],
+            }
+        }
+        with self.assertRaises(ProjectSchemaError):
+            validate_project_dict(data)
+
     def test_seismic_masses_base_and_diaphragm_roles(self):
         data = _minimal_project()
         data["load_conditions"] = {

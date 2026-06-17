@@ -75,6 +75,7 @@ const OPTIONS_DEFAULTS = {
   reactionArrowSize: 1.0,
   inputLoadType: "all",
   supportGizmoSize: 25,
+  axesSize: 100,
   supportLineWidth: 2,
   dispContourLineWidth: 2.5,
   elementLineWidth: 2.0,
@@ -96,6 +97,7 @@ const OPTIONS_LIMITS = {
   loadArrowSize: { min: 0.1, max: 5.0 },
   reactionArrowSize: { min: 0.1, max: 5.0 },
   supportGizmoSize: { min: 20, max: 100 },
+  axesSize: { min: 20, max: 200 },
   supportLineWidth: { min: 0.5, max: 3 },
   dispContourLineWidth: { min: 0.5, max: 3 },
   elementLineWidth: { min: 0.5, max: 3 },
@@ -293,6 +295,8 @@ const el = {
   optReactionArrowVal: document.getElementById("optReactionArrowVal"),
   optSupportGizmo: document.getElementById("optSupportGizmo"),
   optSupportGizmoVal: document.getElementById("optSupportGizmoVal"),
+  optAxesSize: document.getElementById("optAxesSize"),
+  optAxesSizeVal: document.getElementById("optAxesSizeVal"),
   optSupportLineWidth: document.getElementById("optSupportLineWidth"),
   optDispContourLineWidth: document.getElementById("optDispContourLineWidth"),
   optElementLineWidth: document.getElementById("optElementLineWidth"),
@@ -2391,7 +2395,7 @@ async function restoreEditHistoryEntry(snapshot, redoTarget) {
     const current = await fetchInputText(path);
     redoTarget.push({ path: path, text: current });
     await saveInputText(path, snapshot.text);
-    await loadSelectedModel(false, { keepSelection: true });
+    await loadSelectedModel(false, { keepSelection: true, keepCamera: true });
     pruneSelectionToModel();
     return true;
   } catch (ex) {
@@ -2564,6 +2568,7 @@ async function applyModelEdit(extra) {
     const prevWrw = new Set(selectedWrwIds);
     await loadSelectedModel(false, {
       keepSelection: !destructive && !createdDmem && !createdWrw,
+      keepCamera: true,
     });
     if (createdDmem) {
       const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
@@ -3988,11 +3993,30 @@ function fitCamera(model) {
   controls.update();
 }
 
+function captureCameraState() {
+  if (!camera || !controls) return null;
+  return {
+    position: camera.position.clone(),
+    target: controls.target.clone(),
+    near: camera.near,
+    far: camera.far,
+  };
+}
+
+function restoreCameraState(state) {
+  if (!state || !camera || !controls) return;
+  camera.position.copy(state.position);
+  controls.target.copy(state.target);
+  camera.near = state.near;
+  camera.far = state.far;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
 function updateWorldAxes(model) {
   clearGroup(axesGroup);
   if (!showWorldAxes) return;
-  const span = modelSpan(model);
-  const len = Math.max(span * 0.1, 0.12);
+  const len = worldAxesLength(model);
   const origin = new THREE.Vector3(0, 0, 0);
   const lineW = Math.max(supportLineWidthPx(), 1.5);
   const axes = [
@@ -4476,6 +4500,14 @@ function supportGizmoSize(model) {
   const span = modelSpan(model);
   const base = Math.max(span * 0.022, 0.07);
   const pct = parseFloat(viewerOptions.supportGizmoSize);
+  if (!isFinite(pct) || pct < 1) return base;
+  return base * (pct / 100);
+}
+
+function worldAxesLength(model) {
+  const span = modelSpan(model);
+  const base = Math.max(span * 0.1, 0.12);
+  const pct = parseFloat(viewerOptions.axesSize);
   if (!isFinite(pct) || pct < 1) return base;
   return base * (pct / 100);
 }
@@ -7677,6 +7709,10 @@ async function fetchProjectView(path, targetWindow) {
   return fetchApiJson("/api/project?path=" + encodeURIComponent(path), targetWindow || window);
 }
 
+async function fetchProjectTemplate(path, targetWindow) {
+  return fetchApiJson("/api/project/template?path=" + encodeURIComponent(path), targetWindow || window);
+}
+
 async function saveProjectJson(datPath, project, targetWindow) {
   return fetchApiJson(
     "/api/project?path=" + encodeURIComponent(datPath),
@@ -7698,6 +7734,8 @@ function escapeHtml(text) {
 }
 
 const DEFAULT_SEISMIC_RT = 1.0;
+const DEFAULT_SEISMIC_TC = 0.6;
+const DEFAULT_BASE_MASS_POLICY = "LUMP_TO_ABOVE_DIAPHRAGM";
 
 function deepCloneJson(value) {
   return JSON.parse(JSON.stringify(value));
@@ -7764,10 +7802,15 @@ function parseProjectFieldValue(type, raw, path) {
   if (type === "bool") {
     return text === "true" || text === "1" || text === "はい";
   }
+  if (type === "select") {
+    if (!text) return undefined;
+    return text;
+  }
   if (type === "number") {
     if (!text) {
       if (
-        path === "load_conditions.seismic.rt"
+        path === "load_conditions.seismic.ci"
+        || path === "load_conditions.seismic.rt"
         || path === "load_conditions.seismic.design_period_s"
         || path === "load_conditions.seismic.height_m"
         || path === "load_conditions.seismic.base_elevation"
@@ -7779,6 +7822,9 @@ function parseProjectFieldValue(type, raw, path) {
     const n = Number(text);
     if (!Number.isFinite(n)) {
       throw new Error("数値を入力してください: " + raw);
+    }
+    if (path === "load_conditions.seismic.ci" && n <= 0) {
+      return undefined;
     }
     return n;
   }
@@ -7855,14 +7901,42 @@ function filterEmptyProjectTableRows(project) {
 }
 
 function normalizeSeismicSettings(project) {
-  const seismic = project.load_conditions && project.load_conditions.seismic;
-  if (!seismic) return;
+  const loadConditions = project.load_conditions;
+  if (!loadConditions) return;
+  const seismic = loadConditions.seismic;
+  if (!seismic || typeof seismic !== "object") return;
+
+  const ci = Number(seismic.ci);
+  if (!Number.isFinite(ci) || ci <= 0) {
+    delete seismic.ci;
+  }
+  if (seismic.c0 === "" || seismic.c0 == null) {
+    delete seismic.c0;
+  } else {
+    const c0 = Number(seismic.c0);
+    if (!Number.isFinite(c0) || c0 <= 0) {
+      delete seismic.c0;
+    }
+  }
+  if (seismic.z === "" || seismic.z == null) {
+    delete seismic.z;
+  } else {
+    const z = Number(seismic.z);
+    if (!Number.isFinite(z) || z <= 0) {
+      delete seismic.z;
+    }
+  }
   const rt = Number(seismic.rt);
   if (!Number.isFinite(rt) || rt <= 0) {
     delete seismic.rt;
   }
   if (seismic.base_level != null && String(seismic.base_level).trim() === "") {
     delete seismic.base_level;
+  }
+  if (seismic.base_mass_policy != null && String(seismic.base_mass_policy).trim() === "") {
+    delete seismic.base_mass_policy;
+  } else if (seismic.base_mass_policy === DEFAULT_BASE_MASS_POLICY) {
+    delete seismic.base_mass_policy;
   }
   if (seismic.base_elevation === "" || seismic.base_elevation == null) {
     delete seismic.base_elevation;
@@ -7873,11 +7947,29 @@ function normalizeSeismicSettings(project) {
   if (seismic.height_m === "" || seismic.height_m == null) {
     delete seismic.height_m;
   }
-  if (seismic.steel_ratio_alpha === "" || seismic.steel_ratio_alpha == null) {
+  const steelRatio = Number(seismic.steel_ratio_alpha);
+  if (!Number.isFinite(steelRatio) || steelRatio === 0) {
     delete seismic.steel_ratio_alpha;
   }
-  if (seismic.tc === "" || seismic.tc == null) {
+  const tc = Number(seismic.tc);
+  if (!Number.isFinite(tc) || Math.abs(tc - DEFAULT_SEISMIC_TC) < 1.0e-12) {
     delete seismic.tc;
+  }
+  const liveLoadFactor = Number(seismic.live_load_factor);
+  if (!Number.isFinite(liveLoadFactor) || liveLoadFactor === 0) {
+    delete seismic.live_load_factor;
+  }
+  if (seismic.dead_load_lc === "" || seismic.dead_load_lc == null) {
+    delete seismic.dead_load_lc;
+  }
+  if (seismic.live_load_lc === "" || seismic.live_load_lc == null) {
+    delete seismic.live_load_lc;
+  }
+  if (Array.isArray(seismic.directions) && seismic.directions.length === 0) {
+    delete seismic.directions;
+  }
+  if (Object.keys(seismic).length === 0) {
+    loadConditions.seismic = {};
   }
 }
 
@@ -8105,8 +8197,20 @@ function collectProjectFromFormRoot(formRoot, editForm, baseProject) {
   return out;
 }
 
+function buildProjectFieldMap(editForm) {
+  const map = new Map();
+  if (!editForm || !editForm.sections) return map;
+  for (const section of editForm.sections) {
+    for (const field of section.fields || []) {
+      if (field.path) map.set(field.path, field);
+    }
+  }
+  return map;
+}
+
 function populateFormFromProject(formRoot, editForm, project) {
   if (!formRoot || !editForm || !project) return;
+  const fieldMap = buildProjectFieldMap(editForm);
 
   for (const input of formRoot.querySelectorAll(".proj-input[data-path]")) {
     const path = input.getAttribute("data-path");
@@ -8115,6 +8219,10 @@ function populateFormFromProject(formRoot, editForm, project) {
     let cur = project;
     for (const p of parts) {
       cur = cur == null ? undefined : cur[p];
+    }
+    const fieldDef = fieldMap.get(path);
+    if ((cur == null || cur === "") && fieldDef && fieldDef.value != null && fieldDef.value !== "") {
+      cur = fieldDef.value;
     }
     if (path === "load_conditions.seismic.rt" && (cur == null || cur === "")) {
       cur = DEFAULT_SEISMIC_RT;
@@ -8224,6 +8332,7 @@ function initProjectEditorWindow(w, view, title) {
   doc.write("</style></head><body>");
   doc.write("<div class=\"toolbar\">");
   doc.write("<button type=\"button\" id=\"btnSave\">保存</button>");
+  doc.write("<button type=\"button\" id=\"btnCreate\" class=\"secondary\">新規作成</button>");
   doc.write("<button type=\"button\" id=\"btnReload\" class=\"secondary\">再読込</button>");
   doc.write("<button type=\"button\" id=\"btnWind4Dir\" class=\"secondary\">風4方向を生成 (WX±/WY±)</button>");
   doc.write("<span class=\"status\" id=\"status\">ready</span>");
@@ -8255,8 +8364,8 @@ function initProjectEditorWindow(w, view, title) {
   }
 
   function renderFormTab() {
-    if (!view.found || !editForm) {
-      tabForm.innerHTML = "<div class=\"banner\">対応する project.json が見つかりません。JSON タブから新規作成はできません。</div>";
+    if (!editForm) {
+      tabForm.innerHTML = "<div class=\"banner\">対応する project.json が見つかりません。ツールバーの「新規作成」から project.json を作成できます。</div>";
       return;
     }
     let html = "";
@@ -8450,6 +8559,17 @@ function initProjectEditorWindow(w, view, title) {
     return normalizeProjectPayload(project);
   }
 
+  function syncEditorAvailability() {
+    const editable = !!(baseProject && editForm);
+    jsonEditor.disabled = !editable;
+    const jsonTab = doc.querySelector(".tab[data-tab=\"json\"]");
+    if (jsonTab) jsonTab.style.display = editable ? "" : "none";
+    const btnCreate = doc.getElementById("btnCreate");
+    if (btnCreate) btnCreate.style.display = (!view.found && !view.draft) ? "" : "none";
+    const btnSave = doc.getElementById("btnSave");
+    if (btnSave) btnSave.textContent = (view.draft && !view.found) ? "作成して保存" : "保存";
+  }
+
   function applySavedView(savedView) {
     view = savedView;
     baseProject = savedView.raw ? deepCloneJson(savedView.raw) : null;
@@ -8462,23 +8582,26 @@ function initProjectEditorWindow(w, view, title) {
       jsonEditor.value = "";
     }
     doc.title = savedView.title || title;
+    syncEditorAvailability();
   }
 
   renderFormTab();
   if (baseProject) {
     jsonEditor.value = JSON.stringify(baseProject, null, 2);
-  } else {
-    jsonEditor.disabled = true;
-    doc.querySelector(".tab[data-tab=\"json\"]").style.display = "none";
   }
+  syncEditorAvailability();
 
   tabs.forEach((tabBtn) => {
     tabBtn.addEventListener("click", () => switchTab(tabBtn.getAttribute("data-tab")));
   });
 
   doc.getElementById("btnSave").addEventListener("click", async () => {
-    if (!view.found) {
-      alert("project.json が存在しないため保存できません。");
+    if (!view.found && !view.draft) {
+      alert("先に「新規作成」を実行してください。");
+      return;
+    }
+    if (!baseProject || !editForm) {
+      alert("編集可能な project.json がありません。");
       return;
     }
     try {
@@ -8492,6 +8615,19 @@ function initProjectEditorWindow(w, view, title) {
     } catch (ex) {
       setWinStatus("save failed");
       alert("保存に失敗しました: " + ex.message);
+    }
+  });
+
+  doc.getElementById("btnCreate").addEventListener("click", async () => {
+    if (view.found) return;
+    try {
+      setWinStatus("creating template...");
+      const draftView = await fetchProjectTemplate(view.dat_path, w);
+      applySavedView(draftView);
+      setWinStatus("新規作成 — 編集してください");
+    } catch (ex) {
+      setWinStatus("create failed");
+      alert("新規作成テンプレートの取得に失敗しました: " + ex.message);
     }
   });
 
@@ -8510,8 +8646,8 @@ function initProjectEditorWindow(w, view, title) {
   });
 
   doc.getElementById("btnWind4Dir").addEventListener("click", () => {
-    if (!view.found || !baseProject || !editForm) {
-      alert("project.json が存在しないため実行できません。");
+    if (!baseProject || !editForm) {
+      alert("project.json が読み込まれていないため実行できません。");
       return;
     }
     try {
@@ -8590,7 +8726,7 @@ function openLoadsVerifyWindow() {
 }
 
 window.openProjectWindow = openProjectWindow;
-window.reloadCurrentModel = () => loadSelectedModel(false);
+window.reloadCurrentModel = () => loadSelectedModel(false, { keepCamera: true });
 window.refreshWindVisual = () => loadWindVisualForCurrentModel().then(function () {
   if (currentModel) rebuildScene();
 });
@@ -9016,6 +9152,7 @@ async function loadSelectedModel(solve, options) {
   options = options || {};
   const path = getCurrentModelPath();
   if (!path) return;
+  const cameraState = options.keepCamera ? captureCameraState() : null;
   if (!options.keepSelection) clearSelection();
   if (solve) {
     setStatus("Solving " + path + "…");
@@ -9043,7 +9180,11 @@ async function loadSelectedModel(solve, options) {
     await loadWindVisualForCurrentModel();
     buildModelScene(currentModel);
     if (!solve || !complete) {
-      fitCamera(currentModel);
+      if (cameraState) {
+        restoreCameraState(cameraState);
+      } else {
+        fitCamera(currentModel);
+      }
     }
     saveLastModelPath(path);
   } catch (ex) {
@@ -9535,6 +9676,10 @@ function readOptionsFromUi() {
     "reactionArrowSize", parseFloat(el.optReactionArrow.value) || OPTIONS_DEFAULTS.reactionArrowSize);
   viewerOptions.supportGizmoSize = clampViewerOption(
     "supportGizmoSize", parseInt(el.optSupportGizmo.value, 10) || OPTIONS_DEFAULTS.supportGizmoSize);
+  if (el.optAxesSize) {
+    viewerOptions.axesSize = clampViewerOption(
+      "axesSize", parseInt(el.optAxesSize.value, 10) || OPTIONS_DEFAULTS.axesSize);
+  }
   viewerOptions.supportLineWidth = clampViewerOption(
     "supportLineWidth", parseFloat(el.optSupportLineWidth.value) || OPTIONS_DEFAULTS.supportLineWidth);
   viewerOptions.dispContourLineWidth = clampViewerOption(
@@ -9587,6 +9732,10 @@ function applyOptionsToUi() {
   }
   el.optSupportGizmo.value = String(viewerOptions.supportGizmoSize);
   el.optSupportGizmoVal.textContent = String(viewerOptions.supportGizmoSize);
+  if (el.optAxesSize) {
+    el.optAxesSize.value = String(viewerOptions.axesSize);
+    el.optAxesSizeVal.textContent = String(viewerOptions.axesSize);
+  }
   el.optSupportLineWidth.value = String(viewerOptions.supportLineWidth);
   el.optDispContourLineWidth.value = String(viewerOptions.dispContourLineWidth);
   if (el.optElementLineWidth) el.optElementLineWidth.value = String(viewerOptions.elementLineWidth);
@@ -9709,6 +9858,7 @@ function loadViewerOptions() {
     if (typeof st.loadArrowSize === "number") viewerOptions.loadArrowSize = st.loadArrowSize;
     if (typeof st.reactionArrowSize === "number") viewerOptions.reactionArrowSize = st.reactionArrowSize;
     if (typeof st.supportGizmoSize === "number") viewerOptions.supportGizmoSize = st.supportGizmoSize;
+    if (typeof st.axesSize === "number") viewerOptions.axesSize = st.axesSize;
     if (typeof st.supportLineWidth === "number") viewerOptions.supportLineWidth = st.supportLineWidth;
     if (typeof st.dispContourLineWidth === "number") viewerOptions.dispContourLineWidth = st.dispContourLineWidth;
     if (typeof st.elementLineWidth === "number") viewerOptions.elementLineWidth = st.elementLineWidth;
@@ -9756,6 +9906,12 @@ function initViewerOptions() {
     el.optSupportGizmoVal.textContent = el.optSupportGizmo.value;
     onOptionsChanged();
   });
+  if (el.optAxesSize) {
+    el.optAxesSize.addEventListener("input", () => {
+      el.optAxesSizeVal.textContent = el.optAxesSize.value;
+      onOptionsChanged();
+    });
+  }
   el.optSupportLineWidth.addEventListener("input", onOptionsChanged);
   el.optSupportLineWidth.addEventListener("change", onOptionsChanged);
   el.optDispContourLineWidth.addEventListener("input", onOptionsChanged);

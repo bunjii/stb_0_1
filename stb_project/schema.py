@@ -1539,7 +1539,7 @@ def _parse_seismic_load_settings(raw):
             raise ProjectSchemaError("project.load_conditions.seismic.z must be positive")
 
     ci = _optional_number(raw, "ci", "project.load_conditions.seismic", default=0.0)
-    if c0 is None and ci <= 0.0:
+    if c0 is None and ci <= 0.0 and directions:
         raise ProjectSchemaError("project.load_conditions.seismic.c0 or ci must be positive")
 
     return SeismicLoadSettings(
@@ -1655,6 +1655,8 @@ def _optional_string(raw, key, path, default=""):
     value = raw.get(key, default)
     if type(value) is not str:
         raise ProjectSchemaError(path + "." + key + " must be a string")
+    if value == "" and default != "":
+        return default
     return value
 
 
