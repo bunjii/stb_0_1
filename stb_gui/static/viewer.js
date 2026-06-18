@@ -290,6 +290,11 @@ const el = {
   contextMenuDiapMultiplier: document.getElementById("contextMenuDiapMultiplier"),
   contextMenuDiapHint: document.getElementById("contextMenuDiapHint"),
   contextMenuElemEdits: document.getElementById("contextMenuElemEdits"),
+  contextMenuTogglePick: document.getElementById("contextMenuTogglePick"),
+  contextMenuShowMembersOnly: document.getElementById("contextMenuShowMembersOnly"),
+  contextMenuHideMembers: document.getElementById("contextMenuHideMembers"),
+  contextMenuShowAllMembers: document.getElementById("contextMenuShowAllMembers"),
+  contextMenuPickSection: document.getElementById("contextMenuPickSection"),
   ejntEditPanel: document.getElementById("ejntEditPanel"),
   ejntEditText: document.getElementById("ejntEditText"),
   btnEjntEditApply: document.getElementById("btnEjntEditApply"),
@@ -345,7 +350,13 @@ let selectedElementIds = new Set();
 let selectedNodeIds = new Set();
 let selectedDmemIds = new Set();
 let selectedWrwIds = new Set();
+let memberVisibilityFilter = "all";
+let visibilityElementIds = new Set();
+let visibilityDmemIds = new Set();
+let visibilityWrwIds = new Set();
+let visibleNodeIdsCache = null;
 let selectionDrag = null;
+let viewportRightDrag = null;
 const _worldProj = new THREE.Vector3();
 const _ndcScratch = new THREE.Vector3();
 const _ndcP0 = new THREE.Vector3();
@@ -369,6 +380,7 @@ const _labelNdc = new THREE.Vector3();
 const SELECTION_PICK_PX = 10;
 const SELECTION_NODE_PICK_PX = 14;
 const SELECTION_DRAG_MIN_PX = 4;
+const VIEWPORT_CONTEXT_MENU_DRAG_PX = 4;
 const SELECTION_LIST_LIMIT = 80;
 const MAX_EDIT_UNDO = 50;
 const WIND_FLOW_SURFACE_GAP_RATIO = 0.06;
@@ -895,6 +907,122 @@ function clearSelection() {
   updateSelectionPanel();
 }
 
+function invalidateGeometryVisibilityCache() {
+  visibleNodeIdsCache = null;
+}
+
+function isGeometryItemVisible(itemId, targetIds) {
+  if (memberVisibilityFilter === "all") return true;
+  const inSet = targetIds.has(itemId);
+  if (memberVisibilityFilter === "only") return inSet;
+  if (memberVisibilityFilter === "hide") return !inSet;
+  return true;
+}
+
+function isElementVisible(elemId) {
+  return isGeometryItemVisible(elemId, visibilityElementIds);
+}
+
+function isDmemVisible(dmemId) {
+  return isGeometryItemVisible(dmemId, visibilityDmemIds);
+}
+
+function isWrwVisible(wrwId) {
+  return isGeometryItemVisible(wrwId, visibilityWrwIds);
+}
+
+function buildVisibleNodeIds(model) {
+  const ids = new Set();
+  if (!model) return ids;
+  if (memberVisibilityFilter === "all") {
+    for (const n of model.nodes) ids.add(n.id);
+    return ids;
+  }
+  for (const e of model.elements) {
+    if (!isElementVisible(e.id)) continue;
+    ids.add(e.n0);
+    ids.add(e.n1);
+  }
+  for (const mem of model.membrane_elements || []) {
+    if (!isDmemVisible(mem.id)) continue;
+    for (const nid of mem.nodes || []) ids.add(nid);
+  }
+  for (const wall of model.wood_rated_walls || []) {
+    if (!isWrwVisible(wall.id)) continue;
+    for (const nid of wall.nodes || []) ids.add(nid);
+  }
+  return ids;
+}
+
+function isNodeVisible(nodeId) {
+  if (memberVisibilityFilter === "all") return true;
+  if (!currentModel) return true;
+  if (visibleNodeIdsCache == null) {
+    visibleNodeIdsCache = buildVisibleNodeIds(currentModel);
+  }
+  return visibleNodeIdsCache.has(nodeId);
+}
+
+function isMemberElementVisible(elemId) {
+  return isElementVisible(elemId);
+}
+
+function resetMemberVisibilityFilter() {
+  memberVisibilityFilter = "all";
+  visibilityElementIds = new Set();
+  visibilityDmemIds = new Set();
+  visibilityWrwIds = new Set();
+  invalidateGeometryVisibilityCache();
+}
+
+function pruneMemberVisibilityFilter() {
+  if (!currentModel || memberVisibilityFilter === "all") return;
+  const validElems = new Set(currentModel.elements.map(function (e) { return e.id; }));
+  const validDmem = new Set((currentModel.membrane_elements || []).map(function (m) { return m.id; }));
+  const validWrw = new Set((currentModel.wood_rated_walls || []).map(function (w) { return w.id; }));
+  visibilityElementIds = new Set(
+    Array.from(visibilityElementIds).filter(function (id) { return validElems.has(id); })
+  );
+  visibilityDmemIds = new Set(
+    Array.from(visibilityDmemIds).filter(function (id) { return validDmem.has(id); })
+  );
+  visibilityWrwIds = new Set(
+    Array.from(visibilityWrwIds).filter(function (id) { return validWrw.has(id); })
+  );
+  invalidateGeometryVisibilityCache();
+  if (memberVisibilityFilter === "hide"
+    && visibilityElementIds.size === 0
+    && visibilityDmemIds.size === 0
+    && visibilityWrwIds.size === 0) {
+    resetMemberVisibilityFilter();
+    if (currentModel) buildModelScene(currentModel);
+  }
+}
+
+function applyMemberVisibilityFilter(mode) {
+  if (mode === "all") {
+    resetMemberVisibilityFilter();
+  } else {
+    const hasSel = selectedElementIds.size > 0
+      || selectedDmemIds.size > 0
+      || selectedWrwIds.size > 0;
+    if (!hasSel) return;
+    if (mode === "hide" && memberVisibilityFilter === "hide") {
+      selectedElementIds.forEach(function (id) { visibilityElementIds.add(id); });
+      selectedDmemIds.forEach(function (id) { visibilityDmemIds.add(id); });
+      selectedWrwIds.forEach(function (id) { visibilityWrwIds.add(id); });
+    } else {
+      memberVisibilityFilter = mode;
+      visibilityElementIds = new Set(selectedElementIds);
+      visibilityDmemIds = new Set(selectedDmemIds);
+      visibilityWrwIds = new Set(selectedWrwIds);
+    }
+    invalidateGeometryVisibilityCache();
+  }
+  hideContextMenu();
+  if (currentModel) buildModelScene(currentModel);
+}
+
 function setSelectedWrwIds(ids, mode) {
   const next = mode === "replace" ? new Set() : new Set(selectedWrwIds);
   for (const id of ids) {
@@ -1047,6 +1175,18 @@ function segmentIntersectsRect(ax, ay, bx, by, x0, y0, x1, y1) {
   return false;
 }
 
+function segmentInsideRect(ax, ay, bx, by, x0, y0, x1, y1) {
+  return pointInRect(ax, ay, x0, y0, x1, y1) && pointInRect(bx, by, x0, y0, x1, y1);
+}
+
+function polygonInsideRect(verts, x0, y0, x1, y1) {
+  if (!verts || verts.length === 0) return false;
+  for (const v of verts) {
+    if (!pointInRect(v.x, v.y, x0, y0, x1, y1)) return false;
+  }
+  return true;
+}
+
 function pointInTriangle2d(px, py, ax, ay, bx, by, cx, cy) {
   function sign(p1x, p1y, p2x, p2y, p3x, p3y) {
     return (p1x - p3x) * (p2y - p3y) - (p2x - p3x) * (p1y - p3y);
@@ -1115,6 +1255,7 @@ function pickMembraneAtScreen(px, py, thresholdPx) {
   let bestId = null;
   let bestScore = thresholdPx;
   for (const mem of currentModel.membrane_elements || []) {
+    if (!isDmemVisible(mem.id)) continue;
     const verts = membraneScreenVerts(mem, nm, display);
     if (!verts) continue;
     const inside = pointInTriangle2d(
@@ -1140,6 +1281,7 @@ function pickWoodWallAtScreen(px, py, thresholdPx) {
   let bestId = null;
   let bestScore = thresholdPx;
   for (const wall of currentModel.wood_rated_walls || []) {
+    if (!isWrwVisible(wall.id)) continue;
     const verts = woodWallScreenVerts(wall, nm, display);
     if (!verts) continue;
     const inside = pointInTriangle2d(px, py, verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y)
@@ -1154,26 +1296,36 @@ function pickWoodWallAtScreen(px, py, thresholdPx) {
   return bestId == null ? null : { id: bestId, score: bestScore };
 }
 
-function membranesInScreenRect(x0, y0, x1, y1) {
+function membranesInScreenRect(x0, y0, x1, y1, windowMode) {
   const ids = [];
   if (!currentModel || !(el.chkMembrane && el.chkMembrane.checked)) return ids;
   const display = getSceneDisplayState();
   const nm = nodeMap(currentModel);
   for (const mem of currentModel.membrane_elements || []) {
+    if (!isDmemVisible(mem.id)) continue;
     const verts = membraneScreenVerts(mem, nm, display);
-    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(mem.id);
+    if (!verts) continue;
+    const hit = windowMode
+      ? polygonInsideRect(verts, x0, y0, x1, y1)
+      : polygonIntersectsRect(verts, x0, y0, x1, y1);
+    if (hit) ids.push(mem.id);
   }
   return ids;
 }
 
-function woodWallsInScreenRect(x0, y0, x1, y1) {
+function woodWallsInScreenRect(x0, y0, x1, y1, windowMode) {
   const ids = [];
   if (!currentModel || !(el.chkWoodWall && el.chkWoodWall.checked)) return ids;
   const display = getSceneDisplayState();
   const nm = nodeMap(currentModel);
   for (const wall of currentModel.wood_rated_walls || []) {
+    if (!isWrwVisible(wall.id)) continue;
     const verts = woodWallScreenVerts(wall, nm, display);
-    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(wall.id);
+    if (!verts) continue;
+    const hit = windowMode
+      ? polygonInsideRect(verts, x0, y0, x1, y1)
+      : polygonIntersectsRect(verts, x0, y0, x1, y1);
+    if (hit) ids.push(wall.id);
   }
   return ids;
 }
@@ -1196,6 +1348,7 @@ function pickElementAtScreen(px, py, thresholdPx) {
   let bestId = null;
   let bestDist = thresholdPx;
   for (const e of currentModel.elements) {
+    if (!isElementVisible(e.id)) continue;
     const seg = elementScreenSegment(e, nm, display);
     if (!seg) continue;
     const d = distPointToSegment2d(px, py, seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y);
@@ -1207,17 +1360,19 @@ function pickElementAtScreen(px, py, thresholdPx) {
   return bestId == null ? null : { id: bestId, score: bestDist };
 }
 
-function elementsInScreenRect(x0, y0, x1, y1) {
+function elementsInScreenRect(x0, y0, x1, y1, windowMode) {
   const ids = [];
   if (!currentModel) return ids;
   const display = getSceneDisplayState();
   const nm = nodeMap(currentModel);
   for (const e of currentModel.elements) {
+    if (!isElementVisible(e.id)) continue;
     const seg = elementScreenSegment(e, nm, display);
     if (!seg) continue;
-    if (segmentIntersectsRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1)) {
-      ids.push(e.id);
-    }
+    const hit = windowMode
+      ? segmentInsideRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1)
+      : segmentIntersectsRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1);
+    if (hit) ids.push(e.id);
   }
   return ids;
 }
@@ -1231,6 +1386,7 @@ function nodesInScreenRect(x0, y0, x1, y1) {
   const minY = Math.min(y0, y1);
   const maxY = Math.max(y0, y1);
   for (const n of currentModel.nodes) {
+    if (!isNodeVisible(n.id)) continue;
     const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
     const s = worldToScreenPoint(p);
     if (s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY) {
@@ -1247,6 +1403,7 @@ function pickNodeAtScreen(px, py, thresholdPx) {
   let bestNode = null;
   let bestNodeDist = limit;
   for (const n of currentModel.nodes) {
+    if (!isNodeVisible(n.id)) continue;
     const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
     const s = worldToScreenPoint(p);
     const d = Math.hypot(px - s.x, py - s.y);
@@ -1733,6 +1890,9 @@ function updateSelectionMarquee(x0, y0, x1, y1) {
   el.selectionMarquee.style.width = width + "px";
   el.selectionMarquee.style.height = height + "px";
   el.selectionMarquee.hidden = width < 1 && height < 1;
+  const windowMode = (x1 - x0) >= 0;
+  el.selectionMarquee.classList.toggle("selection-marquee-window", windowMode);
+  el.selectionMarquee.classList.toggle("selection-marquee-cross", !windowMode);
 }
 
 function hideSelectionMarquee() {
@@ -1780,6 +1940,8 @@ function finishSelectionDrag(ev) {
     return;
   }
 
+  const windowMode = dx >= 0;
+
   if (pickSubMode === "node") {
     const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
     if (nodeIds.length === 0) {
@@ -1792,7 +1954,7 @@ function finishSelectionDrag(ev) {
   }
 
   if (pickSubMode === "member") {
-    const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y, windowMode);
     if (elemIds.length === 0) {
       if (!extend) clearSelection();
       return;
@@ -1803,7 +1965,7 @@ function finishSelectionDrag(ev) {
   }
 
   if (pickSubMode === "diaphragm") {
-    const dmemIds = membranesInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    const dmemIds = membranesInScreenRect(drag.startX, drag.startY, end.x, end.y, windowMode);
     if (dmemIds.length === 0) {
       if (!extend) clearSelection();
       return;
@@ -1814,7 +1976,7 @@ function finishSelectionDrag(ev) {
   }
 
   if (pickSubMode === "wall") {
-    const wrwIds = woodWallsInScreenRect(drag.startX, drag.startY, end.x, end.y);
+    const wrwIds = woodWallsInScreenRect(drag.startX, drag.startY, end.x, end.y, windowMode);
     if (wrwIds.length === 0) {
       if (!extend) clearSelection();
       return;
@@ -2315,6 +2477,39 @@ function hideContextMenu() {
   if (el.elemContextMenu) el.elemContextMenu.hidden = true;
 }
 
+function beginViewportRightDrag(ev) {
+  viewportRightDrag = {
+    startClientX: ev.clientX,
+    startClientY: ev.clientY,
+    dragged: false,
+  };
+}
+
+function updateViewportRightDrag(ev) {
+  if (!viewportRightDrag || viewportRightDrag.dragged) return;
+  const dx = ev.clientX - viewportRightDrag.startClientX;
+  const dy = ev.clientY - viewportRightDrag.startClientY;
+  if (Math.hypot(dx, dy) >= VIEWPORT_CONTEXT_MENU_DRAG_PX) {
+    viewportRightDrag.dragged = true;
+    hideContextMenu();
+  }
+}
+
+function finishViewportRightDrag(ev) {
+  if (!viewportRightDrag) return;
+  const drag = viewportRightDrag;
+  viewportRightDrag = null;
+
+  const dx = ev.clientX - drag.startClientX;
+  const dy = ev.clientY - drag.startClientY;
+  const moved = drag.dragged || Math.hypot(dx, dy) >= VIEWPORT_CONTEXT_MENU_DRAG_PX;
+  if (moved) {
+    hideContextMenu();
+    return;
+  }
+  showViewportContextMenu(ev.clientX, ev.clientY);
+}
+
 function populateContextMenuCatalog() {
   if (!el.contextMenuSections || !el.contextMenuMaterials || !currentModel) return;
   el.contextMenuSections.innerHTML = "";
@@ -2353,8 +2548,40 @@ function populateContextMenuCatalog() {
   }
 }
 
-function showContextMenu(clientX, clientY) {
-  if (!el.elemContextMenu || !hasPickSelection()) return;
+function positionContextMenu(clientX, clientY) {
+  if (!el.elemContextMenu) return;
+  const margin = 8;
+  el.elemContextMenu.hidden = false;
+  const rect = el.elemContextMenu.getBoundingClientRect();
+  let left = clientX;
+  let top = clientY;
+  if (left + rect.width > window.innerWidth - margin) {
+    left = window.innerWidth - rect.width - margin;
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = window.innerHeight - rect.height - margin;
+  }
+  el.elemContextMenu.style.left = Math.max(margin, left) + "px";
+  el.elemContextMenu.style.top = Math.max(margin, top) + "px";
+}
+
+function updateViewportContextMenuState() {
+  if (el.contextMenuTogglePick) {
+    el.contextMenuTogglePick.textContent = selectionModeActive
+      ? "Exit pick mode (normal)"
+      : "Enter pick mode";
+  }
+  const hasMemberSel = selectedElementIds.size > 0
+    || selectedDmemIds.size > 0
+    || selectedWrwIds.size > 0;
+  if (el.contextMenuShowMembersOnly) el.contextMenuShowMembersOnly.disabled = !hasMemberSel;
+  if (el.contextMenuHideMembers) el.contextMenuHideMembers.disabled = !hasMemberSel;
+  if (el.contextMenuPickSection) {
+    el.contextMenuPickSection.hidden = !hasPickSelection();
+  }
+}
+
+function populatePickContextMenu() {
   if (selectedElementIds.size > 0) populateContextMenuCatalog();
   const elemCount = selectedElementIds.size;
   const nodeCount = selectedNodeIds.size;
@@ -2462,19 +2689,13 @@ function showContextMenu(clientX, clientY) {
     }
     el.contextMenuTitle.textContent = titleParts.join(", ") + " picked";
   }
-  el.elemContextMenu.hidden = false;
-  const margin = 8;
-  const rect = el.elemContextMenu.getBoundingClientRect();
-  let left = clientX;
-  let top = clientY;
-  if (left + rect.width > window.innerWidth - margin) {
-    left = window.innerWidth - rect.width - margin;
-  }
-  if (top + rect.height > window.innerHeight - margin) {
-    top = window.innerHeight - rect.height - margin;
-  }
-  el.elemContextMenu.style.left = Math.max(margin, left) + "px";
-  el.elemContextMenu.style.top = Math.max(margin, top) + "px";
+}
+
+function showViewportContextMenu(clientX, clientY) {
+  if (!el.elemContextMenu) return;
+  updateViewportContextMenuState();
+  if (hasPickSelection()) populatePickContextMenu();
+  positionContextMenu(clientX, clientY);
 }
 
 function resetEditHistory() {
@@ -2509,6 +2730,7 @@ function pruneSelectionToModel() {
   selectedWrwIds = new Set(
     Array.from(selectedWrwIds).filter(function (id) { return validWrw.has(id); })
   );
+  pruneMemberVisibilityFilter();
   updateSelectionHighlight();
   updateSelectionPanel();
 }
@@ -2744,22 +2966,50 @@ async function applyModelEdit(extra) {
 function initContextMenu() {
   if (!el.elemContextMenu || !renderer) return;
 
-  renderer.domElement.addEventListener("mousedown", function (ev) {
-    if (!selectionModeActive || ev.button !== 2 || !hasPickSelection()) return;
-    ev.stopPropagation();
+  const canvas = renderer.domElement;
+
+  canvas.addEventListener("mousedown", function (ev) {
+    if (ev.button !== 2) return;
+    hideContextMenu();
+    beginViewportRightDrag(ev);
+    if (selectionModeActive && hasPickSelection()) ev.stopPropagation();
   }, true);
 
-  renderer.domElement.addEventListener("contextmenu", function (ev) {
-    if (!selectionModeActive || !hasPickSelection()) return;
+  window.addEventListener("mousemove", function (ev) {
+    updateViewportRightDrag(ev);
+  });
+
+  window.addEventListener("mouseup", function (ev) {
+    if (ev.button !== 2) return;
+    finishViewportRightDrag(ev);
+  });
+
+  canvas.addEventListener("contextmenu", function (ev) {
     ev.preventDefault();
     ev.stopPropagation();
-    showContextMenu(ev.clientX, ev.clientY);
   });
 
   el.elemContextMenu.addEventListener("click", function (ev) {
     const btn = ev.target.closest("[data-action]");
     if (!btn) return;
     const action = btn.getAttribute("data-action");
+    if (action === "toggle-pick") {
+      hideContextMenu();
+      setSelectionMode(!selectionModeActive);
+      return;
+    }
+    if (action === "members-only") {
+      applyMemberVisibilityFilter("only");
+      return;
+    }
+    if (action === "members-hide") {
+      applyMemberVisibilityFilter("hide");
+      return;
+    }
+    if (action === "members-show-all") {
+      applyMemberVisibilityFilter("all");
+      return;
+    }
     if (action === "delete") {
       const count = selectedElementIds.size;
       const ok = window.confirm("Delete " + count + " element" + (count === 1 ? "" : "s") + "?");
@@ -2956,6 +3206,7 @@ function initContextMenu() {
   document.addEventListener("mousedown", function (ev) {
     if (!el.elemContextMenu || el.elemContextMenu.hidden) return;
     if (el.elemContextMenu.contains(ev.target)) return;
+    if (ev.button !== 0) return;
     hideContextMenu();
   });
 
@@ -3842,6 +4093,7 @@ function forEachSectionSolidMesh(model, visitor, options) {
   let count = 0;
 
   for (const e of model.elements) {
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     if (!n0 || !n1) continue;
@@ -4257,6 +4509,7 @@ function buildModelScene(model) {
     }, { lc: lc, defFac: 0, deformed: false });
 
     for (const e of model.elements) {
+      if (!isMemberElementVisible(e.id)) continue;
       const n0 = nm[e.n0];
       const n1 = nm[e.n1];
       if (!n0 || !n1) continue;
@@ -4293,6 +4546,7 @@ function buildModelScene(model) {
     }
   } else {
     for (const e of model.elements) {
+      if (!isMemberElementVisible(e.id)) continue;
       const n0 = nm[e.n0];
       const n1 = nm[e.n1];
       if (!n0 || !n1) continue;
@@ -4360,6 +4614,7 @@ function buildModelScene(model) {
 
   const nodePts = [];
   for (const n of model.nodes) {
+    if (!isNodeVisible(n.id)) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
     nodePts.push(p.x, p.y, p.z);
   }
@@ -4380,7 +4635,7 @@ function buildModelScene(model) {
   if (showSupports) {
     for (const s of model.supports) {
       const n = nm[s.node];
-      if (!n) continue;
+      if (!n || !isNodeVisible(n.id)) continue;
       const p = nodePosition(n, model, lc, defFac, deformed);
       const sp = addSupportDisc(
         supportGizmoCenter(p, model, supSize, camera, renderer),
@@ -4430,7 +4685,7 @@ function buildModelScene(model) {
       for (const l of model.point_loads) {
         if (String(l.lc) !== String(lc)) continue;
         const n = nm[l.node];
-        if (!n) continue;
+        if (!n || !isNodeVisible(n.id)) continue;
         const p = nodePosition(n, model, lc, defFac, deformed);
         const fx = l.px, fy = l.py, fz = l.pz;
         const mag = Math.sqrt(fx * fx + fy * fy + fz * fz);
@@ -4498,6 +4753,7 @@ function buildModelScene(model) {
 
   if (showLabels) {
     for (const n of model.nodes) {
+      if (!isNodeVisible(n.id)) continue;
       const p = nodePosition(n, model, lc, defFac, deformed);
       const sprite = makeTextSprite(String(n.id), span, {
         scaleFactor: nodeLabelScale,
@@ -4525,6 +4781,7 @@ function buildModelScene(model) {
   }
 
   for (const e of model.elements) {
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     if (!n0 || !n1) continue;
@@ -5067,6 +5324,7 @@ function drawEJntMarkers(model, opts) {
 
   for (const e of model.elements || []) {
     if (!e) continue;
+    if (!isMemberElementVisible(e.id)) continue;
     const j = ejntMap[e.id];
     const showI = ejntEndHasRelease(j, "i");
     const showJ = ejntEndHasRelease(j, "j");
@@ -5111,6 +5369,7 @@ function drawWoodRatedWalls(model, opts) {
   const edgePts = [];
 
   for (const wall of items) {
+    if (!isWrwVisible(wall.id)) continue;
     const ids = wall.nodes;
     if (!ids || ids.length !== 4) continue;
     const n0 = nm[ids[0]];
@@ -5175,6 +5434,7 @@ function drawMembraneElements(model, opts) {
   const edgePts = [];
 
   for (const mem of items) {
+    if (!isDmemVisible(mem.id)) continue;
     const ids = mem.nodes;
     if (!ids || ids.length !== 3) continue;
     const n0 = nm[ids[0]];
@@ -6063,6 +6323,7 @@ function drawElementInputLoads(model, opts) {
     if (!shouldDrawElementLoad(ld)) continue;
     const e = em[ld.elem];
     if (!e) continue;
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     if (!n0 || !n1) continue;
@@ -6827,7 +7088,7 @@ function drawSupportReactions(model, opts) {
     const r = supportReactsForLc(model, s, lcKey);
     if (!r) continue;
     const n = nm[s.node];
-    if (!n) continue;
+    if (!n || !isNodeVisible(n.id)) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
     const tx = r[0], ty = r[1], tz = r[2];
     const rx = r[3], ry = r[4], rz = r[5];
@@ -7375,6 +7636,7 @@ function buildForceDiagrams(model) {
   const showValues = el.chkForceValues.checked;
 
   for (const e of model.elements) {
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     const f = e.forces && e.forces[lcKey];
@@ -9297,6 +9559,7 @@ async function loadSelectedModel(solve, options) {
   if (!path) return;
   const cameraState = options.keepCamera ? captureCameraState() : null;
   if (!options.keepSelection) clearSelection();
+  resetMemberVisibilityFilter();
   if (solve) {
     setStatus("Solving " + path + "…");
   } else {

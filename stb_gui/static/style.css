@@ -378,6 +378,16 @@ html, body {
   box-sizing: border-box;
 }
 
+.selection-marquee-window {
+  border-color: #5cb3ff;
+  background: rgba(92, 179, 255, 0.12);
+}
+
+.selection-marquee-cross {
+  border-color: #ffb347;
+  background: rgba(255, 179, 71, 0.12);
+}
+
 .selection-summary {
   font-size: 12px;
   color: #ddd;
@@ -483,6 +493,16 @@ html, body {
 
 .context-menu-item:hover {
   background: #353540;
+}
+
+.context-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+.context-menu-item:disabled:hover {
+  background: transparent;
 }
 
 .context-menu-item.context-menu-danger {

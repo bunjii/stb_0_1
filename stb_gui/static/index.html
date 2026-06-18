@@ -38,6 +38,17 @@
   <div id="viewport">
     <div id="selectionMarquee" class="selection-marquee" hidden></div>
     <div id="elemContextMenu" class="context-menu" hidden>
+      <div id="contextMenuGeneralSection" class="context-menu-group">
+        <div class="context-menu-label">Mode</div>
+        <button type="button" id="contextMenuTogglePick" class="context-menu-item" data-action="toggle-pick">Enter pick mode</button>
+      </div>
+      <div id="contextMenuVisibilitySection" class="context-menu-group">
+        <div class="context-menu-label">Member visibility</div>
+        <button type="button" id="contextMenuShowMembersOnly" class="context-menu-item" data-action="members-only">Show selected members only</button>
+        <button type="button" id="contextMenuHideMembers" class="context-menu-item" data-action="members-hide">Hide selected members</button>
+        <button type="button" id="contextMenuShowAllMembers" class="context-menu-item" data-action="members-show-all">Show all members</button>
+      </div>
+      <div id="contextMenuPickSection">
       <div id="contextMenuTitle" class="context-menu-title"></div>
       <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
       <div id="contextMenuNodeSupport" class="context-menu-group">
@@ -117,6 +128,7 @@
       <div class="context-menu-group">
         <div class="context-menu-label">Joint (EJNT)</div>
         <button type="button" class="context-menu-item" data-action="ejnt-edit">Edit joint…</button>
+      </div>
       </div>
       </div>
     </div>

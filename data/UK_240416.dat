@@ -2714,6 +2714,7 @@ EJNT, 530,      ,      ,      ,      ,
 #     ,     ,       m/s2,       m/s2,       m/s2
 
 GLOD,      0,        0.0,        0.0,   -9.80665
+GLOD,      1,        9.80665,        0.0,  0
 
 # --- DIAPHRAGM REGION(DIAP) ---
 # DIAP,   ID,       NAME, TYPE,  SRC,    MAGID,        T,    THETA,           RA,     HMAX
