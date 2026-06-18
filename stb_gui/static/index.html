@@ -307,20 +307,20 @@
 
   <div id="selectionPanel" class="float-panel float-panel-selection hidden">
     <div id="selectionPanelHeader" class="float-panel-header">
-      <span id="selectionPanelTitle" class="float-panel-title">Pick — Nodes</span>
+      <span id="selectionPanelTitle" class="float-panel-title">Pick — All</span>
       <button type="button" id="btnSelectionCollapse" class="btn-icon" title="Collapse">−</button>
     </div>
     <div id="selectionPanelBody" class="float-panel-body">
       <section class="panel-section pick-mode-section">
         <div class="panel-section-title">Pick target</div>
-        <div class="pick-mode-toggle" role="radiogroup" aria-label="Pick target">
-          <button type="button" id="pickModeNode" class="pick-mode-btn active" data-pick-mode="node" aria-pressed="true">Nodes</button>
-          <button type="button" id="pickModeMember" class="pick-mode-btn" data-pick-mode="member" aria-pressed="false">Members</button>
-          <button type="button" id="pickModeDiaphragm" class="pick-mode-btn" data-pick-mode="diaphragm" aria-pressed="false">Diaphragm</button>
-          <button type="button" id="pickModeWall" class="pick-mode-btn" data-pick-mode="wall" aria-pressed="false">Wall</button>
+        <div class="pick-mode-toggle" role="group" aria-label="Pick target">
+          <button type="button" id="pickModeNode" class="pick-mode-btn" data-pick-mode="node" aria-pressed="false" title="Toggle node pick (N)">Nodes</button>
+          <button type="button" id="pickModeMember" class="pick-mode-btn" data-pick-mode="member" aria-pressed="false" title="Toggle member pick (M)">Members</button>
+          <button type="button" id="pickModeDiaphragm" class="pick-mode-btn" data-pick-mode="diaphragm" aria-pressed="false" title="Toggle diaphragm pick (I)">Diaphragm</button>
+          <button type="button" id="pickModeWall" class="pick-mode-btn" data-pick-mode="wall" aria-pressed="false" title="Toggle wall pick (W)">Wall</button>
         </div>
       </section>
-      <p id="pickModeHint" class="panel-hint">Node mode: click or drag to pick nodes. Ctrl+click toggles. 3+ nodes → DMEM mesh, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <p id="pickModeHint" class="panel-hint">All targets (Nodes, Members, Diaphragm, Wall). Toggle Pick target buttons to filter. Click or drag to pick. Ctrl+click toggles. Right-click = menu. Esc clears.</p>
       <section id="pickDmemCreateOptions" class="panel-section pick-options-section" hidden>
         <div class="panel-section-title">New DMEM (selected nodes)</div>
         <label class="panel-row">
