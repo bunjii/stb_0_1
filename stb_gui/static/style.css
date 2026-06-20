@@ -201,6 +201,61 @@ html, body {
   color: #5a48a8;
 }
 
+.viewport-colocated-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(360px, 48vw);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #1a1a22;
+  pointer-events: auto;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.viewport-colocated-legend.visible {
+  display: flex;
+}
+
+.viewport-colocated-legend-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.viewport-colocated-legend-count {
+  font-size: 11px;
+  color: #444;
+  line-height: 1.35;
+}
+
+.viewport-colocated-legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(220px, 32vh);
+  overflow-y: auto;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.35;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.colocated-legend-row {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.colocated-legend-row:last-child {
+  border-bottom: none;
+}
+
 .viewer-info-overlay {
   position: absolute;
   left: 12px;

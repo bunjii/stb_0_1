@@ -171,6 +171,11 @@
         <span class="wind-legend-flow">→ Wind dir / F_story</span>
       </div>
     </div>
+    <div id="colocatedLegendOverlay" class="viewport-colocated-legend" hidden>
+      <div class="viewport-colocated-legend-title">Colocated entities</div>
+      <div id="colocatedLegendCount" class="viewport-colocated-legend-count"></div>
+      <div id="colocatedLegendList" class="viewport-colocated-legend-list"></div>
+    </div>
     <div id="ejntEditPanel" class="ejnt-edit-panel" hidden>
       <div class="ejnt-edit-header">
         <span class="ejnt-edit-title">Edit joint (EJNT)</span>
@@ -285,6 +290,9 @@
             <input type="checkbox" id="chkWoodWallEdge" checked> Edge
           </label>
         </div>
+        <label class="panel-check" title="Informational only — highlights duplicate entities with identical node connectivity">
+          <input type="checkbox" id="chkColocated"> Colocated entities
+        </label>
       </section>
 
       <section class="panel-section">

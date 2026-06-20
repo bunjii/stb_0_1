@@ -32,6 +32,7 @@ const COLORS = {
   windFootprint: 0x5a5a68,
   centerOfMass: 0xff4f7b,
   centerOfRigidity: 0x2dd4bf,
+  colocated: 0xd97706,
 };
 
 const PRES_ZERO = 1e-10;
@@ -137,6 +138,7 @@ const RESULTS_DISPLAY_DEFAULTS = {
   membraneEdge: true,
   woodWall: true,
   woodWallEdge: true,
+  colocated: false,
   forceComponent: 0,
   forceDiv: 8,
   forceFactor: 10,
@@ -212,6 +214,10 @@ const el = {
   chkMembraneEdge: document.getElementById("chkMembraneEdge"),
   chkWoodWall: document.getElementById("chkWoodWall"),
   chkWoodWallEdge: document.getElementById("chkWoodWallEdge"),
+  chkColocated: document.getElementById("chkColocated"),
+  colocatedLegendOverlay: document.getElementById("colocatedLegendOverlay"),
+  colocatedLegendCount: document.getElementById("colocatedLegendCount"),
+  colocatedLegendList: document.getElementById("colocatedLegendList"),
   chkForceValues: document.getElementById("chkForceValues"),
   forceSelect: document.getElementById("forceSelect"),
   frcDiv: document.getElementById("frcDiv"),
@@ -374,6 +380,7 @@ let cameraProjectionMode = "perspective";
 let orthoViewHeight = 10;
 let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
 let practiceCenterGroup;
+let colocatedGroup;
 let windGroup, windLabelGroup;
 let uiTheme = "dark";
 let currentModel = null;
@@ -474,6 +481,7 @@ const THEME_RENDER_COLORS = {
 let _nodePointTexture = null;
 let windVisualData = null;
 let practiceSummaryData = null;
+let colocatedSitesCache = null;
 let selectedWindCaseId = null;
 
 function saveLastModelPath(path) {
@@ -3305,6 +3313,10 @@ function updateViewerInfoOverlay(model) {
     const nwrw = model.wood_rated_walls ? model.wood_rated_walls.length : 0;
     displayLines.push("wood walls (" + nwrw + ")");
   }
+  if (el.chkColocated && el.chkColocated.checked) {
+    const nCol = (colocatedSitesCache || buildColocatedSites(model)).length;
+    displayLines.push("colocated entities (" + nCol + ")");
+  }
   if (forceComp !== "None") {
     displayLines.push(
       "force diagram: " + forceComp +
@@ -3542,6 +3554,8 @@ function initThree() {
   scene.add(windLabelGroup);
   practiceCenterGroup = new THREE.Group();
   scene.add(practiceCenterGroup);
+  colocatedGroup = new THREE.Group();
+  scene.add(colocatedGroup);
   axesGroup = new THREE.Group();
   scene.add(axesGroup);
 
@@ -5025,9 +5039,24 @@ function buildModelScene(model) {
     drawPracticeCentersOverlay(model, practiceSummaryData, span);
   }
 
+  clearGroup(colocatedGroup);
+  if (el.chkColocated && el.chkColocated.checked) {
+    drawColocatedOverlay(model, {
+      lc,
+      defFac,
+      deformed,
+      span,
+      nm,
+      group: colocatedGroup,
+    });
+  } else {
+    colocatedSitesCache = null;
+  }
+
   updateWorldAxes(model);
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
+  updateColocatedLegendOverlay();
   updateSelectionHighlight();
   updateDistanceVisual();
 }
@@ -6467,6 +6496,189 @@ function updateWindLegendOverlay() {
   }
 }
 
+function nodeExactKey(x, y, z) {
+  return String(x) + "\0" + String(y) + "\0" + String(z);
+}
+
+function uniqueSortedIds(ids) {
+  return Array.from(new Set(ids)).sort(function (a, b) { return a - b; });
+}
+
+function pushDuplicateGroups(buckets, buildEntry) {
+  const entries = [];
+  for (const group of Object.values(buckets)) {
+    const ids = uniqueSortedIds(group.ids);
+    if (ids.length < 2) continue;
+    entries.push(buildEntry(ids, group));
+  }
+  return entries;
+}
+
+function buildColocatedSites(model) {
+  if (!model) return [];
+  const nm = nodeMap(model);
+  const entries = [];
+
+  const nodeBuckets = Object.create(null);
+  for (const n of model.nodes || []) {
+    const k = nodeExactKey(n.x, n.y, n.z);
+    if (!nodeBuckets[k]) nodeBuckets[k] = { ids: [], x: n.x, y: n.y, z: n.z };
+    nodeBuckets[k].ids.push(n.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(nodeBuckets, function (ids, group) {
+    return { kind: "node", ids: ids, x: group.x, y: group.y, z: group.z };
+  }));
+
+  const elemBuckets = Object.create(null);
+  for (const e of model.elements || []) {
+    const k = String(e.n0) + ":" + String(e.n1);
+    if (!elemBuckets[k]) elemBuckets[k] = { ids: [], n0: e.n0, n1: e.n1 };
+    elemBuckets[k].ids.push(e.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(elemBuckets, function (ids, group) {
+    return { kind: "element", ids: ids, n0: group.n0, n1: group.n1 };
+  }));
+
+  const wallBuckets = Object.create(null);
+  for (const w of model.wood_rated_walls || []) {
+    const nodes = uniqueSortedIds(w.nodes || []);
+    if (!nodes.length) continue;
+    const k = nodes.join(",");
+    if (!wallBuckets[k]) wallBuckets[k] = { ids: [], nodes: nodes };
+    wallBuckets[k].ids.push(w.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(wallBuckets, function (ids, group) {
+    return { kind: "wall", ids: ids, nodes: group.nodes };
+  }));
+
+  const dmemBuckets = Object.create(null);
+  for (const m of model.membrane_elements || []) {
+    const nodes = uniqueSortedIds(m.nodes || []);
+    if (!nodes.length) continue;
+    const k = nodes.join(",");
+    if (!dmemBuckets[k]) dmemBuckets[k] = { ids: [], nodes: nodes };
+    dmemBuckets[k].ids.push(m.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(dmemBuckets, function (ids, group) {
+    return { kind: "dmem", ids: ids, nodes: group.nodes };
+  }));
+
+  const kindOrder = { node: 0, element: 1, wall: 2, dmem: 3 };
+  entries.sort(function (a, b) {
+    const ka = kindOrder[a.kind] - kindOrder[b.kind];
+    if (ka !== 0) return ka;
+    return (a.ids[0] || 0) - (b.ids[0] || 0);
+  });
+  return entries;
+}
+
+function colocatedNodeIds(entry) {
+  if (entry.kind === "node") return entry.ids.slice();
+  if (entry.kind === "element") return [entry.n0, entry.n1];
+  return entry.nodes.slice();
+}
+
+function colocatedEntryPosition(entry, model, nm, lc, defFac, deformed) {
+  const ids = colocatedNodeIds(entry);
+  const pts = [];
+  for (const nid of ids) {
+    const n = nm[nid];
+    if (!n) continue;
+    pts.push(nodePosition(n, model, lc, defFac, deformed));
+  }
+  if (!pts.length) return null;
+  const out = new THREE.Vector3();
+  for (const p of pts) out.add(p);
+  out.multiplyScalar(1 / pts.length);
+  return out;
+}
+
+function colocatedEntrySummary(entry) {
+  if (entry.kind === "node") {
+    return "Nodes N[" + entry.ids.join(",") + "]";
+  }
+  if (entry.kind === "element") {
+    return "Elements E[" + entry.ids.join(",") + "] (" + entry.n0 + "-" + entry.n1 + ")";
+  }
+  if (entry.kind === "wall") {
+    return "Walls W[" + entry.ids.join(",") + "] nodes[" + entry.nodes.join(",") + "]";
+  }
+  return "DMEM D[" + entry.ids.join(",") + "] nodes[" + entry.nodes.join(",") + "]";
+}
+
+function colocatedEntryLabel(entry, model) {
+  const nm = nodeMap(model);
+  let coordText = "";
+  if (entry.kind === "node") {
+    coordText = "(" + formatCoordMm(entry.x) + ", " + formatCoordMm(entry.y) + ", " + formatCoordMm(entry.z) + ") ";
+  } else {
+    const ids = colocatedNodeIds(entry);
+    const anchor = nm[ids[0]];
+    if (anchor) {
+      coordText = "(" + formatCoordMm(anchor.x) + ", " + formatCoordMm(anchor.y) + ", " + formatCoordMm(anchor.z) + ") ";
+    }
+  }
+  return coordText + colocatedEntrySummary(entry);
+}
+
+function formatCoordMm(v) {
+  return (Number(v) * 1000).toFixed(1);
+}
+
+function drawColocatedOverlay(model, opts) {
+  const { lc, defFac, deformed, span, nm, group } = opts;
+  const entries = buildColocatedSites(model);
+  colocatedSitesCache = entries;
+  if (!entries.length) return;
+
+  const r = Math.max(supportGizmoSize(model) * 0.45, span * 0.006, 0.015);
+  const geo = new THREE.SphereGeometry(r, 14, 10);
+  const mat = new THREE.MeshBasicMaterial({
+    color: COLORS.colocated,
+    depthTest: true,
+    transparent: true,
+    opacity: 0.85,
+  });
+
+  for (const entry of entries) {
+    const p = colocatedEntryPosition(entry, model, nm, lc, defFac, deformed);
+    if (!p) continue;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(p);
+    mesh.renderOrder = 20;
+    group.add(mesh);
+  }
+}
+
+function updateColocatedLegendOverlay() {
+  if (!el.colocatedLegendOverlay) return;
+  const show = !!(el.chkColocated && el.chkColocated.checked);
+  if (!show) {
+    el.colocatedLegendOverlay.hidden = true;
+    el.colocatedLegendOverlay.classList.remove("visible");
+    return;
+  }
+  const entries = colocatedSitesCache || (currentModel ? buildColocatedSites(currentModel) : []);
+  el.colocatedLegendOverlay.hidden = false;
+  el.colocatedLegendOverlay.classList.add("visible");
+  if (el.colocatedLegendCount) {
+    el.colocatedLegendCount.textContent = entries.length
+      ? entries.length + " duplicate group(s) — exact node connectivity match"
+      : "No colocated entities found";
+  }
+  if (el.colocatedLegendList) {
+    el.colocatedLegendList.innerHTML = "";
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "colocated-legend-row";
+      row.textContent = currentModel
+        ? colocatedEntryLabel(entry, currentModel)
+        : colocatedEntrySummary(entry);
+      el.colocatedLegendList.appendChild(row);
+    }
+  }
+}
+
 async function loadWindVisualForCurrentModel() {
   const path = getCurrentModelPath();
   windVisualData = null;
@@ -6508,10 +6720,33 @@ async function loadPracticeSummaryForCurrentModel() {
 }
 
 function practiceStoryZMap(practice) {
+  const rows = practice && practice.story_rows ? practice.story_rows.slice() : [];
+  rows.sort(function (a, b) {
+    const za = Number(a.elevation);
+    const zb = Number(b.elevation);
+    if (isFinite(za) && isFinite(zb) && za !== zb) return za - zb;
+    const ra = Number(String(a.story).replace(/[^\d.-]/g, ""));
+    const rb = Number(String(b.story).replace(/[^\d.-]/g, ""));
+    if (isFinite(ra) && isFinite(rb) && ra !== rb) return ra - rb;
+    return String(a.story).localeCompare(String(b.story), "ja", { numeric: true });
+  });
   const map = new Map();
-  for (const s of practice && practice.story_rows ? practice.story_rows : []) {
-    const z = Number(s.top_elevation != null ? s.top_elevation : s.elevation);
-    if (isFinite(z)) map.set(String(s.story), z);
+  for (let i = 0; i < rows.length; i++) {
+    const s = rows[i];
+    const story = String(s.story);
+    const elev = Number(s.elevation);
+    if (!isFinite(elev)) continue;
+    const nextElev = i + 1 < rows.length ? Number(rows[i + 1].elevation) : NaN;
+    let z;
+    if (isFinite(nextElev)) {
+      z = 0.5 * (elev + nextElev);
+    } else {
+      const top = Number(s.top_elevation != null ? s.top_elevation : s.elevation);
+      const height = Number(s.height);
+      const topElev = isFinite(top) && top !== elev ? top : (isFinite(height) ? elev + height : elev);
+      z = 0.5 * (elev + topElev);
+    }
+    if (isFinite(z)) map.set(story, z);
   }
   return map;
 }
@@ -6540,6 +6775,25 @@ function addPracticeCenterMarker(point, color, text, span, group, offsetSign) {
   group.add(label);
 }
 
+function isPracticeCenterCoord(value) {
+  return value != null && value !== "" && isFinite(Number(value));
+}
+
+function isPracticeCenterPoint(x, y, model) {
+  if (!isPracticeCenterCoord(x) || !isPracticeCenterCoord(y)) return false;
+  if (!model || !Array.isArray(model.bounds) || model.bounds.length < 6) return true;
+  const xmin = Number(model.bounds[0]);
+  const ymin = Number(model.bounds[1]);
+  const xmax = Number(model.bounds[3]);
+  const ymax = Number(model.bounds[4]);
+  if (![xmin, ymin, xmax, ymax].every(isFinite)) return true;
+  const span = Math.max(xmax - xmin, ymax - ymin, 1);
+  const margin = span * 2;
+  const px = Number(x);
+  const py = Number(y);
+  return px >= xmin - margin && px <= xmax + margin && py >= ymin - margin && py <= ymax + margin;
+}
+
 function drawPracticeCentersOverlay(model, practice, span) {
   if (!practice || !practice.eccentricity_rows || !practice.eccentricity_rows.length) return;
   const zByStory = practiceStoryZMap(practice);
@@ -6548,7 +6802,7 @@ function drawPracticeCentersOverlay(model, practice, span) {
   for (const row of practice.eccentricity_rows) {
     const story = String(row.story == null ? "" : row.story);
     const z = (zByStory.has(story) ? zByStory.get(story) : zFallback) + lift;
-    if (isFinite(Number(row.xg)) && isFinite(Number(row.yg))) {
+    if (isPracticeCenterPoint(row.xg, row.yg, model)) {
       addPracticeCenterMarker(
         new THREE.Vector3(Number(row.xg), Number(row.yg), z),
         COLORS.centerOfMass,
@@ -6558,7 +6812,7 @@ function drawPracticeCentersOverlay(model, practice, span) {
         -1
       );
     }
-    if (isFinite(Number(row.xs)) && isFinite(Number(row.ys))) {
+    if (isPracticeCenterPoint(row.xs, row.ys, model)) {
       addPracticeCenterMarker(
         new THREE.Vector3(Number(row.xs), Number(row.ys), z),
         COLORS.centerOfRigidity,
@@ -10273,6 +10527,12 @@ if (el.chkWoodWallEdge) {
     if (currentModel) rebuildScene();
   });
 }
+if (el.chkColocated) {
+  el.chkColocated.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    if (currentModel) rebuildScene();
+  });
+}
 syncRegionEdgeCheckboxes();
 el.forceSelect.addEventListener("change", () => {
   onResultsDisplayChanged();
@@ -10315,6 +10575,7 @@ function readDisplayPrefsFromUi() {
   displayPrefs.membraneEdge = !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
   displayPrefs.woodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
   displayPrefs.woodWallEdge = !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
+  displayPrefs.colocated = !!(el.chkColocated && el.chkColocated.checked);
   displayPrefs.forceComponent = parseInt(el.forceSelect.value, 10) || 0;
   displayPrefs.forceDiv = parseInt(el.frcDiv.value, 10) || RESULTS_DISPLAY_DEFAULTS.forceDiv;
   displayPrefs.forceFactor = parseFloat(el.frcFactor.value) || RESULTS_DISPLAY_DEFAULTS.forceFactor;
@@ -10351,6 +10612,7 @@ function applyDisplayPrefsToUi() {
   if (el.chkMembraneEdge) el.chkMembraneEdge.checked = !!displayPrefs.membraneEdge;
   if (el.chkWoodWall) el.chkWoodWall.checked = !!displayPrefs.woodWall;
   if (el.chkWoodWallEdge) el.chkWoodWallEdge.checked = !!displayPrefs.woodWallEdge;
+  if (el.chkColocated) el.chkColocated.checked = !!displayPrefs.colocated;
   if (!el.forceSelect.disabled) el.forceSelect.value = String(displayPrefs.forceComponent);
   if (!el.frcDiv.disabled) {
     el.frcDiv.value = String(displayPrefs.forceDiv);
@@ -10408,6 +10670,7 @@ function loadDisplayPrefs() {
     if (typeof st.membraneEdge === "boolean") displayPrefs.membraneEdge = st.membraneEdge;
     if (typeof st.woodWall === "boolean") displayPrefs.woodWall = st.woodWall;
     if (typeof st.woodWallEdge === "boolean") displayPrefs.woodWallEdge = st.woodWallEdge;
+    if (typeof st.colocated === "boolean") displayPrefs.colocated = st.colocated;
     if (typeof st.forceComponent === "number") displayPrefs.forceComponent = st.forceComponent;
     if (typeof st.forceDiv === "number") displayPrefs.forceDiv = st.forceDiv;
     if (typeof st.forceFactor === "number") displayPrefs.forceFactor = st.forceFactor;

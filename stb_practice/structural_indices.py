@@ -266,12 +266,13 @@ def _is_vertical_member(e) -> bool:
 
 
 def _story_for_member(e, stories: Sequence[StoryIndex]) -> str:
-    z = min(float(e.n0.z), float(e.n1.z))
     mid = 0.5 * (float(e.n0.z) + float(e.n1.z))
-    for s in stories:
-        if s.elevation - 1.0e-6 <= z <= s.elevation + s.height + 1.0e-6:
-            return s.name
-        if s.elevation - 1.0e-6 <= mid <= s.elevation + s.height + 1.0e-6:
+    last = len(stories) - 1
+    for i, s in enumerate(stories):
+        lo = s.elevation - TOLERANCE
+        top = s.elevation + s.height
+        hi = top + TOLERANCE if i == last else top - TOLERANCE
+        if lo <= mid <= hi:
             return s.name
     return ""
 
@@ -444,29 +445,14 @@ def _build_eccentricity_rows(mdl, project, stories, stiffness_rows) -> List[Ecce
         kxx = sum(float(r.dxx_kN_m or 0.0) for r in valid)
         kxy = sum(float(r.dxy_kN_m or 0.0) for r in valid)
         kyy = sum(float(r.dyy_kN_m or 0.0) for r in valid)
-        kxt = sum(float(r.dxy_kN_m or 0.0) * r.x - float(r.dxx_kN_m or 0.0) * r.y for r in valid)
-        kyt = sum(float(r.dyy_kN_m or 0.0) * r.x - float(r.dxy_kN_m or 0.0) * r.y for r in valid)
-        mat = np.array([[kxy, -kxx], [kyy, -kxy]], dtype=float)
-        rhs = np.array([kxt, kyt], dtype=float)
-        xs = ys = None
+        xs, ys = _directional_rigidity_center(valid)
         status = "OK"
-        if abs(float(np.linalg.det(mat))) > TOLERANCE:
-            sol = np.linalg.solve(mat, rhs)
-            xs, ys = float(sol[0]), float(sol[1])
-        else:
-            status = "center_fallback"
-            xs, ys = _weighted_center_stiffness(valid)
         if xs is None or ys is None:
             out.append(EccentricityRow(story.name, xg, yg, None, None, None, None, kxx, kyy, None, None, None, None, None, None, None, "center_unavailable"))
             continue
-        kr = sum(
-            float(r.dxx_kN_m or 0.0) * (r.y - ys) ** 2
-            + float(r.dyy_kN_m or 0.0) * (r.x - xs) ** 2
-            - 2.0 * float(r.dxy_kN_m or 0.0) * (r.x - xs) * (r.y - ys)
-            for r in valid
-        )
-        rex = math.sqrt(kr / kxx) if kr > TOLERANCE and kxx > TOLERANCE else None
-        rey = math.sqrt(kr / kyy) if kr > TOLERANCE and kyy > TOLERANCE else None
+        kr = _directional_torsional_stiffness(valid, xs, ys)
+        rex = _directional_elastic_radius(valid, "y", "dxx_kN_m", ys)
+        rey = _directional_elastic_radius(valid, "x", "dyy_kN_m", xs)
         ex = abs(xs - xg) if xg is not None else None
         ey = abs(ys - yg) if yg is not None else None
         re_x = (ey / rex) if ey is not None and rex and rex > TOLERANCE else None
@@ -553,6 +539,67 @@ def _weighted_center_stiffness(rows: Sequence[MemberStiffnessRow]) -> Tuple[Opti
         w = abs(float(r.dxx_kN_m or 0.0)) + abs(float(r.dyy_kN_m or 0.0))
         vals.append((r.x, r.y, w))
     return _weighted_center(vals)
+
+
+def _directional_rigidity_center(rows: Sequence[MemberStiffnessRow]) -> Tuple[Optional[float], Optional[float]]:
+    """Rigidity center from directional stiffness weights (Dyy -> Xs, Dxx -> Ys)."""
+    x_vals = [
+        (r.x, r.y, abs(float(r.dyy_kN_m or 0.0)))
+        for r in rows
+        if abs(float(r.dyy_kN_m or 0.0)) > TOLERANCE
+    ]
+    y_vals = [
+        (r.x, r.y, abs(float(r.dxx_kN_m or 0.0)))
+        for r in rows
+        if abs(float(r.dxx_kN_m or 0.0)) > TOLERANCE
+    ]
+    xs = _weighted_center(x_vals)[0] if x_vals else None
+    ys = _weighted_center(y_vals)[1] if y_vals else None
+    if xs is None or ys is None:
+        return _weighted_center_stiffness(rows)
+    return xs, ys
+
+
+def _positive_stiffness(value: Optional[float]) -> float:
+    return max(0.0, float(value or 0.0))
+
+
+def _directional_elastic_radius(
+    rows: Sequence[MemberStiffnessRow],
+    coord: str,
+    stiff_field: str,
+    center: float,
+) -> Optional[float]:
+    total = 0.0
+    inertia = 0.0
+    for r in rows:
+        stiff = _positive_stiffness(getattr(r, stiff_field))
+        if stiff <= TOLERANCE:
+            continue
+        c = float(getattr(r, coord))
+        total += stiff
+        inertia += stiff * (c - center) ** 2
+    if total <= TOLERANCE:
+        return None
+    if inertia <= TOLERANCE:
+        return 0.0
+    return math.sqrt(inertia / total)
+
+
+def _directional_torsional_stiffness(
+    rows: Sequence[MemberStiffnessRow],
+    xs: float,
+    ys: float,
+) -> Optional[float]:
+    kr = 0.0
+    for r in rows:
+        dxx = _positive_stiffness(r.dxx_kN_m)
+        dyy = _positive_stiffness(r.dyy_kN_m)
+        if dxx > TOLERANCE:
+            kr += dxx * (r.y - ys) ** 2
+        if dyy > TOLERANCE:
+            kr += dyy * (r.x - xs) ** 2
+    return kr if kr > TOLERANCE else None
 
 
 def _fe(re: Optional[float]) -> Optional[float]:
