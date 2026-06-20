@@ -30,6 +30,8 @@ const COLORS = {
   windFlow: 0x5a48a8,
   windStoryForce: 0x8fd4a0,
   windFootprint: 0x5a5a68,
+  centerOfMass: 0xff4f7b,
+  centerOfRigidity: 0x2dd4bf,
 };
 
 const PRES_ZERO = 1e-10;
@@ -123,6 +125,7 @@ const RESULTS_DISPLAY_DEFAULTS = {
   loads: true,
   loadValues: false,
   windLoads: false,
+  practiceCenters: false,
   reactions: false,
   reactionValues: false,
   nodeLabels: false,
@@ -172,6 +175,7 @@ const el = {
   btnInput: document.getElementById("btnInput"),
   btnProject: document.getElementById("btnProject"),
   btnLoads: document.getElementById("btnLoads"),
+  btnPractice: document.getElementById("btnPractice"),
   btnOutput: document.getElementById("btnOutput"),
   lcSelect: document.getElementById("lcSelect"),
   defFactor: document.getElementById("defFactor"),
@@ -192,6 +196,7 @@ const el = {
   loadTypeFilter: document.getElementById("loadTypeFilter"),
   chkLoadValues: document.getElementById("chkLoadValues"),
   chkWindLoads: document.getElementById("chkWindLoads"),
+  chkPracticeCenters: document.getElementById("chkPracticeCenters"),
   windCaseSelect: document.getElementById("windCaseSelect"),
   windLegendOverlay: document.getElementById("windLegendOverlay"),
   windLegendCase: document.getElementById("windLegendCase"),
@@ -223,6 +228,8 @@ const el = {
   btnOptionsCollapse: document.getElementById("btnOptionsCollapse"),
   btnToggleOptions: document.getElementById("btnToggleOptions"),
   btnTheme: document.getElementById("btnTheme"),
+  btnViewProjection: document.getElementById("btnViewProjection"),
+  viewPreset: document.getElementById("viewPreset"),
   btnToggleAxes: document.getElementById("btnToggleAxes"),
   btnToggleSelect: document.getElementById("btnToggleSelect"),
   btnToggleDistance: document.getElementById("btnToggleDistance"),
@@ -334,8 +341,39 @@ const el = {
   status: document.getElementById("status"),
 };
 
+const CAMERA_FOV = 45;
+const STANDARD_VIEWS = {
+  front: {
+    offset: (span) => new THREE.Vector3(0, -span * 1.8, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  back: {
+    offset: (span) => new THREE.Vector3(0, span * 1.8, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  right: {
+    offset: (span) => new THREE.Vector3(span * 1.8, 0, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  left: {
+    offset: (span) => new THREE.Vector3(-span * 1.8, 0, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  top: {
+    offset: (span) => new THREE.Vector3(0, 0, span * 1.8),
+    up: () => new THREE.Vector3(0, 1, 0),
+  },
+  bottom: {
+    offset: (span) => new THREE.Vector3(0, 0, -span * 1.8),
+    up: () => new THREE.Vector3(0, -1, 0),
+  },
+};
+
 let scene, camera, renderer, controls;
+let cameraProjectionMode = "perspective";
+let orthoViewHeight = 10;
 let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
+let practiceCenterGroup;
 let windGroup, windLabelGroup;
 let uiTheme = "dark";
 let currentModel = null;
@@ -435,6 +473,7 @@ const THEME_RENDER_COLORS = {
 };
 let _nodePointTexture = null;
 let windVisualData = null;
+let practiceSummaryData = null;
 let selectedWindCaseId = null;
 
 function saveLastModelPath(path) {
@@ -3249,6 +3288,7 @@ function updateViewerInfoOverlay(model) {
       );
     }
   }
+  if (el.chkPracticeCenters && el.chkPracticeCenters.checked) displayLines.push("CoG / CoR");
   if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
   if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
   if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
@@ -3332,7 +3372,128 @@ function updateViewerInfoOverlay(model) {
 }
 
 function applyZUpView() {
+  if (!camera) return;
   camera.up.set(0, 0, 1);
+}
+
+function modelCenterAndSpan(model) {
+  const b = model && model.bounds;
+  if (!b) {
+    const target = controls ? controls.target : new THREE.Vector3();
+    return { center: target.clone(), span: 10 };
+  }
+  return {
+    center: new THREE.Vector3(
+      0.5 * (b[0] + b[1]),
+      0.5 * (b[2] + b[3]),
+      0.5 * (b[4] + b[5]),
+    ),
+    span: Math.max(b[1] - b[0], b[3] - b[2], b[5] - b[4], 1.0),
+  };
+}
+
+function applyOrthoProjection() {
+  if (!(camera instanceof THREE.OrthographicCamera)) return;
+  const w = el.viewport ? el.viewport.clientWidth : 1;
+  const h = el.viewport ? el.viewport.clientHeight : 1;
+  const aspect = (w || 1) / (h || 1);
+  camera.left = -orthoViewHeight * aspect / 2;
+  camera.right = orthoViewHeight * aspect / 2;
+  camera.top = orthoViewHeight / 2;
+  camera.bottom = -orthoViewHeight / 2;
+  camera.updateProjectionMatrix();
+}
+
+function updateViewProjectionUi() {
+  if (!el.btnViewProjection) return;
+  const parallel = cameraProjectionMode === "parallel";
+  el.btnViewProjection.textContent = parallel ? "View: Parallel" : "View: Perspective";
+  el.btnViewProjection.classList.toggle("active", parallel);
+  el.btnViewProjection.title = parallel
+    ? "Switch to perspective view"
+    : "Switch to parallel (axonometric) view";
+}
+
+function updateViewPresetUi(name) {
+  if (!el.viewPreset) return;
+  el.viewPreset.value = name && STANDARD_VIEWS[name] ? name : "";
+}
+
+function setCameraProjectionMode(mode, options) {
+  const opts = options || {};
+  if (!camera || !controls || mode === cameraProjectionMode) return;
+
+  const position = camera.position.clone();
+  const target = controls.target.clone();
+  const up = camera.up.clone();
+  const near = camera.near;
+  const far = camera.far;
+  let nextOrthoHeight = orthoViewHeight;
+
+  if (opts.preserveView !== false) {
+    const dist = position.distanceTo(target);
+    if (mode === "parallel") {
+      if (camera instanceof THREE.PerspectiveCamera) {
+        const fovRad = camera.fov * Math.PI / 180;
+        nextOrthoHeight = 2 * Math.tan(fovRad / 2) * dist;
+      }
+    } else if (camera instanceof THREE.OrthographicCamera) {
+      nextOrthoHeight = orthoViewHeight / Math.max(camera.zoom, 1e-6);
+    }
+  } else if (opts.orthoViewHeight != null) {
+    nextOrthoHeight = opts.orthoViewHeight;
+  }
+
+  const w = el.viewport ? el.viewport.clientWidth : 1;
+  const h = el.viewport ? el.viewport.clientHeight : 1;
+  const aspect = (w || 1) / (h || 1);
+
+  if (mode === "parallel") {
+    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, near, far);
+    orthoViewHeight = nextOrthoHeight;
+    camera.zoom = 1;
+    applyOrthoProjection();
+  } else {
+    camera = new THREE.PerspectiveCamera(CAMERA_FOV, aspect, near, far);
+    camera.updateProjectionMatrix();
+  }
+
+  camera.position.copy(position);
+  camera.up.copy(up);
+  controls.object = camera;
+  cameraProjectionMode = mode;
+  controls.update();
+  updateViewProjectionUi();
+}
+
+function toggleCameraProjectionMode() {
+  setCameraProjectionMode(cameraProjectionMode === "parallel" ? "perspective" : "parallel");
+}
+
+function setStandardView(name) {
+  const view = STANDARD_VIEWS[name];
+  if (!view || !camera || !controls) return;
+
+  const { center, span } = modelCenterAndSpan(currentModel);
+  controls.target.copy(center);
+  camera.position.copy(center).add(view.offset(span));
+  camera.up.copy(view.up());
+  camera.near = span * 0.001;
+  camera.far = span * 100;
+
+  if (camera instanceof THREE.OrthographicCamera) {
+    orthoViewHeight = span * 1.35;
+    camera.zoom = 1;
+    applyOrthoProjection();
+  } else {
+    const w = el.viewport ? el.viewport.clientWidth : 1;
+    const h = el.viewport ? el.viewport.clientHeight : 1;
+    camera.aspect = (w || 1) / (h || 1);
+    camera.updateProjectionMatrix();
+  }
+
+  controls.update();
+  updateViewPresetUi(name);
 }
 
 function initThree() {
@@ -3341,9 +3502,10 @@ function initThree() {
 
   const w = el.viewport.clientWidth;
   const h = el.viewport.clientHeight;
-  camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 1e6);
+  camera = new THREE.PerspectiveCamera(CAMERA_FOV, w / h, 0.01, 1e6);
   applyZUpView();
   camera.position.set(8, -8, 6);
+  cameraProjectionMode = "perspective";
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
@@ -3354,6 +3516,7 @@ function initThree() {
   controls.enableDamping = true;
   controls.dampingFactor = 0.2;
   controls.target.set(0, 0, 0);
+  updateViewProjectionUi();
 
   const amb = new THREE.AmbientLight(0xffffff, 0.65);
   scene.add(amb);
@@ -3377,6 +3540,8 @@ function initThree() {
   scene.add(windGroup);
   windLabelGroup = new THREE.Group();
   scene.add(windLabelGroup);
+  practiceCenterGroup = new THREE.Group();
+  scene.add(practiceCenterGroup);
   axesGroup = new THREE.Group();
   scene.add(axesGroup);
 
@@ -3388,8 +3553,12 @@ function initThree() {
 function onResize() {
   const w = el.viewport.clientWidth;
   const h = el.viewport.clientHeight;
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  if (camera instanceof THREE.PerspectiveCamera) {
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    applyOrthoProjection();
+  }
   renderer.setSize(w, h);
   updateWideLineResolution(w, h);
 }
@@ -4354,27 +4523,62 @@ function fitCamera(model) {
   camera.position.set(cx + span * 1.15, cy - span * 1.15, cz + span * 0.55);
   camera.near = span * 0.001;
   camera.far = span * 100;
-  camera.updateProjectionMatrix();
+  if (camera instanceof THREE.OrthographicCamera) {
+    orthoViewHeight = span * 1.35;
+    camera.zoom = 1;
+    applyOrthoProjection();
+  } else {
+    const w = el.viewport ? el.viewport.clientWidth : 1;
+    const h = el.viewport ? el.viewport.clientHeight : 1;
+    camera.aspect = (w || 1) / (h || 1);
+    camera.updateProjectionMatrix();
+  }
   controls.update();
+  updateViewPresetUi("");
 }
 
 function captureCameraState() {
   if (!camera || !controls) return null;
-  return {
+  const state = {
     position: camera.position.clone(),
     target: controls.target.clone(),
+    up: camera.up.clone(),
     near: camera.near,
     far: camera.far,
+    projectionMode: cameraProjectionMode,
   };
+  if (camera instanceof THREE.PerspectiveCamera) {
+    state.fov = camera.fov;
+    state.aspect = camera.aspect;
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    state.orthoViewHeight = orthoViewHeight;
+    state.zoom = camera.zoom;
+  }
+  return state;
 }
 
 function restoreCameraState(state) {
   if (!state || !camera || !controls) return;
+  if (state.projectionMode && state.projectionMode !== cameraProjectionMode) {
+    setCameraProjectionMode(state.projectionMode, {
+      preserveView: false,
+      orthoViewHeight: state.orthoViewHeight,
+    });
+  }
   camera.position.copy(state.position);
   controls.target.copy(state.target);
+  if (state.up) camera.up.copy(state.up);
   camera.near = state.near;
   camera.far = state.far;
-  camera.updateProjectionMatrix();
+  if (camera instanceof THREE.PerspectiveCamera) {
+    if (state.fov != null) camera.fov = state.fov;
+    if (state.aspect != null) camera.aspect = state.aspect;
+    camera.updateProjectionMatrix();
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    if (state.orthoViewHeight != null) orthoViewHeight = state.orthoViewHeight;
+    if (state.zoom != null) camera.zoom = state.zoom;
+    applyOrthoProjection();
+  }
   controls.update();
 }
 
@@ -4816,6 +5020,11 @@ function buildModelScene(model) {
   }
   updateWindLegendOverlay();
 
+  clearGroup(practiceCenterGroup);
+  if (el.chkPracticeCenters && el.chkPracticeCenters.checked && practiceSummaryData) {
+    drawPracticeCentersOverlay(model, practiceSummaryData, span);
+  }
+
   updateWorldAxes(model);
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
@@ -4826,6 +5035,18 @@ function buildModelScene(model) {
 function formatForceValue(val) {
   if (Math.abs(val) < PRES_ZERO) return "0";
   return (val * 1e-3).toFixed(1);
+}
+
+function isForceValueDisplayZero(val) {
+  if (!isFinite(val) || Math.abs(val) < PRES_ZERO) return true;
+  // Match formatForceValue (kN, 1 decimal): |display| < 0.05 → "0.0"
+  return Math.abs(val * 1e-3) < 0.05;
+}
+
+function forceLabelsAllDisplayZero(labels) {
+  return labels.length > 0 && labels.every(function (item) {
+    return isForceValueDisplayZero(item.val);
+  });
 }
 
 function modelSpan(model) {
@@ -6270,6 +6491,84 @@ async function loadWindVisualForCurrentModel() {
   }
   populateWindCaseSelect();
   updateWindControlsAvailability();
+}
+
+async function loadPracticeSummaryForCurrentModel() {
+  const path = getCurrentModelPath();
+  practiceSummaryData = null;
+  if (!path) return;
+  try {
+    const view = await fetchApiJson("/api/practice/summary?path=" + encodeURIComponent(path));
+    if (view && view.eccentricity_rows && view.eccentricity_rows.length) {
+      practiceSummaryData = view;
+    }
+  } catch (ex) {
+    console.warn("Practice summary load failed:", ex.message);
+  }
+}
+
+function practiceStoryZMap(practice) {
+  const map = new Map();
+  for (const s of practice && practice.story_rows ? practice.story_rows : []) {
+    const z = Number(s.top_elevation != null ? s.top_elevation : s.elevation);
+    if (isFinite(z)) map.set(String(s.story), z);
+  }
+  return map;
+}
+
+function addPracticeCenterMarker(point, color, text, span, group, offsetSign) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute([point.x, point.y, point.z], 3));
+  const mat = nodePointsMaterial({
+    color: color,
+    size: 16,
+    sizeAttenuation: false,
+    depthTest: false,
+  });
+  const marker = new THREE.Points(geo, mat);
+  marker.renderOrder = 24;
+  group.add(marker);
+
+  const label = makeTextSprite(text, span, {
+    scaleFactor: nodeLabelScaleFactor() * 0.9,
+    bg: "rgba(0, 0, 0, 1.0)",
+    fg: colorHex(color),
+  });
+  const d = Math.max(span * 0.012, 0.05);
+  label.position.copy(point).add(new THREE.Vector3(offsetSign * d, d, d));
+  label.renderOrder = 25;
+  group.add(label);
+}
+
+function drawPracticeCentersOverlay(model, practice, span) {
+  if (!practice || !practice.eccentricity_rows || !practice.eccentricity_rows.length) return;
+  const zByStory = practiceStoryZMap(practice);
+  const zFallback = model.bounds ? model.bounds[5] : 0;
+  const lift = Math.max(span * 0.008, 0.03);
+  for (const row of practice.eccentricity_rows) {
+    const story = String(row.story == null ? "" : row.story);
+    const z = (zByStory.has(story) ? zByStory.get(story) : zFallback) + lift;
+    if (isFinite(Number(row.xg)) && isFinite(Number(row.yg))) {
+      addPracticeCenterMarker(
+        new THREE.Vector3(Number(row.xg), Number(row.yg), z),
+        COLORS.centerOfMass,
+        "CoG " + story,
+        span,
+        practiceCenterGroup,
+        -1
+      );
+    }
+    if (isFinite(Number(row.xs)) && isFinite(Number(row.ys))) {
+      addPracticeCenterMarker(
+        new THREE.Vector3(Number(row.xs), Number(row.ys), z),
+        COLORS.centerOfRigidity,
+        "CoR " + story,
+        span,
+        practiceCenterGroup,
+        1
+      );
+    }
+  }
 }
 
 function syncLcToWindCase(windCase) {
@@ -7747,7 +8046,7 @@ function buildForceDiagrams(model) {
     }
 
     addForceStemAndSpline(stemPts, splinePts, forceGroup);
-    if (showValues) {
+    if (showValues && !forceLabelsAllDisplayZero(labels)) {
       const span = modelSpan(model);
       for (const item of labels) {
         addForceValueLabelWithLeader(
@@ -7913,6 +8212,7 @@ const CHILD_WINDOW_NAMES = {
   input: "stb_gui_input",
   project: "stb_gui_project",
   loadsVerify: "stb_loads_verify",
+  practiceVerify: "stb_practice_verify",
   results: "stb_gui_results",
 };
 
@@ -9100,6 +9400,34 @@ function openLoadsVerifyWindow() {
   setStatus(path + " — load verification opened");
 }
 
+function openPracticeVerifyWindow() {
+  const path = getCurrentModelPath();
+  if (!path) {
+    setStatus("Open a model before using Practice…");
+    return;
+  }
+  let url;
+  try {
+    url = guiApiUrl(
+      "/static/practice_verify.html?path=" + encodeURIComponent(path),
+      window
+    );
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+    return;
+  }
+  const w = openNamedChildUrl(
+    "practiceVerify",
+    url,
+    "width=1120,height=860,scrollbars=yes,resizable=yes"
+  );
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  setStatus(path + " — structural indices opened");
+}
+
 window.openProjectWindow = openProjectWindow;
 window.reloadCurrentModel = () => loadSelectedModel(false, { keepCamera: true });
 window.refreshWindVisual = () => loadWindVisualForCurrentModel().then(function () {
@@ -9554,6 +9882,10 @@ async function loadSelectedModel(solve, options) {
       if (el.chkDispContour) el.chkDispContour.checked = false;
     }
     await loadWindVisualForCurrentModel();
+    practiceSummaryData = null;
+    if (el.chkPracticeCenters && el.chkPracticeCenters.checked) {
+      await loadPracticeSummaryForCurrentModel();
+    }
     buildModelScene(currentModel);
     if (!solve || !complete) {
       if (cameraState) {
@@ -9764,6 +10096,20 @@ if (el.btnTheme) {
   });
 }
 
+if (el.btnViewProjection) {
+  el.btnViewProjection.addEventListener("click", () => {
+    toggleCameraProjectionMode();
+  });
+}
+
+if (el.viewPreset) {
+  el.viewPreset.addEventListener("change", () => {
+    const name = el.viewPreset.value;
+    if (!name) return;
+    setStandardView(name);
+  });
+}
+
 if (el.btnClearSelection) {
   el.btnClearSelection.addEventListener("click", () => clearSelection());
 }
@@ -9771,6 +10117,9 @@ if (el.btnClearSelection) {
 el.btnInput.addEventListener("click", () => openInputWindow());
 el.btnProject.addEventListener("click", () => openProjectWindow());
 el.btnLoads.addEventListener("click", () => openLoadsVerifyWindow());
+if (el.btnPractice) {
+  el.btnPractice.addEventListener("click", () => openPracticeVerifyWindow());
+}
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
@@ -9840,6 +10189,15 @@ if (el.chkWindLoads) {
     if (el.chkWindLoads.checked && windVisualData) {
       const wc = windCaseById(windVisualData, selectedWindCaseId);
       syncLcToWindCase(wc);
+    }
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.chkPracticeCenters) {
+  el.chkPracticeCenters.addEventListener("change", async () => {
+    onResultsDisplayChanged();
+    if (el.chkPracticeCenters.checked && !practiceSummaryData) {
+      await loadPracticeSummaryForCurrentModel();
     }
     if (currentModel) rebuildScene();
   });
@@ -9945,6 +10303,7 @@ function readDisplayPrefsFromUi() {
   displayPrefs.loads = !!(el.chkLoads && el.chkLoads.checked);
   displayPrefs.loadValues = !!(el.chkLoadValues && el.chkLoadValues.checked);
   displayPrefs.windLoads = !!(el.chkWindLoads && el.chkWindLoads.checked);
+  displayPrefs.practiceCenters = !!(el.chkPracticeCenters && el.chkPracticeCenters.checked);
   displayPrefs.reactions = !!(el.chkReactions && el.chkReactions.checked);
   displayPrefs.reactionValues = !!(el.chkReactionValues && el.chkReactionValues.checked);
   displayPrefs.nodeLabels = !!(el.chkLabels && el.chkLabels.checked);
@@ -9978,6 +10337,7 @@ function applyDisplayPrefsToUi() {
   if (el.chkLoads) el.chkLoads.checked = !!displayPrefs.loads;
   if (el.chkLoadValues) el.chkLoadValues.checked = !!displayPrefs.loadValues;
   if (el.chkWindLoads && !el.chkWindLoads.disabled) el.chkWindLoads.checked = !!displayPrefs.windLoads;
+  if (el.chkPracticeCenters) el.chkPracticeCenters.checked = !!displayPrefs.practiceCenters;
   if (el.chkReactions && !el.chkReactions.disabled) el.chkReactions.checked = !!displayPrefs.reactions;
   if (el.chkReactionValues && !el.chkReactionValues.disabled) {
     el.chkReactionValues.checked = !!displayPrefs.reactionValues;
@@ -10036,6 +10396,7 @@ function loadDisplayPrefs() {
     if (typeof st.loads === "boolean") displayPrefs.loads = st.loads;
     if (typeof st.loadValues === "boolean") displayPrefs.loadValues = st.loadValues;
     if (typeof st.windLoads === "boolean") displayPrefs.windLoads = st.windLoads;
+    if (typeof st.practiceCenters === "boolean") displayPrefs.practiceCenters = st.practiceCenters;
     if (typeof st.reactions === "boolean") displayPrefs.reactions = st.reactions;
     if (typeof st.reactionValues === "boolean") displayPrefs.reactionValues = st.reactionValues;
     if (typeof st.nodeLabels === "boolean") displayPrefs.nodeLabels = st.nodeLabels;

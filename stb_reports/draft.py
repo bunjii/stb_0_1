@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from stb_checks import build_wood_check_summary
-from stb_practice import build_practice_summary
+from stb_practice import build_practice_summary, build_structural_indices
 from stb_project import ProjectDefinition
 
 
@@ -89,9 +89,10 @@ def render_confirmation_draft_markdown(
 ):
     generated_at = generated_at or datetime.now()
     practice = build_practice_summary(mdl, project)
+    indices = build_structural_indices(mdl, project)
     wood = build_wood_check_summary(mdl, project) if project.design_checks.wood.enabled else None
     analysis = _analysis_summary(mdl, analysis_text)
-    warnings = _collect_warnings_from_summaries(practice, wood, project, mdl=mdl)
+    warnings = _collect_warnings_from_summaries(practice, wood, project, mdl=mdl, indices=indices)
 
     lines = []
     lines.append("# " + _report_title(project))
@@ -238,7 +239,69 @@ def render_confirmation_draft_markdown(
     ))
     lines.append("")
 
-    lines.append("## 7. 木造梁・柱・筋かいの基本検定")
+    lines.append("## 7. 層間変形角・偏心率・剛性率")
+    lines.append("")
+    lines.append("解析後処理による構造指標です。段違い梁・中間層・混構造の詳細補正は初期実装では未考慮です。")
+    lines.append("")
+    lines.append("### 層間変形角（階最大）")
+    lines.append("")
+    lines.extend(_dict_table(
+        ("story", "direction", "load_case", "element_id", "drift_m", "height_m", "drift_angle", "inverse_ratio", "status"),
+        [r for r in indices.tables["story_drifts"] if r.get("is_story_max")],
+        {
+            "story": "階",
+            "direction": "方向",
+            "load_case": "LC",
+            "element_id": "部材",
+            "drift_m": "δ m",
+            "height_m": "h m",
+            "drift_angle": "δ/h",
+            "inverse_ratio": "逆数",
+            "status": "状態",
+        },
+    ))
+    lines.append("")
+    lines.append("### ASTIM式ベース偏心率")
+    lines.append("")
+    lines.extend(_dict_table(
+        ("story", "xg", "yg", "xs", "ys", "ex", "ey", "re_x", "re_y", "fe_x", "fe_y", "status"),
+        indices.tables["eccentricities"],
+        {
+            "story": "階",
+            "xg": "Xg",
+            "yg": "Yg",
+            "xs": "Xs",
+            "ys": "Ys",
+            "ex": "ex",
+            "ey": "ey",
+            "re_x": "Rex",
+            "re_y": "Rey",
+            "fe_x": "FeX",
+            "fe_y": "FeY",
+            "status": "状態",
+        },
+    ))
+    lines.append("")
+    lines.append("### 剛性率")
+    lines.append("")
+    lines.extend(_dict_table(
+        ("story", "direction", "load_case", "drift_m", "inverse_ratio", "mean_inverse_ratio", "rigidity_ratio", "fs", "status"),
+        indices.tables["rigidity_ratios"],
+        {
+            "story": "階",
+            "direction": "方向",
+            "load_case": "LC",
+            "drift_m": "δ m",
+            "inverse_ratio": "rs",
+            "mean_inverse_ratio": "平均rs",
+            "rigidity_ratio": "Rs",
+            "fs": "Fs",
+            "status": "状態",
+        },
+    ))
+    lines.append("")
+
+    lines.append("## 8. 木造梁・柱・筋かいの基本検定")
     lines.append("")
     if wood is None:
         lines.append("木造検定は project.design_checks.wood.enabled が false のため未実施です。")
@@ -319,7 +382,7 @@ def render_confirmation_draft_markdown(
         ))
     lines.append("")
 
-    lines.append("## 8. 照合メモ")
+    lines.append("## 9. 照合メモ")
     lines.append("")
     lines.append("手計算・既存表計算との照合では、次の値を優先して確認してください。")
     lines.append("")
@@ -334,7 +397,7 @@ def render_confirmation_draft_markdown(
     lines.append("")
 
     if project.report.include_warnings:
-        lines.append("## 8. 警告・注意")
+        lines.append("## 10. 警告・注意")
         lines.append("")
         if warnings:
             for warning in warnings:
@@ -344,13 +407,13 @@ def render_confirmation_draft_markdown(
         lines.append("")
 
     if project.report.include_manual_items:
-        lines.append("## 9. 手作業確認項目")
+        lines.append("## 11. 手作業確認項目")
         lines.append("")
         for item in MANUAL_CONFIRMATION_ITEMS:
             lines.append("- " + item)
         lines.append("")
 
-    lines.append("## 10. 総合所見ドラフト")
+    lines.append("## 12. 総合所見ドラフト")
     lines.append("")
     lines.append(_overall_comment(wood, warnings))
     lines.append("")
@@ -387,13 +450,16 @@ def _report_title(project):
 
 def _collect_warnings(mdl, project):
     practice = build_practice_summary(mdl, project)
+    indices = build_structural_indices(mdl, project)
     wood = build_wood_check_summary(mdl, project) if project.design_checks.wood.enabled else None
-    return _collect_warnings_from_summaries(practice, wood, project, mdl=mdl)
+    return _collect_warnings_from_summaries(practice, wood, project, mdl=mdl, indices=indices)
 
 
-def _collect_warnings_from_summaries(practice, wood, project, mdl=None):
+def _collect_warnings_from_summaries(practice, wood, project, mdl=None, indices=None):
     warnings = list(getattr(mdl, "input_warnings", []) or []) if mdl is not None else []
     warnings.extend(practice.warnings)
+    if indices is not None:
+        warnings.extend(indices.warnings)
     if wood is not None:
         warnings.extend(wood.warnings)
     if project.report.mode != "practice":

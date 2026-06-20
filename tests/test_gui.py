@@ -296,28 +296,28 @@ class TestGuiApi(unittest.TestCase):
     def test_api_project_save_round_trip(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
+        project_path = os.path.join(_STB_ROOT, "data", "practice_wood_single_story.project.json")
+        with open(project_path, encoding="utf-8") as fh:
+            original_text = fh.read()
         get_r = self.client.get(
             "/api/project",
             params={"path": "data/practice_wood_single_story.dat"},
         )
-        self.assertEqual(get_r.status_code, 200)
-        project = get_r.json()["raw"]
-        project["building"]["name"] = "GUI Save Test"
-        put_r = self.client.put(
-            "/api/project",
-            params={"path": "data/practice_wood_single_story.dat"},
-            json={"project": project},
-        )
-        self.assertEqual(put_r.status_code, 200)
-        saved = put_r.json()["view"]["raw"]["building"]["name"]
-        self.assertEqual(saved, "GUI Save Test")
-        # restore original name
-        project["building"]["name"] = "Practice Wood Single-Story Sample"
-        self.client.put(
-            "/api/project",
-            params={"path": "data/practice_wood_single_story.dat"},
-            json={"project": project},
-        )
+        try:
+            self.assertEqual(get_r.status_code, 200)
+            project = get_r.json()["raw"]
+            project["building"]["name"] = "GUI Save Test"
+            put_r = self.client.put(
+                "/api/project",
+                params={"path": "data/practice_wood_single_story.dat"},
+                json={"project": project},
+            )
+            self.assertEqual(put_r.status_code, 200)
+            saved = put_r.json()["view"]["raw"]["building"]["name"]
+            self.assertEqual(saved, "GUI Save Test")
+        finally:
+            with open(project_path, "w", encoding="utf-8") as fh:
+                fh.write(original_text)
 
     def test_api_project_save_empty_grids_placeholder(self):
         if self.client == None:
@@ -402,45 +402,66 @@ class TestGuiApi(unittest.TestCase):
     def test_api_loads_wind_view_missing_project_returns_404(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
-        path = "data/UK_ROOF_240420.dat"
+        path = "data/UK_240416panel.dat"
         r = self.client.get("/api/loads/wind", params={"path": path})
         self.assertEqual(r.status_code, 404, r.text)
         self.assertIn("Project file not found", r.json().get("detail", ""))
 
+    def test_api_practice_summary_view(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        r = self.client.get("/api/practice/summary", params={"path": path})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["kind"], "practice")
+        self.assertIn("summary", body)
+        self.assertGreater(len(body["story_rows"]), 0)
+        self.assertGreater(len(body["story_drift_rows"]), 0)
+        self.assertGreater(len(body["eccentricity_rows"]), 0)
+        self.assertGreater(len(body["rigidity_ratio_rows"]), 0)
+        self.assertFalse(any("PDF 2.5" in note or "2.5節" in note for note in body["notes"]))
+        self.assertFalse(any("PDF 2.5" in warning or "2.5節" in warning for warning in body["warnings"]))
+        tab_ids = [t["id"] for t in body["tabs"]]
+        self.assertIn("drift", tab_ids)
+        self.assertIn("eccentricity", tab_ids)
+        self.assertIn("rigidity", tab_ids)
+
     def test_api_project_save_seismic_rt_default(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
+        project_path = os.path.join(_STB_ROOT, "data", "practice_wood_single_story.project.json")
+        with open(project_path, encoding="utf-8") as fh:
+            original_text = fh.read()
         get_r = self.client.get(
             "/api/project",
             params={"path": "data/practice_wood_single_story.dat"},
         )
-        self.assertEqual(get_r.status_code, 200)
-        project = copy.deepcopy(get_r.json()["raw"])
-        self.assertNotIn("rt", project["load_conditions"]["seismic"])
-        bad = copy.deepcopy(project)
-        bad["load_conditions"]["seismic"]["rt"] = 0
-        put_r = self.client.put(
-            "/api/project",
-            params={"path": "data/practice_wood_single_story.dat"},
-            json={"project": bad},
-        )
-        self.assertEqual(put_r.status_code, 400)
-        good = copy.deepcopy(project)
-        good["building"]["name"] = "RT Default Save Test"
-        put_r = self.client.put(
-            "/api/project",
-            params={"path": "data/practice_wood_single_story.dat"},
-            json={"project": good},
-        )
-        self.assertEqual(put_r.status_code, 200)
-        seismic = put_r.json()["view"]["raw"]["load_conditions"]["seismic"]
-        self.assertNotIn("rt", seismic)
-        project["building"]["name"] = "Practice Wood Single-Story Sample"
-        self.client.put(
-            "/api/project",
-            params={"path": "data/practice_wood_single_story.dat"},
-            json={"project": project},
-        )
+        try:
+            self.assertEqual(get_r.status_code, 200)
+            project = copy.deepcopy(get_r.json()["raw"])
+            self.assertNotIn("rt", project["load_conditions"]["seismic"])
+            bad = copy.deepcopy(project)
+            bad["load_conditions"]["seismic"]["rt"] = 0
+            put_r = self.client.put(
+                "/api/project",
+                params={"path": "data/practice_wood_single_story.dat"},
+                json={"project": bad},
+            )
+            self.assertEqual(put_r.status_code, 400)
+            good = copy.deepcopy(project)
+            good["building"]["name"] = "RT Default Save Test"
+            put_r = self.client.put(
+                "/api/project",
+                params={"path": "data/practice_wood_single_story.dat"},
+                json={"project": good},
+            )
+            self.assertEqual(put_r.status_code, 200)
+            seismic = put_r.json()["view"]["raw"]["load_conditions"]["seismic"]
+            self.assertNotIn("rt", seismic)
+        finally:
+            with open(project_path, "w", encoding="utf-8") as fh:
+                fh.write(original_text)
 
     def test_api_project_missing_sidecar(self):
         if self.client == None:
@@ -464,6 +485,8 @@ class TestGuiApi(unittest.TestCase):
         self.assertIn("btnSave", r.text)
         self.assertIn("btnClose", r.text)
         self.assertIn("btnToggleSelect", r.text)
+        self.assertIn("btnViewProjection", r.text)
+        self.assertIn("viewPreset", r.text)
         self.assertIn("selectionPanel", r.text)
         self.assertIn("selectionMarquee", r.text)
         self.assertIn("elemContextMenu", r.text)

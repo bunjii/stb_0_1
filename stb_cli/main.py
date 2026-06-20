@@ -290,7 +290,7 @@ def cmd_report(args):
     _ensure_project_root_on_path()
     from stb_engine import parse_input, format_results
     from stb_engine.errors import StbParseError, StbSolveError
-    from stb_project import load_project_file, load_project_for_dat
+    from stb_project import apply_load_combinations_to_model, load_project_file, load_project_for_dat
     from stb_reports import write_confirmation_draft
 
     try:

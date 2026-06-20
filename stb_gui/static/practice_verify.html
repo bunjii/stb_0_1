@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e1dee4">
+  <meta name="color-scheme" content="dark light">
+  <title>構造指標</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/loads_verify.css">
+  <link rel="stylesheet" href="/static/practice_verify.css">
+</head>
+<body class="loads-verify-body">
+  <header class="loads-verify-toolbar">
+    <div class="loads-verify-toolbar-left">
+      <h1 id="pvTitle" class="loads-verify-title">構造指標</h1>
+      <span id="pvPath" class="loads-verify-path"></span>
+    </div>
+    <div class="loads-verify-toolbar-right">
+      <button type="button" id="btnPvRefresh" class="btn-secondary">再読込</button>
+    </div>
+  </header>
+
+  <nav id="pvTabs" class="loads-verify-tabs" aria-label="構造指標"></nav>
+
+  <main id="pvMain" class="loads-verify-main">
+    <p id="pvStatus" class="loads-verify-status">読み込み中...</p>
+  </main>
+
+  <script src="/static/practice_verify.js"></script>
+</body>
+</html>

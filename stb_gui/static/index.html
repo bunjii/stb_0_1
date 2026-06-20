@@ -27,10 +27,21 @@
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
     <button id="btnProject" type="button" class="btn-secondary" title="project.json sidecar settings">Project…</button>
     <button id="btnLoads" type="button" class="btn-secondary" title="Load and external-force verification">Loads…</button>
+    <button id="btnPractice" type="button" class="btn-secondary" title="Story drift / eccentricity / rigidity ratio">Practice…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnTheme" type="button" class="btn-secondary" title="Switch light/dark theme">Theme: Dark</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
+    <button id="btnViewProjection" type="button" class="btn-secondary" title="Switch perspective / parallel (axonometric)">View: Perspective</button>
+    <select id="viewPreset" title="Standard views">
+      <option value="">View…</option>
+      <option value="front">Front</option>
+      <option value="right">Right</option>
+      <option value="left">Left</option>
+      <option value="back">Back</option>
+      <option value="top">Top</option>
+      <option value="bottom">Bottom</option>
+    </select>
     <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P). Nodes (N) / Elements (E) in panel">Pick mode</button>
     <button id="btnToggleDistance" type="button" class="btn-secondary" title="Distance (D)">Distance</button>
     <span id="status">Loading…</span>
@@ -226,6 +237,9 @@
         </label>
         <label class="panel-check">
           <input type="checkbox" id="chkWindLoads"> Wind (surfaces / F_story)
+        </label>
+        <label class="panel-check">
+          <input type="checkbox" id="chkPracticeCenters"> CoG / CoR
         </label>
         <label class="panel-row">
           <span>Wind case</span>

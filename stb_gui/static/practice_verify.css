@@ -1,0 +1,18 @@
+.pv-note-list {
+  margin: 0;
+  padding-left: 1.4rem;
+  color: #c8c4d0;
+  line-height: 1.5;
+}
+
+.pv-ok {
+  color: #8fd4a0;
+}
+
+.pv-warn {
+  color: #f0d8c0;
+}
+
+.pv-nowrap {
+  white-space: nowrap;
+}
