@@ -824,6 +824,16 @@ select.context-menu-input {
   font-size: 12px;
 }
 
+.pick-options-section input[type="number"] {
+  width: 100%;
+  background: #1a1a22;
+  color: #e8e6ed;
+  border: 1px solid #4a4a58;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  font-size: 12px;
+}
+
 .pick-cons-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

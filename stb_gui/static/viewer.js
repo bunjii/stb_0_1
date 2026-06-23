@@ -250,6 +250,11 @@ const el = {
   pickModeDiaphragm: document.getElementById("pickModeDiaphragm"),
   pickModeWall: document.getElementById("pickModeWall"),
   pickModeHint: document.getElementById("pickModeHint"),
+  pickElemCreateOptions: document.getElementById("pickElemCreateOptions"),
+  pickElemCreateSection: document.getElementById("pickElemCreateSection"),
+  pickElemCreateBeta: document.getElementById("pickElemCreateBeta"),
+  pickElemCreateHint: document.getElementById("pickElemCreateHint"),
+  btnPickElemCreate: document.getElementById("btnPickElemCreate"),
   selectionSummary: document.getElementById("selectionSummary"),
   selectionList: document.getElementById("selectionList"),
   btnClearSelection: document.getElementById("btnClearSelection"),
@@ -293,6 +298,10 @@ const el = {
   contextMenuDmemCreate: document.getElementById("contextMenuDmemCreate"),
   contextMenuDmemCreateDiap: document.getElementById("contextMenuDmemCreateDiap"),
   contextMenuDmemCreateHint: document.getElementById("contextMenuDmemCreateHint"),
+  contextMenuElemCreate: document.getElementById("contextMenuElemCreate"),
+  contextMenuElemCreateSection: document.getElementById("contextMenuElemCreateSection"),
+  contextMenuElemCreateBeta: document.getElementById("contextMenuElemCreateBeta"),
+  contextMenuElemCreateHint: document.getElementById("contextMenuElemCreateHint"),
   contextMenuWrwCreate: document.getElementById("contextMenuWrwCreate"),
   contextMenuWrwCreateMultiplier: document.getElementById("contextMenuWrwCreateMultiplier"),
   contextMenuWrwCreateModel: document.getElementById("contextMenuWrwCreateModel"),
@@ -2120,6 +2129,82 @@ function canCreateDmemFromNodePick() {
     && diaps.length > 0;
 }
 
+function canCreateElemFromNodePick() {
+  const sections = currentModel ? (currentModel.sections || []) : [];
+  return isPickTargetEnabled("node")
+    && selectedNodeIds.size === 2
+    && selectedElementIds.size === 0
+    && selectedDmemIds.size === 0
+    && selectedWrwIds.size === 0
+    && sections.length > 0;
+}
+
+function parseCreatedElemIdFromWarnings(warnings) {
+  for (const w of warnings || []) {
+    const m = String(w).match(/^Created ELEM (\d+)/);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
+
+function findElementIdByNodes(ni, nj) {
+  if (!currentModel) return null;
+  const pair = new Set([ni, nj]);
+  for (const e of currentModel.elements || []) {
+    if (pair.has(e.n0) && pair.has(e.n1)) return e.id;
+  }
+  return null;
+}
+
+function populateElemCreateSectionSelect() {
+  const targets = [el.contextMenuElemCreateSection, el.pickElemCreateSection];
+  if (!currentModel) return;
+  const sections = currentModel.sections || [];
+  for (const sel of targets) {
+    if (!sel) continue;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const s of sections) {
+      const opt = document.createElement("option");
+      opt.value = String(s.id);
+      const mat = s.material_name || ("MAT " + s.material_id);
+      opt.textContent = "SECT " + s.id + " — " + s.name + " (" + mat + ")";
+      sel.appendChild(opt);
+    }
+    if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+      sel.value = prev;
+    } else if (sel.options.length) {
+      sel.selectedIndex = 0;
+    }
+  }
+}
+
+function getPickElemCreateSectionId() {
+  const raw = el.pickElemCreateSection
+    ? el.pickElemCreateSection.value
+    : (el.contextMenuElemCreateSection ? el.contextMenuElemCreateSection.value : "");
+  const sectId = parseInt(raw, 10);
+  return isFinite(sectId) ? sectId : null;
+}
+
+function getPickElemCreateBeta() {
+  const raw = el.pickElemCreateBeta
+    ? el.pickElemCreateBeta.value.trim()
+    : (el.contextMenuElemCreateBeta ? el.contextMenuElemCreateBeta.value.trim() : "0");
+  const beta = parseFloat(raw);
+  return isFinite(beta) ? beta : 0;
+}
+
+function requestCreateElement(sectionId, beta) {
+  if (!canCreateElemFromNodePick()) return;
+  const ids = selectedNodeIdList();
+  const ok = window.confirm(
+    "Create ELEM between nodes " + ids[0] + " and " + ids[1] + " (SECT " + sectionId + ")?"
+  );
+  if (!ok) return;
+  applyModelEdit({ action: "create_element", section_id: sectionId, beta: beta });
+}
+
 function requestCreateDmemMesh(diapId) {
   if (!canCreateDmemFromNodePick()) return;
   const ids = selectedNodeIdList();
@@ -2369,6 +2454,19 @@ function applyConsChange(fixed) {
 
 function updatePickWrwOptions() {
   const nodePickEnabled = isPickTargetEnabled("node");
+  if (el.pickElemCreateOptions) {
+    const showElem = canCreateElemFromNodePick();
+    el.pickElemCreateOptions.hidden = !showElem;
+    if (showElem) {
+      populateElemCreateSectionSelect();
+      if (el.pickElemCreateHint) {
+        const ids = selectedNodeIdList();
+        el.pickElemCreateHint.textContent = "Nodes " + ids[0] + " → " + ids[1];
+      }
+    } else if (el.pickElemCreateHint) {
+      el.pickElemCreateHint.textContent = "";
+    }
+  }
   if (el.pickDmemCreateOptions) {
     const showDmem = canCreateDmemFromNodePick();
     el.pickDmemCreateOptions.hidden = !showDmem;
@@ -2655,6 +2753,22 @@ function populatePickContextMenu() {
       el.contextMenuDmemCreateHint.textContent = "";
     }
   }
+  if (el.contextMenuElemCreate) {
+    const canCreateElem = canCreateElemFromNodePick();
+    el.contextMenuElemCreate.hidden = !canCreateElem;
+    if (canCreateElem) {
+      populateElemCreateSectionSelect();
+      if (el.contextMenuElemCreateBeta && el.pickElemCreateBeta) {
+        el.contextMenuElemCreateBeta.value = el.pickElemCreateBeta.value;
+      }
+      if (el.contextMenuElemCreateHint) {
+        const ids = selectedNodeIdList();
+        el.contextMenuElemCreateHint.textContent = "Nodes " + ids[0] + " → " + ids[1];
+      }
+    } else if (el.contextMenuElemCreateHint) {
+      el.contextMenuElemCreateHint.textContent = "";
+    }
+  }
   if (el.contextMenuWrwCreate) {
     const canCreateWrw = nodeCount === 4 && elemCount === 0 && dmemCount === 0
       && wrwCount === 0;
@@ -2845,6 +2959,17 @@ async function applyModelEdit(extra) {
       node_ids: selectedNodeIdList(),
       diap_id: diapId,
     };
+  } else if (extra.action === "create_element") {
+    if (!canCreateElemFromNodePick()) return;
+    const sectionId = parseInt(extra.section_id, 10);
+    if (!isFinite(sectionId)) return;
+    const beta = parseFloat(extra.beta);
+    payload = {
+      action: "create_element",
+      node_ids: selectedNodeIdList(),
+      section_id: sectionId,
+      beta: isFinite(beta) ? beta : 0,
+    };
   } else if (extra.action === "create_wwll") {
     if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
       || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
@@ -2932,12 +3057,13 @@ async function applyModelEdit(extra) {
       || payload.action === "delete_dmem" || payload.action === "delete_wwll";
     const createdDmem = payload.action === "create_dmem";
     const createdWrw = payload.action === "create_wwll";
+    const createdElem = payload.action === "create_element";
     const prevElems = new Set(selectedElementIds);
     const prevNodes = new Set(selectedNodeIds);
     const prevDmem = new Set(selectedDmemIds);
     const prevWrw = new Set(selectedWrwIds);
     await loadSelectedModel(false, {
-      keepSelection: !destructive && !createdDmem && !createdWrw,
+      keepSelection: !destructive && !createdDmem && !createdWrw && !createdElem,
       keepCamera: true,
     });
     if (createdDmem) {
@@ -2958,6 +3084,14 @@ async function applyModelEdit(extra) {
       const newId = findWrwIdByNodes(payload.node_ids);
       if (newId != null) {
         replacePickSelection([], [], [], [newId]);
+      } else {
+        clearSelection();
+      }
+    } else if (createdElem) {
+      const newId = parseCreatedElemIdFromWarnings(body.warnings)
+        ?? findElementIdByNodes(payload.node_ids[0], payload.node_ids[1]);
+      if (newId != null) {
+        replacePickSelection([], [newId], [], []);
       } else {
         clearSelection();
       }
@@ -3097,6 +3231,19 @@ function initContextMenu() {
       requestCreateDmemMesh(diapId);
       return;
     }
+    if (action === "create-elem") {
+      if (!canCreateElemFromNodePick()) {
+        window.alert("Pick exactly 2 nodes (no elements / DMEM / WRW) to create a member.");
+        return;
+      }
+      const sectId = getPickElemCreateSectionId();
+      if (sectId == null) {
+        window.alert("Select a section for the new ELEM.");
+        return;
+      }
+      requestCreateElement(sectId, getPickElemCreateBeta());
+      return;
+    }
     if (action === "create-wrw") {
       if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
         || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
@@ -3183,6 +3330,44 @@ function initContextMenu() {
         return;
       }
       requestCreateDmemMesh(diapId);
+    });
+  }
+  if (el.btnPickElemCreate) {
+    el.btnPickElemCreate.addEventListener("click", function () {
+      const sectId = getPickElemCreateSectionId();
+      if (sectId == null) {
+        window.alert("Select a section for the new ELEM.");
+        return;
+      }
+      requestCreateElement(sectId, getPickElemCreateBeta());
+    });
+  }
+  if (el.pickElemCreateSection) {
+    el.pickElemCreateSection.addEventListener("change", function () {
+      if (el.contextMenuElemCreateSection) {
+        el.contextMenuElemCreateSection.value = el.pickElemCreateSection.value;
+      }
+    });
+  }
+  if (el.contextMenuElemCreateSection) {
+    el.contextMenuElemCreateSection.addEventListener("change", function () {
+      if (el.pickElemCreateSection) {
+        el.pickElemCreateSection.value = el.contextMenuElemCreateSection.value;
+      }
+    });
+  }
+  if (el.pickElemCreateBeta) {
+    el.pickElemCreateBeta.addEventListener("change", function () {
+      if (el.contextMenuElemCreateBeta) {
+        el.contextMenuElemCreateBeta.value = el.pickElemCreateBeta.value;
+      }
+    });
+  }
+  if (el.contextMenuElemCreateBeta) {
+    el.contextMenuElemCreateBeta.addEventListener("change", function () {
+      if (el.pickElemCreateBeta) {
+        el.pickElemCreateBeta.value = el.contextMenuElemCreateBeta.value;
+      }
     });
   }
   if (el.btnPickWrwApplyModel) {

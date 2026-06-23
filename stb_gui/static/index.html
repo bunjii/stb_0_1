@@ -104,6 +104,15 @@
         </div>
         <div id="contextMenuDiapHint" class="context-menu-hint"></div>
       </div>
+      <div id="contextMenuElemCreate" class="context-menu-group">
+        <div class="context-menu-label">Create ELEM (2 nodes)</div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuElemCreateSection" class="context-menu-input"></select>
+          <input type="number" id="contextMenuElemCreateBeta" class="context-menu-input" step="any" value="0" title="Beta (deg)">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="create-elem">Create</button>
+        </div>
+        <div id="contextMenuElemCreateHint" class="context-menu-hint"></div>
+      </div>
       <div id="contextMenuDmemCreate" class="context-menu-group">
         <div class="context-menu-label">Create DMEM (3+ nodes)</div>
         <div class="context-menu-field-row">
@@ -343,6 +352,19 @@
         </div>
       </section>
       <p id="pickModeHint" class="panel-hint">All targets (Nodes, Members, Diaphragm, Wall). Toggle Pick target buttons to filter. Click or drag to pick. Ctrl+click toggles. Right-click = menu. Esc clears.</p>
+      <section id="pickElemCreateOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">New ELEM (2 nodes)</div>
+        <label class="panel-row">
+          <span>SECT</span>
+          <select id="pickElemCreateSection"></select>
+        </label>
+        <label class="panel-row">
+          <span>Beta (deg)</span>
+          <input type="number" id="pickElemCreateBeta" step="any" value="0">
+        </label>
+        <p id="pickElemCreateHint" class="panel-hint"></p>
+        <button type="button" id="btnPickElemCreate" class="btn-block btn-secondary">Create member</button>
+      </section>
       <section id="pickDmemCreateOptions" class="panel-section pick-options-section" hidden>
         <div class="panel-section-title">New DMEM (selected nodes)</div>
         <label class="panel-row">

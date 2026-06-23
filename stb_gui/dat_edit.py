@@ -531,6 +531,118 @@ def _insert_dmem_lines(lines: list[str], new_data_lines: list[str]) -> list[str]
     return out
 
 
+def _existing_element_ids(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "ELEM":
+            out.add(_parse_int(rec[1][1], "element id"))
+    return out
+
+
+def _next_element_id(lines: list[str]) -> int:
+    ids = _existing_element_ids(lines)
+    if not ids:
+        return 1
+    return max(ids) + 1
+
+
+def _find_element_between_nodes(lines: list[str], n1: int, n2: int) -> int | None:
+    pair = {int(n1), int(n2)}
+    for line in lines:
+        rec = _split_record(line)
+        if not rec or rec[0] != "ELEM":
+            continue
+        parts = rec[1]
+        if len(parts) < 4:
+            continue
+        ni = _parse_int(parts[2], "node i")
+        nj = _parse_int(parts[3], "node j")
+        if {ni, nj} == pair:
+            return _parse_int(parts[1], "element id")
+    return None
+
+
+def _format_elem_line(elem_id: int, ni: int, nj: int, sect_id: int, beta: float = 0.0) -> str:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from dat_format import ELEM_FMTS, record_line
+
+    return record_line("ELEM", ELEM_FMTS, [elem_id, ni, nj, sect_id, beta])
+
+
+def _insert_elem_lines(lines: list[str], new_data_lines: list[str]) -> list[str]:
+    from stb_gui.dat_format_headers import SECTION_HEADERS
+
+    out = list(lines)
+    last_elem = -1
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] == "ELEM":
+            last_elem = idx
+    if last_elem >= 0:
+        out[last_elem + 1:last_elem + 1] = new_data_lines
+        return out
+
+    insert_at = len(out)
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] == "CONS":
+            insert_at = idx
+            break
+
+    block = list(SECTION_HEADERS["ELEM"])
+    if insert_at < len(out) and insert_at > 0 and out[insert_at - 1].strip():
+        block = [""] + block
+    block.extend(new_data_lines)
+    out[insert_at:insert_at] = block
+    return out
+
+
+def create_element(
+    text: str,
+    node_ids: list[int],
+    section_id: int,
+    beta: float = 0.0,
+    elem_id: int | None = None,
+) -> tuple[str, list[str]]:
+    if len(node_ids) != 2:
+        raise ValueError("create_element requires exactly 2 node ids")
+    n1, n2 = int(node_ids[0]), int(node_ids[1])
+    if n1 == n2:
+        raise ValueError("Element endpoints must be different nodes")
+
+    lines = text.splitlines()
+    valid_nodes = _node_ids_in_text(lines)
+    for n in (n1, n2):
+        if n not in valid_nodes:
+            raise ValueError("Unknown node id: {0}".format(n))
+
+    sect_id = int(section_id)
+    if sect_id not in _section_ids(lines):
+        raise ValueError("Unknown section id: {0}".format(sect_id))
+
+    existing = _find_element_between_nodes(lines, n1, n2)
+    if existing is not None:
+        raise ValueError(
+            "Element {0} already connects nodes {1} and {2}".format(existing, n1, n2)
+        )
+
+    new_id = int(elem_id) if elem_id is not None else _next_element_id(lines)
+    if new_id in _existing_element_ids(lines):
+        raise ValueError("Element id {0} already exists".format(new_id))
+
+    new_line = _format_elem_line(new_id, n1, n2, sect_id, float(beta))
+    out = _insert_elem_lines(lines, [new_line])
+    return _ensure_trailing_newline("\n".join(out)), [
+        "Created ELEM {0} (nodes {1}, {2}, SECT {3}).".format(new_id, n1, n2, sect_id)
+    ]
+
+
 def create_dmem(
     text: str,
     diap_id: int,
@@ -1113,6 +1225,14 @@ def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]
         return delete_elements(text, element_ids)
     if op == "delete_nodes":
         return delete_nodes(text, node_ids)
+    if op == "create_element":
+        return create_element(
+            text,
+            node_ids,
+            action["section_id"],
+            beta=action.get("beta", 0.0),
+            elem_id=action.get("elem_id"),
+        )
     if op == "create_dmem":
         return create_dmem(text, action["diap_id"], node_ids, action.get("dmem_id"))
     if op == "create_wwll":

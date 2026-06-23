@@ -8,7 +8,13 @@ if _STB_ROOT not in sys.path:
 
 from stb_engine import run_from_file
 from stb_practice import build_structural_indices
-from stb_practice.structural_indices import StoryIndex, _directional_rigidity_center, _story_for_member
+from stb_practice.structural_indices import (
+    StoryIndex,
+    _build_shear_panel_stiffness_rows,
+    _directional_rigidity_center,
+    _story_for_member,
+    _story_indices,
+)
 from stb_project import load_project_for_dat
 
 
@@ -70,8 +76,8 @@ class TestStructuralIndices(unittest.TestCase):
         self.assertGreater(story1.ys, -10.0)
         self.assertLess(story1.ys, 10.0)
         self.assertEqual(story1.status, "OK")
-        self.assertAlmostEqual(story1.xs, 4.20, places=1)
-        self.assertAlmostEqual(story1.ys, 3.34, places=1)
+        self.assertAlmostEqual(story1.xs, 1.78, places=1)
+        self.assertAlmostEqual(story1.ys, 3.78, places=1)
         self.assertIsNotNone(story1.rex_m)
         self.assertIsNotNone(story1.rey_m)
         self.assertLess(story1.rex_m, 10.0)
@@ -79,7 +85,30 @@ class TestStructuralIndices(unittest.TestCase):
         self.assertGreater(story1.rex_m, 0.0)
         self.assertGreater(story1.rey_m, 0.0)
         self.assertIsNotNone(story1.re_x)
-        self.assertLess(story1.re_x, 0.3)
+        self.assertIsNotNone(story1.re_y)
+        self.assertLess(story1.re_x, 0.05)
+        self.assertLess(story1.re_y, 0.55)
+
+    def test_shear_panels_included_in_stiffness_rows(self):
+        dat_path = _data_path("UK_240416_floors_1to3_diaphragm.dat")
+        mdl, _txt = run_from_file(dat_path)
+        project = load_project_for_dat(dat_path, required=True)
+
+        result = build_structural_indices(mdl, project)
+        panel_rows = [r for r in result.member_stiffnesses if r.status == "shear_panel"]
+        self.assertGreater(len(panel_rows), 0)
+        self.assertGreater(len(mdl.wshears), 0)
+        self.assertEqual(len(panel_rows), len(mdl.wshears))
+
+        stories = _story_indices(project)
+        direct = _build_shear_panel_stiffness_rows(mdl, stories)
+        self.assertEqual(len(direct), len(mdl.wshears))
+        x_panel = next(r for r in direct if r.dxx_kN_m is not None and r.dyy_kN_m is None)
+        y_panel = next(r for r in direct if r.dyy_kN_m is not None and r.dxx_kN_m is None)
+        self.assertGreater(x_panel.dxx_kN_m, 0.0)
+        self.assertGreater(y_panel.dyy_kN_m, 0.0)
+        self.assertEqual(x_panel.dxy_kN_m, 0.0)
+        self.assertEqual(y_panel.dxy_kN_m, 0.0)
 
     def test_rigidity_center_uses_directional_stiffness_weights(self):
         from stb_practice.structural_indices import MemberStiffnessRow

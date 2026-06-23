@@ -12,6 +12,7 @@ DRIFT_ROUTE2_LIMIT = 1.0 / 200.0
 ECCENTRICITY_ROUTE_LIMIT = 0.15
 RIGIDITY_ROUTE2_LIMIT = 0.6
 LATERAL_MEMBER_KINDS = ("lateral_resisting_element", "column", "brace", "wall")
+SHEAR_PANEL_ELEM_ID_BASE = 900_000
 
 
 @dataclass(frozen=True)
@@ -126,11 +127,12 @@ def build_structural_indices(mdl, project) -> StructuralIndicesResult:
 
     drift_rows = _build_story_drift_rows(mdl, stories, vertical_members, lateral_cases)
     stiffness_rows = _build_member_stiffness_rows(mdl, stories, vertical_members, lateral_cases)
+    stiffness_rows.extend(_build_shear_panel_stiffness_rows(mdl, stories))
     eccentricity_rows = _build_eccentricity_rows(mdl, project, stories, stiffness_rows)
     rigidity_rows = _build_rigidity_ratio_rows(project, stories, drift_rows, lateral_cases)
 
     _append_limit_warnings(project, drift_rows, eccentricity_rows, rigidity_rows, warnings)
-    if not vertical_members:
+    if not vertical_members and not getattr(mdl, "wshears", None):
         warnings.append("No vertical lateral members were available for structural indices.")
     if not lateral_cases:
         warnings.append("No X/Y lateral load cases were available for structural indices.")
@@ -265,16 +267,20 @@ def _is_vertical_member(e) -> bool:
     return abs(dz) > math.hypot(dx, dy)
 
 
-def _story_for_member(e, stories: Sequence[StoryIndex]) -> str:
-    mid = 0.5 * (float(e.n0.z) + float(e.n1.z))
+def _story_for_z_midpoint(z_mid: float, stories: Sequence[StoryIndex]) -> str:
     last = len(stories) - 1
     for i, s in enumerate(stories):
         lo = s.elevation - TOLERANCE
         top = s.elevation + s.height
         hi = top + TOLERANCE if i == last else top - TOLERANCE
-        if lo <= mid <= hi:
+        if lo <= z_mid <= hi:
             return s.name
     return ""
+
+
+def _story_for_member(e, stories: Sequence[StoryIndex]) -> str:
+    mid = 0.5 * (float(e.n0.z) + float(e.n1.z))
+    return _story_for_z_midpoint(mid, stories)
 
 
 def _story_by_name(stories: Sequence[StoryIndex], name: str) -> Optional[StoryIndex]:
@@ -431,6 +437,66 @@ def _stiffness_components(qx_x, qy_x, dx_x, dy_x, qx_y, qy_y, dx_y, dy_y):
 
 def _element_xy(e) -> Tuple[float, float]:
     return 0.5 * (float(e.n0.x) + float(e.n1.x)), 0.5 * (float(e.n0.y) + float(e.n1.y))
+
+
+def _shear_panel_xy(panel) -> Tuple[float, float]:
+    nodes = panel.nodes()
+    if not nodes:
+        return 0.0, 0.0
+    x = sum(float(n.x) for n in nodes) / len(nodes)
+    y = sum(float(n.y) for n in nodes) / len(nodes)
+    return x, y
+
+
+def _story_for_shear_panel(panel, stories: Sequence[StoryIndex]) -> str:
+    nodes = panel.nodes()
+    if not nodes:
+        return ""
+    z_mid = sum(float(n.z) for n in nodes) / len(nodes)
+    return _story_for_z_midpoint(z_mid, stories)
+
+
+def _build_shear_panel_stiffness_rows(mdl, stories: Sequence[StoryIndex]) -> List[MemberStiffnessRow]:
+    """Rated-wall shear panels (WWLL MODEL=1) as directional spring stiffness at panel centroid."""
+    rows: List[MemberStiffnessRow] = []
+    for panel in getattr(mdl, "wshears", []) or []:
+        story_name = _story_for_shear_panel(panel, stories)
+        if not story_name:
+            continue
+        direction = str(getattr(panel, "direction", "")).upper()
+        if direction not in ("X", "Y"):
+            continue
+        k_kN_m = float(panel.k) / 1000.0
+        if k_kN_m <= TOLERANCE:
+            continue
+        x, y = _shear_panel_xy(panel)
+        dxx = k_kN_m if direction == "X" else None
+        dyy = k_kN_m if direction == "Y" else None
+        wall_id = int(getattr(panel, "wall_id", 0) or 0)
+        label = str(getattr(panel, "name", "") or "").strip()
+        member_class = "shear_panel"
+        if label:
+            member_class = "shear_panel ({0})".format(label)
+        rows.append(MemberStiffnessRow(
+            story=story_name,
+            element_id=SHEAR_PANEL_ELEM_ID_BASE + int(panel.id),
+            member_class=member_class,
+            x=x,
+            y=y,
+            qx_x_kN=None,
+            qy_x_kN=None,
+            dx_x_m=None,
+            dy_x_m=None,
+            qx_y_kN=None,
+            qy_y_kN=None,
+            dx_y_m=None,
+            dy_y_m=None,
+            dxx_kN_m=dxx,
+            dxy_kN_m=0.0,
+            dyy_kN_m=dyy,
+            status="shear_panel",
+        ))
+    return rows
 
 
 def _build_eccentricity_rows(mdl, project, stories, stiffness_rows) -> List[EccentricityRow]:
