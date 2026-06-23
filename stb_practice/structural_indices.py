@@ -679,6 +679,7 @@ def _fe(re: Optional[float]) -> Optional[float]:
 
 
 def _build_rigidity_ratio_rows(project, stories, drift_rows, lateral_cases) -> List[RigidityRatioRow]:
+    """Rigidity ratio Rs = ri / ri_mean with ri = h / delta (proxy for story stiffness)."""
     out = []
     for case in lateral_cases:
         maxima = {}
@@ -756,4 +757,9 @@ def _eccentricity_to_dict(r: EccentricityRow) -> dict:
 
 
 def _rigidity_ratio_to_dict(r: RigidityRatioRow) -> dict:
-    return r.__dict__.copy()
+    d = r.__dict__.copy()
+    if r.drift_m is not None and r.height_m and r.height_m > TOLERANCE:
+        d["drift_angle"] = abs(float(r.drift_m)) / float(r.height_m)
+    else:
+        d["drift_angle"] = None
+    return d

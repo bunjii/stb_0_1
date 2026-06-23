@@ -25,6 +25,8 @@ class TestGuiModelJson(unittest.TestCase):
         self.assertTrue("examples/cantilever.dat" in models)
 
     def test_load_cantilever_geometry(self):
+        from stb_loads.equilibrium import invalidate_solved_model_cache
+        invalidate_solved_model_cache(resolve_model_path("examples/cantilever.dat"))
         data = load_model_dict("examples/cantilever.dat", solve=False)
         self.assertEqual(len(data["nodes"]), 2)
         self.assertEqual(len(data["elements"]), 1)
@@ -84,6 +86,20 @@ class TestGuiModelJson(unittest.TestCase):
         self.assertTrue(len(data.get("reactions", [])) >= 1)
         self.assertAlmostEqual(data["reactions"][0]["tz"], 5.0, places=3)
         self.assertAlmostEqual(data["reactions"][0]["ry"], -10.0, places=3)
+
+    def test_load_model_dict_reuses_solved_cache(self):
+        from stb_loads.equilibrium import invalidate_solved_model_cache
+
+        path = "examples/cantilever.dat"
+        full = resolve_model_path(path)
+        invalidate_solved_model_cache(full)
+        unsolved = load_model_dict(path, solve=False)
+        self.assertFalse(unsolved["solved"])
+        load_model_dict(path, solve=True)
+        cached = load_model_dict(path, solve=False)
+        self.assertTrue(cached["solved"])
+        self.assertTrue("NDSP" in cached["results_text"])
+        self.assertTrue("forces" in cached["elements"][0])
 
     def test_reject_path_outside_project(self):
         raised = False
@@ -180,10 +196,25 @@ class TestGuiApi(unittest.TestCase):
     def test_api_model_geometry(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
+        from stb_loads.equilibrium import invalidate_solved_model_cache
+        invalidate_solved_model_cache(resolve_model_path("examples/cantilever.dat"))
         r = self.client.get("/api/model", params={"path": "examples/cantilever.dat", "solve": 0})
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertEqual(len(body["elements"]), 1)
+        self.assertFalse(body["solved"])
+
+    def test_api_model_reuses_solved_cache(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        path = "examples/cantilever.dat"
+        self.client.get("/api/model", params={"path": path, "solve": 1})
+        r = self.client.get("/api/model", params={"path": path, "solve": 0})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["solved"])
+        self.assertTrue("NDSP" in body["results_text"])
+        self.assertTrue("forces" in body["elements"][0])
 
     def test_api_model_solved_has_results_text(self):
         if self.client == None:
@@ -410,7 +441,12 @@ class TestGuiApi(unittest.TestCase):
     def test_api_practice_summary_view(self):
         if self.client == None:
             self.skipTest("fastapi not installed")
+        from stb_loads.equilibrium import invalidate_solved_model_cache
         path = "data/UK_240416_floors_1to3_diaphragm.dat"
+        invalidate_solved_model_cache(resolve_model_path(path))
+        r = self.client.get("/api/practice/summary", params={"path": path})
+        self.assertEqual(r.status_code, 400, r.text)
+        self.client.get("/api/model", params={"path": path, "solve": 1})
         r = self.client.get("/api/practice/summary", params={"path": path})
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()

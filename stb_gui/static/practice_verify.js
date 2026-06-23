@@ -54,6 +54,35 @@
     return "1/" + (1 / n).toFixed(0);
   }
 
+  function rigiditySymbolRsBar() {
+    return "r\u0304s";
+  }
+
+  function storyMaxDriftMap(view) {
+    const map = new Map();
+    for (const row of view.story_drift_rows || []) {
+      if (!row.is_story_max) continue;
+      const key = String(row.direction).toLowerCase() + "|" + String(row.load_case) + "|" + String(row.story);
+      map.set(key, row);
+    }
+    return map;
+  }
+
+  function rigidityDriftValues(r, view, direction) {
+    const key = String(direction).toLowerCase() + "|" + String(r.load_case) + "|" + String(r.story);
+    const driftRow = storyMaxDriftMap(view).get(key);
+    const driftM = driftRow && driftRow.drift_m != null ? Number(driftRow.drift_m) : Number(r.drift_m);
+    const heightM = driftRow && driftRow.height_m != null ? Number(driftRow.height_m) : Number(r.height_m);
+    if (!Number.isFinite(driftM) || !Number.isFinite(heightM) || heightM <= 0) {
+      return { driftM: null, heightM: null, driftAngle: null };
+    }
+    return {
+      driftM: driftM,
+      heightM: heightM,
+      driftAngle: Math.abs(driftM) / heightM,
+    };
+  }
+
   async function fetchJson(path) {
     const res = await fetch(guiApiUrl(path));
     if (!res.ok) {
@@ -214,17 +243,37 @@
     );
   }
 
-  function renderRigidityTable(rows, view, title) {
+  function renderRigidityTable(rows, view, title, direction) {
+    const rsBar = rigiditySymbolRsBar();
+    const headers = [
+      "階",
+      "LC",
+      "δ (m)",
+      "h (m)",
+      "δ/h",
+      "rs",
+      rsBar,
+      "Rs",
+      "Fs",
+      "状態",
+    ];
     return table(
-      ["階", "LC", "δ m", "rs", "平均rs", "Rs", "Fs", "状態"],
+      headers,
       upperStoriesFirst(rows, view),
       function (r) {
+        const drift = rigidityDriftValues(r, view, direction);
+        const rs = r.inverse_ratio != null ? Number(r.inverse_ratio) : (
+          drift.driftAngle != null ? 1 / drift.driftAngle : null
+        );
+        const rsBarVal = r.mean_inverse_ratio != null ? Number(r.mean_inverse_ratio) : null;
         return "<tr>"
           + "<td>" + escapeHtml(r.story) + "</td>"
           + '<td class="num">' + escapeHtml(r.load_case) + "</td>"
-          + '<td class="num">' + fmtNum(r.drift_m, 6) + "</td>"
-          + '<td class="num">' + fmtNum(r.inverse_ratio, 1) + "</td>"
-          + '<td class="num">' + fmtNum(r.mean_inverse_ratio, 1) + "</td>"
+          + '<td class="num">' + fmtNum(drift.driftM, 6) + "</td>"
+          + '<td class="num">' + fmtNum(drift.heightM, 3) + "</td>"
+          + '<td class="num">' + fmtNum(drift.driftAngle, 6) + "</td>"
+          + '<td class="num">' + fmtNum(rs, 1) + "</td>"
+          + '<td class="num">' + fmtNum(rsBarVal, 1) + "</td>"
           + '<td class="num">' + fmtNum(r.rigidity_ratio, 3) + "</td>"
           + '<td class="num">' + fmtNum(r.fs, 3) + "</td>"
           + "<td>" + escapeHtml(r.status) + "</td>"
@@ -243,8 +292,8 @@
 
   function renderRigidity(view) {
     const rows = view.rigidity_ratio_rows || [];
-    return renderRigidityTable(rigidityRowsForDirection(rows, "x"), view, "剛性率（X方向）")
-      + renderRigidityTable(rigidityRowsForDirection(rows, "y"), view, "剛性率（Y方向）");
+    return renderRigidityTable(rigidityRowsForDirection(rows, "x"), view, "剛性率（X方向）", "x")
+      + renderRigidityTable(rigidityRowsForDirection(rows, "y"), view, "剛性率（Y方向）", "y");
   }
 
   function renderStiffness(view) {

@@ -6893,7 +6893,7 @@ async function loadWindVisualForCurrentModel() {
 async function loadPracticeSummaryForCurrentModel() {
   const path = getCurrentModelPath();
   practiceSummaryData = null;
-  if (!path) return;
+  if (!path || !currentModel || !analysisComplete(currentModel)) return;
   try {
     const view = await fetchApiJson("/api/practice/summary?path=" + encodeURIComponent(path));
     if (view && view.eccentricity_rows && view.eccentricity_rows.length) {
@@ -10322,7 +10322,7 @@ async function loadSelectedModel(solve, options) {
     }
     await loadWindVisualForCurrentModel();
     practiceSummaryData = null;
-    if (el.chkPracticeCenters && el.chkPracticeCenters.checked) {
+    if (el.chkPracticeCenters && el.chkPracticeCenters.checked && analysisComplete(currentModel)) {
       await loadPracticeSummaryForCurrentModel();
     }
     buildModelScene(currentModel);
@@ -10635,8 +10635,18 @@ if (el.chkWindLoads) {
 if (el.chkPracticeCenters) {
   el.chkPracticeCenters.addEventListener("change", async () => {
     onResultsDisplayChanged();
-    if (el.chkPracticeCenters.checked && !practiceSummaryData) {
-      await loadPracticeSummaryForCurrentModel();
+    if (el.chkPracticeCenters.checked) {
+      if (!currentModel || !analysisComplete(currentModel)) {
+        el.chkPracticeCenters.checked = false;
+        onResultsDisplayChanged();
+        setStatus("CoG / CoR requires analysis — use Solve (F5) first.");
+        return;
+      }
+      if (!practiceSummaryData) {
+        await loadPracticeSummaryForCurrentModel();
+      }
+    } else {
+      practiceSummaryData = null;
     }
     if (currentModel) rebuildScene();
   });

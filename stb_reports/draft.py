@@ -285,15 +285,17 @@ def render_confirmation_draft_markdown(
     lines.append("### 剛性率")
     lines.append("")
     lines.extend(_dict_table(
-        ("story", "direction", "load_case", "drift_m", "inverse_ratio", "mean_inverse_ratio", "rigidity_ratio", "fs", "status"),
+        ("story", "direction", "load_case", "drift_m", "height_m", "drift_angle", "inverse_ratio", "mean_inverse_ratio", "rigidity_ratio", "fs", "status"),
         indices.tables["rigidity_ratios"],
         {
             "story": "階",
             "direction": "方向",
             "load_case": "LC",
-            "drift_m": "δ m",
+            "drift_m": "δ (m)",
+            "height_m": "h (m)",
+            "drift_angle": "δ/h",
             "inverse_ratio": "rs",
-            "mean_inverse_ratio": "平均rs",
+            "mean_inverse_ratio": "r̄s",
             "rigidity_ratio": "Rs",
             "fs": "Fs",
             "status": "状態",

@@ -16,3 +16,7 @@
 .pv-nowrap {
   white-space: nowrap;
 }
+
+.pv-var-bar {
+  text-decoration: overline;
+}

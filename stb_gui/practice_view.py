@@ -6,7 +6,8 @@ import os
 import re
 from typing import Any, Dict, Iterable, Optional
 
-from stb_gui.model_json import _load_mdl, normalize_model_relpath, project_root, resolve_model_path
+from stb_gui.model_json import normalize_model_relpath, project_root, resolve_model_path
+from stb_loads.equilibrium import get_cached_solved_model
 from stb_practice import build_structural_indices
 from stb_project import load_project_for_dat, project_path_for_dat
 
@@ -118,5 +119,9 @@ def load_practice_summary_view_for_model(dat_relpath: str) -> Dict[str, Any]:
     dat_relpath = normalize_model_relpath(dat_relpath)
     full = resolve_model_path(dat_relpath)
     project = load_project_for_dat(full, required=True)
-    mdl, full = _load_mdl(dat_relpath, solve=True, quiet=True)
+    mdl = get_cached_solved_model(full)
+    if mdl is None:
+        raise ValueError(
+            "Analysis results are not available. Run Solve in the main window first."
+        )
     return build_practice_summary_view(mdl, project, dat_relpath, full)

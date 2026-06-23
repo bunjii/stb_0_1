@@ -56,6 +56,17 @@ def invalidate_solved_model_cache(full: str) -> None:
     _SOLVED_MODEL_CACHE.pop(full, None)
 
 
+def get_cached_solved_model(full: str):
+    """Return a cached solved model when the .dat mtime matches; otherwise None."""
+    if not full or not os.path.isfile(full):
+        return None
+    mtime = os.path.getmtime(full)
+    cached = _SOLVED_MODEL_CACHE.get(full)
+    if not cached or cached[0] != mtime:
+        return None
+    return cached[1]
+
+
 def seed_solved_model_cache(mdl) -> None:
     """Register an already-solved model (e.g. after /api/model?solve=1)."""
     cache_key = getattr(mdl, "filepath", None)

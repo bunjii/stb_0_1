@@ -51,6 +51,34 @@ class TestStructuralIndices(unittest.TestCase):
         self.assertTrue("story_drifts" in result.tables)
         self.assertTrue(any(row.is_story_max for row in result.story_drifts))
 
+    def test_rigidity_ratio_rs_is_dimensionless_for_uk_diaphragm_sample(self):
+        dat_path = _data_path("UK_240416_floors_1to3_diaphragm.dat")
+        mdl, _txt = run_from_file(dat_path)
+        project = load_project_for_dat(dat_path, required=True)
+        result = build_structural_indices(mdl, project)
+        by_key = {}
+        for row in result.rigidity_ratios:
+            if row.rigidity_ratio is None:
+                continue
+            key = (row.direction, row.load_case)
+            by_key.setdefault(key, []).append(row)
+        self.assertGreater(len(by_key), 0)
+        for rows in by_key.values():
+            mean_inv = rows[0].mean_inverse_ratio
+            self.assertIsNotNone(mean_inv)
+            for row in rows:
+                drift = abs(float(row.drift_m))
+                expected_ri = row.height_m / drift
+                self.assertAlmostEqual(row.inverse_ratio, expected_ri, places=3)
+                self.assertAlmostEqual(
+                    row.rigidity_ratio,
+                    expected_ri / mean_inv,
+                    places=3,
+                )
+                self.assertGreater(row.rigidity_ratio, 0.1)
+                self.assertLess(row.rigidity_ratio, 5.0)
+                self.assertGreater(mean_inv, row.rigidity_ratio * 10.0)
+
     def test_story_for_member_uses_midpoint_at_floor_boundary(self):
         stories = [
             StoryIndex(name="1", elevation=0.0, height=3.035),
