@@ -14,7 +14,12 @@ environment and makes classroom Windows deployment easier.
 - `STB Forces`: exposes parsed element force rows
 - `STB DAT Nodes`: reads original node points from an existing `.dat` file
 - `STB DAT Beams`: reads element connectivity from an existing `.dat` file
-- `STB Node`, `STB Beam`, `STB Material`, `STB Section`, `STB Support`, `STB Load`, `STB Assemble Model`: early model-building placeholders
+- `STB Element`: input `Name`, `Line`, `Section`, `Beta` → output typed `Element`
+- `STB Material`: input `Name`, `E`, `G`, `Gamma`, `Alpha`, `Fy` → output typed `Mat`
+- `STB Section`: input `Name`, `Mat`, `Type`, `Dim` → output typed `Section`
+- `STB Support`: input `Point`, restraint flags → output typed `Support`
+- `STB Load`: input `Point`, `LC`, `F`, `M` → output typed `Load`
+- `STB Assemble Model`: input typed `Element`, `Load`, `Support`, `Write` → output `Text`, `DAT`
 - `STB Deformed Shape`: preview placeholder for the next step
 
 ## Build Notes
@@ -84,3 +89,10 @@ python -m pip install -e .
 - `STB Deformed Shape` only needs `Results`, `Load Case`, and `Scale`.
 
 The first component to make production-ready is `StbAnalyzeComponent.cs`.
+
+## Model-building workflow
+
+1. `STB Material` → `STB Section` → `STB Element`
+2. `STB Support` and `STB Load` use `Point3d` locations (resolved to merged nodes in assemble)
+3. Merge typed objects into `STB Assemble Model`
+4. `STB Assemble Model` auto-assigns material/section/element/node ids, merges duplicate nodes at the Rhino document tolerance, and writes `.dat` text

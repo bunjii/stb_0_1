@@ -660,14 +660,22 @@ def _load_mdl(path, solve=False, quiet=True):
     return mdl, full
 
 
-def load_model_dict(path, solve=False, quiet=True):
+def load_model_dict(path, solve=False, quiet=True, use_cached=True):
     """Parse (and optionally solve) a model file; return dict for JSON."""
 
     mdl, full = _load_mdl(path, solve=solve, quiet=quiet)
     relpath = os.path.relpath(full, project_root()).replace("\\", "/")
-    data = mdl_to_dict(mdl, relpath=relpath, solved=solve)
+    solved = bool(solve)
+    if not solve and use_cached:
+        from stb_loads.equilibrium import get_cached_solved_model
 
-    if solve:
+        cached = get_cached_solved_model(full)
+        if cached is not None:
+            mdl = cached
+            solved = True
+    data = mdl_to_dict(mdl, relpath=relpath, solved=solved)
+
+    if solved:
         from stb_engine import format_results
         data["results_text"] = format_results(mdl)
 
@@ -675,9 +683,14 @@ def load_model_dict(path, solve=False, quiet=True):
 
 
 def load_results_text(path, quiet=True):
-    """Run analysis and return result text (same as CLI .out file)."""
+    """Return result text from cache when available; otherwise run analysis."""
 
-    mdl, full = _load_mdl(path, solve=True, quiet=quiet)
+    from stb_loads.equilibrium import get_cached_solved_model
+
+    full = resolve_model_path(path)
+    mdl = get_cached_solved_model(full)
+    if mdl is None:
+        mdl, full = _load_mdl(path, solve=True, quiet=quiet)
     from stb_engine import format_results
     return format_results(mdl)
 

@@ -531,16 +531,128 @@ def _insert_dmem_lines(lines: list[str], new_data_lines: list[str]) -> list[str]
     return out
 
 
+def _existing_element_ids(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if rec and rec[0] == "ELEM":
+            out.add(_parse_int(rec[1][1], "element id"))
+    return out
+
+
+def _next_element_id(lines: list[str]) -> int:
+    ids = _existing_element_ids(lines)
+    if not ids:
+        return 1
+    return max(ids) + 1
+
+
+def _find_element_between_nodes(lines: list[str], n1: int, n2: int) -> int | None:
+    pair = {int(n1), int(n2)}
+    for line in lines:
+        rec = _split_record(line)
+        if not rec or rec[0] != "ELEM":
+            continue
+        parts = rec[1]
+        if len(parts) < 4:
+            continue
+        ni = _parse_int(parts[2], "node i")
+        nj = _parse_int(parts[3], "node j")
+        if {ni, nj} == pair:
+            return _parse_int(parts[1], "element id")
+    return None
+
+
+def _format_elem_line(elem_id: int, ni: int, nj: int, sect_id: int, beta: float = 0.0) -> str:
+    import os
+    import sys
+
+    classes = os.path.join(os.path.dirname(os.path.dirname(__file__)), "classes")
+    if classes not in sys.path:
+        sys.path.insert(0, classes)
+    from dat_format import ELEM_FMTS, record_line
+
+    return record_line("ELEM", ELEM_FMTS, [elem_id, ni, nj, sect_id, beta])
+
+
+def _insert_elem_lines(lines: list[str], new_data_lines: list[str]) -> list[str]:
+    from stb_gui.dat_format_headers import SECTION_HEADERS
+
+    out = list(lines)
+    last_elem = -1
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] == "ELEM":
+            last_elem = idx
+    if last_elem >= 0:
+        out[last_elem + 1:last_elem + 1] = new_data_lines
+        return out
+
+    insert_at = len(out)
+    for idx, line in enumerate(out):
+        rec = _split_record(line)
+        if rec and rec[0] == "CONS":
+            insert_at = idx
+            break
+
+    block = list(SECTION_HEADERS["ELEM"])
+    if insert_at < len(out) and insert_at > 0 and out[insert_at - 1].strip():
+        block = [""] + block
+    block.extend(new_data_lines)
+    out[insert_at:insert_at] = block
+    return out
+
+
+def create_element(
+    text: str,
+    node_ids: list[int],
+    section_id: int,
+    beta: float = 0.0,
+    elem_id: int | None = None,
+) -> tuple[str, list[str]]:
+    if len(node_ids) != 2:
+        raise ValueError("create_element requires exactly 2 node ids")
+    n1, n2 = int(node_ids[0]), int(node_ids[1])
+    if n1 == n2:
+        raise ValueError("Element endpoints must be different nodes")
+
+    lines = text.splitlines()
+    valid_nodes = _node_ids_in_text(lines)
+    for n in (n1, n2):
+        if n not in valid_nodes:
+            raise ValueError("Unknown node id: {0}".format(n))
+
+    sect_id = int(section_id)
+    if sect_id not in _section_ids(lines):
+        raise ValueError("Unknown section id: {0}".format(sect_id))
+
+    existing = _find_element_between_nodes(lines, n1, n2)
+    if existing is not None:
+        raise ValueError(
+            "Element {0} already connects nodes {1} and {2}".format(existing, n1, n2)
+        )
+
+    new_id = int(elem_id) if elem_id is not None else _next_element_id(lines)
+    if new_id in _existing_element_ids(lines):
+        raise ValueError("Element id {0} already exists".format(new_id))
+
+    new_line = _format_elem_line(new_id, n1, n2, sect_id, float(beta))
+    out = _insert_elem_lines(lines, [new_line])
+    return _ensure_trailing_newline("\n".join(out)), [
+        "Created ELEM {0} (nodes {1}, {2}, SECT {3}).".format(new_id, n1, n2, sect_id)
+    ]
+
+
 def create_dmem(
     text: str,
     diap_id: int,
     node_ids: list[int],
     dmem_id: int | None = None,
 ) -> tuple[str, list[str]]:
-    if len(node_ids) != 3:
-        raise ValueError("create_dmem requires exactly 3 node ids")
-    nodes = [int(n) for n in node_ids]
-    if len(set(nodes)) != 3:
+    nodes = sorted({int(n) for n in node_ids})
+    if len(nodes) < 3:
+        raise ValueError("create_dmem requires at least 3 node ids")
+    if len(set(nodes)) != len(nodes):
         raise ValueError("DMEM nodes must be distinct")
 
     lines = text.splitlines()
@@ -554,18 +666,95 @@ def create_dmem(
     if diap not in known_diaps:
         raise ValueError("Unknown DIAP id: {0}".format(diap))
 
+    if len(nodes) == 3:
+        return _create_single_dmem(lines, diap, nodes, dmem_id)
+
+    from stb_gui.dmem_triangulate import (
+        elem_adjacency_for_nodes,
+        triangulate_node_selection,
+    )
+
+    coords3d = _node_coords_map(lines)
+    elem_adj = elem_adjacency_for_nodes(lines, set(nodes))
+    triangles = triangulate_node_selection(coords3d, nodes, elem_adj=elem_adj)
+    return _create_dmem_triangles(lines, diap, triangles, dmem_id)
+
+
+def _create_single_dmem(
+    lines: list[str],
+    diap_id: int,
+    nodes: list[int],
+    dmem_id: int | None,
+) -> tuple[str, list[str]]:
     new_id = int(dmem_id) if dmem_id is not None else _next_dmem_id(lines)
     if new_id in _existing_dmem_ids(lines):
         raise ValueError("DMEM id {0} already exists".format(new_id))
-
     n1, n2, n3 = nodes
-    new_line = _format_dmem_line(new_id, diap, n1, n2, n3)
+    new_line = _format_dmem_line(new_id, diap_id, n1, n2, n3)
     out = _insert_dmem_lines(lines, [new_line])
     return _ensure_trailing_newline("\n".join(out)), [
         "Created DMEM {0} for DIAP {1} (nodes {2}, {3}, {4}).".format(
-            new_id, diap, n1, n2, n3
+            new_id, diap_id, n1, n2, n3
         )
     ]
+
+
+def _existing_dmem_triangles_for_diap(lines: list[str], diap_id: int) -> set[tuple[int, int, int]]:
+    out: set[tuple[int, int, int]] = set()
+    for line in lines:
+        rec = _split_record(line)
+        if not rec or rec[0] != "DMEM":
+            continue
+        parts = rec[1]
+        if int(parts[2]) != diap_id:
+            continue
+        tri = tuple(sorted(int(parts[i]) for i in (3, 4, 5)))
+        out.add(tri)
+    return out
+
+
+def _create_dmem_triangles(
+    lines: list[str],
+    diap_id: int,
+    triangles: list[tuple[int, int, int]],
+    dmem_id: int | None,
+) -> tuple[str, list[str]]:
+    existing = _existing_dmem_triangles_for_diap(lines, diap_id)
+    next_id = int(dmem_id) if dmem_id is not None else _next_dmem_id(lines)
+    used_ids = _existing_dmem_ids(lines)
+    new_lines: list[str] = []
+    warnings: list[str] = []
+    created = 0
+    skipped = 0
+    for n1, n2, n3 in triangles:
+        key = tuple(sorted((n1, n2, n3)))
+        if key in existing:
+            skipped += 1
+            continue
+        while next_id in used_ids:
+            next_id += 1
+        new_lines.append(_format_dmem_line(next_id, diap_id, n1, n2, n3))
+        used_ids.add(next_id)
+        existing.add(key)
+        warnings.append(
+            "Created DMEM {0} for DIAP {1} (nodes {2}, {3}, {4}).".format(
+                next_id, diap_id, n1, n2, n3
+            )
+        )
+        next_id += 1
+        created += 1
+    if created == 0:
+        raise ValueError("All candidate DMEM triangles already exist for DIAP {0}".format(diap_id))
+    if skipped:
+        warnings.append("Skipped {0} triangle(s) that already exist on DIAP {1}.".format(skipped, diap_id))
+    warnings.insert(
+        0,
+        "Created {0} DMEM element(s) for DIAP {1} from {2} selected node(s).".format(
+            created, diap_id, len({n for tri in triangles for n in tri})
+        ),
+    )
+    out = _insert_dmem_lines(lines, new_lines)
+    return _ensure_trailing_newline("\n".join(out)), warnings
 
 
 def _node_coords_map(lines: list[str]) -> dict[int, tuple[float, float, float]]:
@@ -1036,6 +1225,14 @@ def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]
         return delete_elements(text, element_ids)
     if op == "delete_nodes":
         return delete_nodes(text, node_ids)
+    if op == "create_element":
+        return create_element(
+            text,
+            node_ids,
+            action["section_id"],
+            beta=action.get("beta", 0.0),
+            elem_id=action.get("elem_id"),
+        )
     if op == "create_dmem":
         return create_dmem(text, action["diap_id"], node_ids, action.get("dmem_id"))
     if op == "create_wwll":

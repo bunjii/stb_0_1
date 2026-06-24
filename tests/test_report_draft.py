@@ -44,9 +44,10 @@ class TestReportDraft(unittest.TestCase):
         )
 
         self.assertTrue("# Practice Wood Single-Story Summary" in markdown)
-        self.assertTrue("## 5. 重心・剛心・偏心率" in markdown)
-        self.assertTrue("## 6. 木造梁・柱・筋かいの基本検定" in markdown)
-        self.assertTrue("## 7. 照合メモ" in markdown)
+        self.assertTrue("## 6. 重心・剛心・偏心率" in markdown)
+        self.assertTrue("## 7. 層間変形角・偏心率・剛性率" in markdown)
+        self.assertTrue("## 8. 木造梁・柱・筋かいの基本検定" in markdown)
+        self.assertTrue("## 9. 照合メモ" in markdown)
         self.assertTrue("解析出力 NDSP | あり" in markdown)
         self.assertTrue("wood_columns" in markdown)
         self.assertTrue("最大検定比" in markdown)

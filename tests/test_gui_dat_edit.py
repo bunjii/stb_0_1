@@ -10,6 +10,7 @@ from stb_gui.dat_edit import (
     apply_edit_action,
     apply_ejnt_lines_text,
     create_dmem,
+    create_element,
     create_wwll,
     delete_dmem,
     delete_elements,
@@ -181,6 +182,67 @@ DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
     def test_create_dmem_rejects_duplicate_nodes(self):
         with self.assertRaises(ValueError):
             create_dmem(DIAPHRAGM_SAMPLE, 10, [1, 1, 2])
+
+    def test_create_element_appends_record(self):
+        out, warnings = create_element(SAMPLE, [3, 4], 2, beta=0.0)
+        self.assertRegex(out, r"ELEM,\s+4,\s+3,\s+4,\s+2")
+        validate_dat_text(out)
+        self.assertTrue(any("Created ELEM 4" in w for w in warnings))
+
+    def test_create_element_rejects_duplicate_pair(self):
+        with self.assertRaises(ValueError):
+            create_element(SAMPLE, [1, 2], 1)
+
+    def test_create_element_adds_section_when_missing(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+SECT, 1, C120, 1, 0, 120.0, 120.0
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 3.0, 0.0, 3.0
+CONS, 1, 1, 1, 1, 1, 1, 1
+"""
+        out, _ = create_element(sample, [1, 2], 1)
+        self.assertIn("# --- ELEMENT(ELEM) ---", out)
+        self.assertRegex(out, r"ELEM,\s+1,\s+1,\s+2,\s+1")
+        validate_dat_text(out)
+
+    def test_apply_edit_action_create_element(self):
+        out, _ = apply_edit_action(SAMPLE, {
+            "action": "create_element",
+            "node_ids": [3, 4],
+            "section_id": 2,
+            "beta": 0.0,
+        })
+        self.assertRegex(out, r"ELEM,\s+4,\s+3,\s+4,\s+2")
+        validate_dat_text(out)
+
+    def test_create_dmem_mesh_from_rectangular_nodes(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 1.0, 0.0, 3.0
+NODE, 3, 0.0, 1.0, 3.0
+NODE, 4, 1.0, 1.0, 3.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+"""
+        out, warnings = create_dmem(sample, 10, [1, 2, 3, 4])
+        self.assertRegex(out, r"DMEM,\s+1001,\s+10,")
+        self.assertRegex(out, r"DMEM,\s+1002,\s+10,")
+        self.assertEqual(len([ln for ln in out.splitlines() if ln.lstrip().startswith("DMEM,")]), 2)
+        validate_dat_text(out)
+        self.assertTrue(any("Created 2 DMEM element(s)" in w for w in warnings))
+
+    def test_create_dmem_mesh_skips_existing_triangles(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 1.0, 0.0, 3.0
+NODE, 3, 0.0, 1.0, 3.0
+NODE, 4, 1.0, 1.0, 3.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+DMEM, 1001, 10, 1, 2, 4
+"""
+        out, warnings = create_dmem(sample, 10, [1, 2, 3, 4])
+        self.assertEqual(len([ln for ln in out.splitlines() if ln.lstrip().startswith("DMEM,")]), 2)
+        validate_dat_text(out)
+        self.assertTrue(any("Skipped 1 triangle" in w for w in warnings))
 
     def test_delete_dmem(self):
         out, warnings = delete_dmem(DIAPHRAGM_SAMPLE, [1001])

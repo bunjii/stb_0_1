@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using Grasshopper.Kernel;
+using Rhino;
 using Rhino.Geometry;
 
 namespace StbGrasshopper
@@ -13,49 +14,6 @@ namespace StbGrasshopper
         public static string Number(double value)
         {
             return value.ToString("0.##########", CultureInfo.InvariantCulture);
-        }
-    }
-
-    public sealed class StbNodeComponent : GH_Component
-    {
-        public StbNodeComponent() : base("STB Node", "STB Node", "Create NODE records from points.", "STB", "Model") { }
-        public override Guid ComponentGuid => new Guid("466e891d-870e-4044-88d5-b9d0949639fa");
-
-        protected override Bitmap Icon => StbIcons.Node;
-
-        protected override void RegisterInputParams(GH_InputParamManager pManager)
-        {
-            pManager.AddIntegerParameter("Start ID", "ID", "First node id.", GH_ParamAccess.item, 1);
-            pManager.AddPointParameter("Points", "P", "Node coordinates in meters.", GH_ParamAccess.list);
-        }
-
-        protected override void RegisterOutputParams(GH_OutputParamManager pManager)
-        {
-            pManager.AddIntegerParameter("Node IDs", "N", "Generated node ids.", GH_ParamAccess.list);
-            pManager.AddPointParameter("Points", "P", "Original node points passed through.", GH_ParamAccess.list);
-            pManager.AddTextParameter("Records", "Rec", "STB NODE records.", GH_ParamAccess.list);
-        }
-
-        protected override void SolveInstance(IGH_DataAccess da)
-        {
-            int startId = 1;
-            var points = new List<Point3d>();
-            da.GetData(0, ref startId);
-            if (!da.GetDataList(1, points)) return;
-
-            var ids = new List<int>();
-            var records = new List<string>();
-            for (var i = 0; i < points.Count; i++)
-            {
-                var id = startId + i;
-                ids.Add(id);
-                var p = points[i];
-                records.Add("NODE," + id + "," + StbRecord.Number(p.X) + "," + StbRecord.Number(p.Y) + "," + StbRecord.Number(p.Z));
-            }
-
-            da.SetDataList(0, ids);
-            da.SetDataList(1, points);
-            da.SetDataList(2, records);
         }
     }
 
@@ -169,70 +127,63 @@ namespace StbGrasshopper
         }
     }
 
-    public sealed class StbBeamComponent : GH_Component
+    public sealed class StbElementComponent : GH_Component
     {
-        public StbBeamComponent() : base("STB Beam", "STB Beam", "Create ELEM records from node id pairs.", "STB", "Model") { }
+        public StbElementComponent() : base("STB Element", "STB Elem", "Create an STB element from a line and section.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("e9ac94fe-4ee4-4d15-b16b-7881e3b1f622");
 
         protected override Bitmap Icon => StbIcons.Beam;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddIntegerParameter("Start ID", "ID", "First element id.", GH_ParamAccess.item, 1);
-            pManager.AddIntegerParameter("Node I", "I", "Start node ids.", GH_ParamAccess.list);
-            pManager.AddIntegerParameter("Node J", "J", "End node ids.", GH_ParamAccess.list);
-            pManager.AddIntegerParameter("Section ID", "Sec", "Section id.", GH_ParamAccess.item, 1);
+            pManager.AddTextParameter("Name", "Name", "Element name.", GH_ParamAccess.item, "ELEM");
+            pManager.AddLineParameter("Line", "L", "Element center line.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbSectionParameter(), "Section", "Sec", "Section definition.", GH_ParamAccess.item);
             pManager.AddNumberParameter("Beta", "Beta", "Section beta angle in degrees.", GH_ParamAccess.item, 0.0);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddIntegerParameter("Element IDs", "E", "Generated element ids.", GH_ParamAccess.list);
-            pManager.AddIntegerParameter("Node I", "I", "Start node ids.", GH_ParamAccess.list);
-            pManager.AddIntegerParameter("Node J", "J", "End node ids.", GH_ParamAccess.list);
-            pManager.AddTextParameter("Records", "Rec", "STB ELEM records.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbElementParameter(), "Element", "Elem", "STB element object.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            int startId = 1;
-            int sectionId = 1;
+            string name = "ELEM";
+            var line = Line.Unset;
             double beta = 0.0;
-            var nodeI = new List<int>();
-            var nodeJ = new List<int>();
-            da.GetData(0, ref startId);
-            if (!da.GetDataList(1, nodeI)) return;
-            if (!da.GetDataList(2, nodeJ)) return;
-            da.GetData(3, ref sectionId);
-            da.GetData(4, ref beta);
+            da.GetData(0, ref name);
+            if (!da.GetData(1, ref line)) return;
+            if (!StbModelGooUtil.TryGetSection(da, 2, out var section)) return;
+            da.GetData(3, ref beta);
 
-            var count = Math.Min(nodeI.Count, nodeJ.Count);
-            var ids = new List<int>();
-            var records = new List<string>();
-            for (var i = 0; i < count; i++)
+            if (!line.IsValid)
             {
-                var id = startId + i;
-                ids.Add(id);
-                records.Add("ELEM," + id + "," + nodeI[i] + "," + nodeJ[i] + "," + sectionId + "," + StbRecord.Number(beta));
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Invalid line.");
+                return;
             }
 
-            da.SetDataList(0, ids);
-            da.SetDataList(1, nodeI.GetRange(0, count));
-            da.SetDataList(2, nodeJ.GetRange(0, count));
-            da.SetDataList(3, records);
+            var element = new StbElementModel
+            {
+                Name = name,
+                Line = line,
+                Section = section,
+                Beta = beta,
+            };
+
+            da.SetData(0, new StbElementGoo(element));
         }
     }
 
     public sealed class StbMaterialComponent : GH_Component
     {
-        public StbMaterialComponent() : base("STB Material", "STB Mat", "Create one MATE record.", "STB", "Model") { }
+        public StbMaterialComponent() : base("STB Material", "STB Mat", "Create an STB material object.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("2c6d678d-92f9-4ee5-a171-e95d64b1411b");
 
         protected override Bitmap Icon => StbIcons.Material;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddIntegerParameter("ID", "ID", "Material id.", GH_ParamAccess.item, 1);
             pManager.AddTextParameter("Name", "Name", "Material name.", GH_ParamAccess.item, "MAT");
             pManager.AddNumberParameter("E", "E", "Young's modulus in N/mm2.", GH_ParamAccess.item, 205000.0);
             pManager.AddNumberParameter("G", "G", "Shear modulus in N/mm2.", GH_ParamAccess.item, 79000.0);
@@ -243,76 +194,106 @@ namespace StbGrasshopper
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddTextParameter("Record", "Rec", "STB MATE record.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbMaterialParameter(), "Mat", "Mat", "STB material object.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            int id = 1;
             string name = "MAT";
             double e = 205000.0, g = 79000.0, gamma = 78.5, alpha = 0.0, fy = 235.0;
-            da.GetData(0, ref id);
-            da.GetData(1, ref name);
-            da.GetData(2, ref e);
-            da.GetData(3, ref g);
-            da.GetData(4, ref gamma);
-            da.GetData(5, ref alpha);
-            da.GetData(6, ref fy);
-            da.SetData(0, "MATE," + id + "," + name + "," + StbRecord.Number(e) + "," + StbRecord.Number(g) + "," + StbRecord.Number(gamma) + "," + StbRecord.Number(alpha) + "," + StbRecord.Number(fy));
+            da.GetData(0, ref name);
+            da.GetData(1, ref e);
+            da.GetData(2, ref g);
+            da.GetData(3, ref gamma);
+            da.GetData(4, ref alpha);
+            da.GetData(5, ref fy);
+
+            da.SetData(0, new StbMaterialGoo(new StbMaterialModel
+            {
+                Name = name,
+                E = e,
+                G = g,
+                Gamma = gamma,
+                Alpha = alpha,
+                Fy = fy,
+            }));
         }
     }
 
     public sealed class StbSectionComponent : GH_Component
     {
-        public StbSectionComponent() : base("STB Section", "STB Sec", "Create one SECT record.", "STB", "Model") { }
+        public StbSectionComponent() : base("STB Section", "STB Sec", "Create an STB section object.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("fd94f3c4-1574-45dc-bd80-6635f18517dd");
 
         protected override Bitmap Icon => StbIcons.Section;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddIntegerParameter("ID", "ID", "Section id.", GH_ParamAccess.item, 1);
             pManager.AddTextParameter("Name", "Name", "Section name.", GH_ParamAccess.item, "SEC");
-            pManager.AddIntegerParameter("Material ID", "Mat", "Material id.", GH_ParamAccess.item, 1);
+            pManager.AddParameter(new StbMaterialParameter(), "Mat", "Mat", "Material definition.", GH_ParamAccess.item);
             pManager.AddIntegerParameter("Type", "Type", "0 rectangle, 1 circle, 2 I, 3 CHS, 4 RHS.", GH_ParamAccess.item, 0);
-            pManager.AddNumberParameter("Dimensions", "Dim", "Section dimensions in mm.", GH_ParamAccess.list);
+            pManager.AddNumberParameter("Dim", "Dim", "Section dimensions in mm. Type 0: B,H. Type 1: D. Type 2/4: H,B,tw,tf or H,B,t,t. Type 3: D,t.", GH_ParamAccess.list);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddTextParameter("Record", "Rec", "STB SECT record.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbSectionParameter(), "Section", "Sec", "STB section object.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            int id = 1, matId = 1, type = 0;
+            int type = 0;
             string name = "SEC";
             var dims = new List<double>();
-            da.GetData(0, ref id);
-            da.GetData(1, ref name);
-            da.GetData(2, ref matId);
-            da.GetData(3, ref type);
-            da.GetDataList(4, dims);
+            da.GetData(0, ref name);
+            if (!StbModelGooUtil.TryGetMaterial(da, 1, out var material)) return;
+            da.GetData(2, ref type);
+            da.GetDataList(3, dims);
 
-            var fields = new List<string> { "SECT", id.ToString(), name, matId.ToString(), type.ToString() };
-            foreach (var dim in dims)
+            List<double> resolvedDims;
+            try
             {
-                fields.Add(StbRecord.Number(dim));
+                resolvedDims = StbSectionDimensions.Resolve(type, dims, useDefaultsWhenEmpty: true);
             }
-            da.SetData(0, string.Join(",", fields));
+            catch (InvalidOperationException ex)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
+                return;
+            }
+
+            if (dims.Count == 0)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Remark,
+                    "Dim was empty. Using defaults for type "
+                    + type
+                    + ": "
+                    + string.Join(", ", resolvedDims)
+                    + " mm.");
+            }
+
+            var section = new StbSectionModel
+            {
+                Name = name,
+                Material = material,
+                Type = type,
+            };
+            section.Dimensions.AddRange(resolvedDims);
+
+            da.SetData(0, new StbSectionGoo(section));
         }
     }
 
     public sealed class StbSupportComponent : GH_Component
     {
-        public StbSupportComponent() : base("STB Support", "STB Sup", "Create CONS support records.", "STB", "Model") { }
+        public StbSupportComponent() : base("STB Support", "STB Sup", "Create STB support objects from points.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("54816191-f022-43a1-b094-9bb5cf4bc371");
 
         protected override Bitmap Icon => StbIcons.Support;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddIntegerParameter("Node IDs", "N", "Supported node ids.", GH_ParamAccess.list);
+            pManager.AddPointParameter("Point", "P", "Support location in meters.", GH_ParamAccess.list);
             pManager.AddBooleanParameter("TX", "TX", "Fix translation X.", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("TY", "TY", "Fix translation Y.", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("TZ", "TZ", "Fix translation Z.", GH_ParamAccess.item, true);
@@ -323,14 +304,14 @@ namespace StbGrasshopper
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddTextParameter("Records", "Rec", "STB CONS records.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbSupportParameter(), "Support", "Sup", "STB support objects.", GH_ParamAccess.list);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            var nodeIds = new List<int>();
+            var points = new List<Point3d>();
             bool tx = true, ty = true, tz = true, rx = true, ry = true, rz = true;
-            if (!da.GetDataList(0, nodeIds)) return;
+            if (!da.GetDataList(0, points)) return;
             da.GetData(1, ref tx);
             da.GetData(2, ref ty);
             da.GetData(3, ref tz);
@@ -338,97 +319,159 @@ namespace StbGrasshopper
             da.GetData(5, ref ry);
             da.GetData(6, ref rz);
 
-            var records = new List<string>();
-            foreach (var nodeId in nodeIds)
+            var supports = new List<StbSupportGoo>();
+            foreach (var point in points)
             {
-                records.Add("CONS," + nodeId + "," + Bit(tx) + "," + Bit(ty) + "," + Bit(tz) + "," + Bit(rx) + "," + Bit(ry) + "," + Bit(rz));
+                supports.Add(new StbSupportGoo(new StbSupportModel
+                {
+                    Point = point,
+                    Tx = tx,
+                    Ty = ty,
+                    Tz = tz,
+                    Rx = rx,
+                    Ry = ry,
+                    Rz = rz,
+                }));
             }
-            da.SetDataList(0, records);
-        }
 
-        private static int Bit(bool value) => value ? 1 : 0;
+            da.SetDataList(0, supports);
+        }
     }
 
     public sealed class StbLoadComponent : GH_Component
     {
-        public StbLoadComponent() : base("STB Load", "STB Load", "Create PLOD point load records.", "STB", "Model") { }
+        public StbLoadComponent() : base("STB Load", "STB Load", "Create STB point load objects from points.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("fcf0fb0e-33d0-4926-a09f-1f1bbffcfbc1");
 
         protected override Bitmap Icon => StbIcons.Load;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddIntegerParameter("Node IDs", "N", "Loaded node ids.", GH_ParamAccess.list);
-            pManager.AddIntegerParameter("Load Case", "LC", "Load case id.", GH_ParamAccess.item, 0);
-            pManager.AddVectorParameter("Force", "F", "Force vector in kN.", GH_ParamAccess.item, Vector3d.Zero);
-            pManager.AddVectorParameter("Moment", "M", "Moment vector in kNm.", GH_ParamAccess.item, Vector3d.Zero);
+            pManager.AddPointParameter("Point", "P", "Loaded point in meters.", GH_ParamAccess.list);
+            pManager.AddIntegerParameter("LC", "LC", "Load case id.", GH_ParamAccess.item, 0);
+            pManager.AddVectorParameter("F", "F", "Force vector in kN.", GH_ParamAccess.item, Vector3d.Zero);
+            pManager.AddVectorParameter("M", "M", "Moment vector in kNm.", GH_ParamAccess.item, Vector3d.Zero);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddTextParameter("Records", "Rec", "STB PLOD records.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbLoadParameter(), "Load", "Ld", "STB load objects.", GH_ParamAccess.list);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            var nodeIds = new List<int>();
+            var points = new List<Point3d>();
             int loadCase = 0;
             var force = Vector3d.Zero;
             var moment = Vector3d.Zero;
-            if (!da.GetDataList(0, nodeIds)) return;
+            if (!da.GetDataList(0, points)) return;
             da.GetData(1, ref loadCase);
             da.GetData(2, ref force);
             da.GetData(3, ref moment);
 
-            var records = new List<string>();
-            foreach (var nodeId in nodeIds)
+            var loads = new List<StbLoadGoo>();
+            foreach (var point in points)
             {
-                records.Add("PLOD," + nodeId + "," + loadCase + "," + StbRecord.Number(force.X) + "," + StbRecord.Number(force.Y) + "," + StbRecord.Number(force.Z) + "," + StbRecord.Number(moment.X) + "," + StbRecord.Number(moment.Y) + "," + StbRecord.Number(moment.Z));
+                loads.Add(new StbLoadGoo(new StbLoadModel
+                {
+                    Point = point,
+                    LoadCase = loadCase,
+                    Force = force,
+                    Moment = moment,
+                }));
             }
-            da.SetDataList(0, records);
+
+            da.SetDataList(0, loads);
         }
     }
 
     public sealed class StbAssembleModelComponent : GH_Component
     {
-        public StbAssembleModelComponent() : base("STB Assemble Model", "STB Model", "Assemble STB records and optionally write a .dat file.", "STB", "Model") { }
+        public StbAssembleModelComponent() : base("STB Assemble Model", "STB Model", "Assemble typed STB model objects into a .dat text file.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("ce8a157a-b1b7-4d92-918f-e6ce2294af1c");
 
         protected override Bitmap Icon => StbIcons.Assemble;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddTextParameter("Records", "Rec", "STB record lines.", GH_ParamAccess.list);
-            pManager.AddTextParameter("DAT Path", "DAT", "Optional .dat path to write.", GH_ParamAccess.item, string.Empty);
+            pManager.AddParameter(new StbElementParameter(), "Element", "Elem", "STB elements.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbLoadParameter(), "Load", "Ld", "STB loads.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbSupportParameter(), "Support", "Sup", "STB supports.", GH_ParamAccess.list);
+            pManager.AddTextParameter("DAT", "DAT", "Output .dat path. Empty uses the temp folder.", GH_ParamAccess.item, string.Empty);
             pManager.AddBooleanParameter("Write", "Write", "Write the .dat file.", GH_ParamAccess.item, false);
+            Params.Input[1].Optional = true;
+            Params.Input[2].Optional = true;
+            Params.Input[3].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             pManager.AddTextParameter("Text", "Text", "Assembled STB input text.", GH_ParamAccess.item);
-            pManager.AddTextParameter("DAT Path", "DAT", "Written .dat path.", GH_ParamAccess.item);
+            pManager.AddTextParameter("DAT", "DAT", "Resolved .dat path. Populated when Write is true.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            var records = new List<string>();
+            var elements = StbModelGooUtil.GetElements(da, 0);
+            var loads = StbModelGooUtil.GetLoads(da, 1);
+            var supports = StbModelGooUtil.GetSupports(da, 2);
             string datPath = string.Empty;
             bool write = false;
-            if (!da.GetDataList(0, records)) return;
-            da.GetData(1, ref datPath);
-            da.GetData(2, ref write);
+            da.GetData(3, ref datPath);
+            da.GetData(4, ref write);
 
-            var text = string.Join(Environment.NewLine, records) + Environment.NewLine;
-            if (write && !string.IsNullOrWhiteSpace(datPath))
+            if (elements.Count == 0)
             {
-                var fullPath = Path.GetFullPath(datPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
-                File.WriteAllText(fullPath, text);
-                datPath = fullPath;
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "At least one element is required.");
+                return;
             }
 
-            da.SetData(0, text);
-            da.SetData(1, datPath);
+            var tolerance = RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001;
+
+            StbAssembleResult assembleResult;
+            try
+            {
+                assembleResult = StbModelAssembler.Assemble(elements, loads, supports, tolerance);
+            }
+            catch (InvalidOperationException ex)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
+                return;
+            }
+
+            if (assembleResult.MergedNodeCount > 0)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Remark,
+                    "Merged "
+                    + assembleResult.MergedNodeCount
+                    + " duplicate node(s) at tolerance "
+                    + StbRecord.Number(tolerance)
+                    + ".");
+            }
+
+            var writtenPath = string.Empty;
+            if (write)
+            {
+                try
+                {
+                    writtenPath = StbPathUtil.WriteTextFile(datPath, assembleResult.Text);
+                }
+                catch (Exception ex)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Failed to write .dat file: " + ex.Message);
+                    return;
+                }
+            }
+            else
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Remark,
+                    "Write is false. Set Write to true before connecting DAT to STB Analyze.");
+            }
+
+            da.SetData(0, assembleResult.Text);
+            da.SetData(1, writtenPath);
         }
     }
 }

@@ -27,10 +27,21 @@
     <button id="btnInput" type="button" class="btn-secondary">Input file…</button>
     <button id="btnProject" type="button" class="btn-secondary" title="project.json sidecar settings">Project…</button>
     <button id="btnLoads" type="button" class="btn-secondary" title="Load and external-force verification">Loads…</button>
+    <button id="btnPractice" type="button" class="btn-secondary" title="Story drift / eccentricity / rigidity ratio">Practice…</button>
     <button id="btnTogglePanel" type="button" class="btn-secondary" title="Show/hide results panel">Results</button>
     <button id="btnToggleOptions" type="button" class="btn-secondary" title="Display options">Options</button>
     <button id="btnTheme" type="button" class="btn-secondary" title="Switch light/dark theme">Theme: Dark</button>
     <button id="btnToggleAxes" type="button" class="btn-secondary active" title="Show/hide origin XYZ axes">Axes</button>
+    <button id="btnViewProjection" type="button" class="btn-secondary" title="Switch perspective / parallel (axonometric)">View: Perspective</button>
+    <select id="viewPreset" title="Standard views">
+      <option value="">View…</option>
+      <option value="front">Front</option>
+      <option value="right">Right</option>
+      <option value="left">Left</option>
+      <option value="back">Back</option>
+      <option value="top">Top</option>
+      <option value="bottom">Bottom</option>
+    </select>
     <button id="btnToggleSelect" type="button" class="btn-secondary" title="Pick mode (P). Nodes (N) / Elements (E) in panel">Pick mode</button>
     <button id="btnToggleDistance" type="button" class="btn-secondary" title="Distance (D)">Distance</button>
     <span id="status">Loading…</span>
@@ -38,6 +49,17 @@
   <div id="viewport">
     <div id="selectionMarquee" class="selection-marquee" hidden></div>
     <div id="elemContextMenu" class="context-menu" hidden>
+      <div id="contextMenuGeneralSection" class="context-menu-group">
+        <div class="context-menu-label">Mode</div>
+        <button type="button" id="contextMenuTogglePick" class="context-menu-item" data-action="toggle-pick">Enter pick mode</button>
+      </div>
+      <div id="contextMenuVisibilitySection" class="context-menu-group">
+        <div class="context-menu-label">Member visibility</div>
+        <button type="button" id="contextMenuShowMembersOnly" class="context-menu-item" data-action="members-only">Show selected members only</button>
+        <button type="button" id="contextMenuHideMembers" class="context-menu-item" data-action="members-hide">Hide selected members</button>
+        <button type="button" id="contextMenuShowAllMembers" class="context-menu-item" data-action="members-show-all">Show all members</button>
+      </div>
+      <div id="contextMenuPickSection">
       <div id="contextMenuTitle" class="context-menu-title"></div>
       <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
       <div id="contextMenuNodeSupport" class="context-menu-group">
@@ -82,8 +104,17 @@
         </div>
         <div id="contextMenuDiapHint" class="context-menu-hint"></div>
       </div>
+      <div id="contextMenuElemCreate" class="context-menu-group">
+        <div class="context-menu-label">Create ELEM (2 nodes)</div>
+        <div class="context-menu-field-row">
+          <select id="contextMenuElemCreateSection" class="context-menu-input"></select>
+          <input type="number" id="contextMenuElemCreateBeta" class="context-menu-input" step="any" value="0" title="Beta (deg)">
+          <button type="button" class="context-menu-item context-menu-inline" data-action="create-elem">Create</button>
+        </div>
+        <div id="contextMenuElemCreateHint" class="context-menu-hint"></div>
+      </div>
       <div id="contextMenuDmemCreate" class="context-menu-group">
-        <div class="context-menu-label">Create DMEM (3 nodes)</div>
+        <div class="context-menu-label">Create DMEM (3+ nodes)</div>
         <div class="context-menu-field-row">
           <select id="contextMenuDmemCreateDiap" class="context-menu-input"></select>
           <button type="button" class="context-menu-item context-menu-inline" data-action="create-dmem">Create</button>
@@ -119,6 +150,7 @@
         <button type="button" class="context-menu-item" data-action="ejnt-edit">Edit joint…</button>
       </div>
       </div>
+      </div>
     </div>
     <div id="dispLegendOverlay" class="viewport-disp-legend" hidden>
       <div id="dispLegendTitle" class="viewport-disp-legend-title">|u|</div>
@@ -147,6 +179,11 @@
         <span class="wind-legend-leeward">■ Leeward</span>
         <span class="wind-legend-flow">→ Wind dir / F_story</span>
       </div>
+    </div>
+    <div id="colocatedLegendOverlay" class="viewport-colocated-legend" hidden>
+      <div class="viewport-colocated-legend-title">Colocated entities</div>
+      <div id="colocatedLegendCount" class="viewport-colocated-legend-count"></div>
+      <div id="colocatedLegendList" class="viewport-colocated-legend-list"></div>
     </div>
     <div id="ejntEditPanel" class="ejnt-edit-panel" hidden>
       <div class="ejnt-edit-header">
@@ -215,6 +252,9 @@
         <label class="panel-check">
           <input type="checkbox" id="chkWindLoads"> Wind (surfaces / F_story)
         </label>
+        <label class="panel-check">
+          <input type="checkbox" id="chkPracticeCenters"> CoG / CoR
+        </label>
         <label class="panel-row">
           <span>Wind case</span>
           <select id="windCaseSelect" disabled></select>
@@ -259,6 +299,9 @@
             <input type="checkbox" id="chkWoodWallEdge" checked> Edge
           </label>
         </div>
+        <label class="panel-check" title="Informational only — highlights duplicate entities with identical node connectivity">
+          <input type="checkbox" id="chkColocated"> Colocated entities
+        </label>
       </section>
 
       <section class="panel-section">
@@ -295,18 +338,42 @@
 
   <div id="selectionPanel" class="float-panel float-panel-selection hidden">
     <div id="selectionPanelHeader" class="float-panel-header">
-      <span id="selectionPanelTitle" class="float-panel-title">Pick — Nodes</span>
+      <span id="selectionPanelTitle" class="float-panel-title">Pick — All</span>
       <button type="button" id="btnSelectionCollapse" class="btn-icon" title="Collapse">−</button>
     </div>
     <div id="selectionPanelBody" class="float-panel-body">
       <section class="panel-section pick-mode-section">
         <div class="panel-section-title">Pick target</div>
-        <div class="pick-mode-toggle" role="radiogroup" aria-label="Pick target">
-          <button type="button" id="pickModeNode" class="pick-mode-btn active" data-pick-mode="node" aria-pressed="true">Nodes</button>
-          <button type="button" id="pickModeElement" class="pick-mode-btn" data-pick-mode="element" aria-pressed="false">Elements</button>
+        <div class="pick-mode-toggle" role="group" aria-label="Pick target">
+          <button type="button" id="pickModeNode" class="pick-mode-btn" data-pick-mode="node" aria-pressed="false" title="Toggle node pick (N)">Nodes</button>
+          <button type="button" id="pickModeMember" class="pick-mode-btn" data-pick-mode="member" aria-pressed="false" title="Toggle member pick (M)">Members</button>
+          <button type="button" id="pickModeDiaphragm" class="pick-mode-btn" data-pick-mode="diaphragm" aria-pressed="false" title="Toggle diaphragm pick (I)">Diaphragm</button>
+          <button type="button" id="pickModeWall" class="pick-mode-btn" data-pick-mode="wall" aria-pressed="false" title="Toggle wall pick (W)">Wall</button>
         </div>
       </section>
-      <p id="pickModeHint" class="panel-hint">Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.</p>
+      <p id="pickModeHint" class="panel-hint">All targets (Nodes, Members, Diaphragm, Wall). Toggle Pick target buttons to filter. Click or drag to pick. Ctrl+click toggles. Right-click = menu. Esc clears.</p>
+      <section id="pickElemCreateOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">New ELEM (2 nodes)</div>
+        <label class="panel-row">
+          <span>SECT</span>
+          <select id="pickElemCreateSection"></select>
+        </label>
+        <label class="panel-row">
+          <span>Beta (deg)</span>
+          <input type="number" id="pickElemCreateBeta" step="any" value="0">
+        </label>
+        <p id="pickElemCreateHint" class="panel-hint"></p>
+        <button type="button" id="btnPickElemCreate" class="btn-block btn-secondary">Create member</button>
+      </section>
+      <section id="pickDmemCreateOptions" class="panel-section pick-options-section" hidden>
+        <div class="panel-section-title">New DMEM (selected nodes)</div>
+        <label class="panel-row">
+          <span>DIAP</span>
+          <select id="pickDmemCreateDiap"></select>
+        </label>
+        <p id="pickDmemCreateHint" class="panel-hint"></p>
+        <button type="button" id="btnPickDmemCreate" class="btn-block btn-secondary">Create DMEM mesh</button>
+      </section>
       <section id="pickWrwCreateOptions" class="panel-section pick-options-section" hidden>
         <div class="panel-section-title">New WRW (4 nodes)</div>
         <label class="panel-row">

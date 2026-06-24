@@ -201,6 +201,61 @@ html, body {
   color: #5a48a8;
 }
 
+.viewport-colocated-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(360px, 48vw);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #1a1a22;
+  pointer-events: auto;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.viewport-colocated-legend.visible {
+  display: flex;
+}
+
+.viewport-colocated-legend-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.viewport-colocated-legend-count {
+  font-size: 11px;
+  color: #444;
+  line-height: 1.35;
+}
+
+.viewport-colocated-legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(220px, 32vh);
+  overflow-y: auto;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.35;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.colocated-legend-row {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.colocated-legend-row:last-child {
+  border-bottom: none;
+}
+
 .viewer-info-overlay {
   position: absolute;
   left: 12px;
@@ -378,6 +433,16 @@ html, body {
   box-sizing: border-box;
 }
 
+.selection-marquee-window {
+  border-color: #5cb3ff;
+  background: rgba(92, 179, 255, 0.12);
+}
+
+.selection-marquee-cross {
+  border-color: #ffb347;
+  background: rgba(255, 179, 71, 0.12);
+}
+
 .selection-summary {
   font-size: 12px;
   color: #ddd;
@@ -483,6 +548,16 @@ html, body {
 
 .context-menu-item:hover {
   background: #353540;
+}
+
+.context-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+.context-menu-item:disabled:hover {
+  background: transparent;
 }
 
 .context-menu-item.context-menu-danger {
@@ -707,11 +782,13 @@ select.context-menu-input {
 
 .pick-mode-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
 }
 
 .pick-mode-btn {
-  flex: 1;
+  flex: 1 1 calc(50% - 0.2rem);
+  min-width: 4.8rem;
   padding: 0.35rem 0.5rem;
   font-size: 12px;
   border: 1px solid #4a4a58;
@@ -738,6 +815,16 @@ select.context-menu-input {
 }
 
 .pick-options-section select {
+  width: 100%;
+  background: #1a1a22;
+  color: #e8e6ed;
+  border: 1px solid #4a4a58;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  font-size: 12px;
+}
+
+.pick-options-section input[type="number"] {
   width: 100%;
   background: #1a1a22;
   color: #e8e6ed;

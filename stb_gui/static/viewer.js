@@ -30,6 +30,9 @@ const COLORS = {
   windFlow: 0x5a48a8,
   windStoryForce: 0x8fd4a0,
   windFootprint: 0x5a5a68,
+  centerOfMass: 0xff4f7b,
+  centerOfRigidity: 0x2dd4bf,
+  colocated: 0xd97706,
 };
 
 const PRES_ZERO = 1e-10;
@@ -123,6 +126,7 @@ const RESULTS_DISPLAY_DEFAULTS = {
   loads: true,
   loadValues: false,
   windLoads: false,
+  practiceCenters: false,
   reactions: false,
   reactionValues: false,
   nodeLabels: false,
@@ -134,6 +138,7 @@ const RESULTS_DISPLAY_DEFAULTS = {
   membraneEdge: true,
   woodWall: true,
   woodWallEdge: true,
+  colocated: false,
   forceComponent: 0,
   forceDiv: 8,
   forceFactor: 10,
@@ -172,6 +177,7 @@ const el = {
   btnInput: document.getElementById("btnInput"),
   btnProject: document.getElementById("btnProject"),
   btnLoads: document.getElementById("btnLoads"),
+  btnPractice: document.getElementById("btnPractice"),
   btnOutput: document.getElementById("btnOutput"),
   lcSelect: document.getElementById("lcSelect"),
   defFactor: document.getElementById("defFactor"),
@@ -192,6 +198,7 @@ const el = {
   loadTypeFilter: document.getElementById("loadTypeFilter"),
   chkLoadValues: document.getElementById("chkLoadValues"),
   chkWindLoads: document.getElementById("chkWindLoads"),
+  chkPracticeCenters: document.getElementById("chkPracticeCenters"),
   windCaseSelect: document.getElementById("windCaseSelect"),
   windLegendOverlay: document.getElementById("windLegendOverlay"),
   windLegendCase: document.getElementById("windLegendCase"),
@@ -207,6 +214,10 @@ const el = {
   chkMembraneEdge: document.getElementById("chkMembraneEdge"),
   chkWoodWall: document.getElementById("chkWoodWall"),
   chkWoodWallEdge: document.getElementById("chkWoodWallEdge"),
+  chkColocated: document.getElementById("chkColocated"),
+  colocatedLegendOverlay: document.getElementById("colocatedLegendOverlay"),
+  colocatedLegendCount: document.getElementById("colocatedLegendCount"),
+  colocatedLegendList: document.getElementById("colocatedLegendList"),
   chkForceValues: document.getElementById("chkForceValues"),
   forceSelect: document.getElementById("forceSelect"),
   frcDiv: document.getElementById("frcDiv"),
@@ -223,6 +234,8 @@ const el = {
   btnOptionsCollapse: document.getElementById("btnOptionsCollapse"),
   btnToggleOptions: document.getElementById("btnToggleOptions"),
   btnTheme: document.getElementById("btnTheme"),
+  btnViewProjection: document.getElementById("btnViewProjection"),
+  viewPreset: document.getElementById("viewPreset"),
   btnToggleAxes: document.getElementById("btnToggleAxes"),
   btnToggleSelect: document.getElementById("btnToggleSelect"),
   btnToggleDistance: document.getElementById("btnToggleDistance"),
@@ -233,13 +246,24 @@ const el = {
   selectionPanelTitle: document.getElementById("selectionPanelTitle"),
   btnSelectionCollapse: document.getElementById("btnSelectionCollapse"),
   pickModeNode: document.getElementById("pickModeNode"),
-  pickModeElement: document.getElementById("pickModeElement"),
+  pickModeMember: document.getElementById("pickModeMember"),
+  pickModeDiaphragm: document.getElementById("pickModeDiaphragm"),
+  pickModeWall: document.getElementById("pickModeWall"),
   pickModeHint: document.getElementById("pickModeHint"),
+  pickElemCreateOptions: document.getElementById("pickElemCreateOptions"),
+  pickElemCreateSection: document.getElementById("pickElemCreateSection"),
+  pickElemCreateBeta: document.getElementById("pickElemCreateBeta"),
+  pickElemCreateHint: document.getElementById("pickElemCreateHint"),
+  btnPickElemCreate: document.getElementById("btnPickElemCreate"),
   selectionSummary: document.getElementById("selectionSummary"),
   selectionList: document.getElementById("selectionList"),
   btnClearSelection: document.getElementById("btnClearSelection"),
   pickWrwCreateOptions: document.getElementById("pickWrwCreateOptions"),
   pickWrwCreateModel: document.getElementById("pickWrwCreateModel"),
+  pickDmemCreateOptions: document.getElementById("pickDmemCreateOptions"),
+  pickDmemCreateDiap: document.getElementById("pickDmemCreateDiap"),
+  pickDmemCreateHint: document.getElementById("pickDmemCreateHint"),
+  btnPickDmemCreate: document.getElementById("btnPickDmemCreate"),
   pickWrwEditOptions: document.getElementById("pickWrwEditOptions"),
   pickWrwEditModel: document.getElementById("pickWrwEditModel"),
   pickNodeSupportOptions: document.getElementById("pickNodeSupportOptions"),
@@ -274,6 +298,10 @@ const el = {
   contextMenuDmemCreate: document.getElementById("contextMenuDmemCreate"),
   contextMenuDmemCreateDiap: document.getElementById("contextMenuDmemCreateDiap"),
   contextMenuDmemCreateHint: document.getElementById("contextMenuDmemCreateHint"),
+  contextMenuElemCreate: document.getElementById("contextMenuElemCreate"),
+  contextMenuElemCreateSection: document.getElementById("contextMenuElemCreateSection"),
+  contextMenuElemCreateBeta: document.getElementById("contextMenuElemCreateBeta"),
+  contextMenuElemCreateHint: document.getElementById("contextMenuElemCreateHint"),
   contextMenuWrwCreate: document.getElementById("contextMenuWrwCreate"),
   contextMenuWrwCreateMultiplier: document.getElementById("contextMenuWrwCreateMultiplier"),
   contextMenuWrwCreateModel: document.getElementById("contextMenuWrwCreateModel"),
@@ -284,6 +312,11 @@ const el = {
   contextMenuDiapMultiplier: document.getElementById("contextMenuDiapMultiplier"),
   contextMenuDiapHint: document.getElementById("contextMenuDiapHint"),
   contextMenuElemEdits: document.getElementById("contextMenuElemEdits"),
+  contextMenuTogglePick: document.getElementById("contextMenuTogglePick"),
+  contextMenuShowMembersOnly: document.getElementById("contextMenuShowMembersOnly"),
+  contextMenuHideMembers: document.getElementById("contextMenuHideMembers"),
+  contextMenuShowAllMembers: document.getElementById("contextMenuShowAllMembers"),
+  contextMenuPickSection: document.getElementById("contextMenuPickSection"),
   ejntEditPanel: document.getElementById("ejntEditPanel"),
   ejntEditText: document.getElementById("ejntEditText"),
   btnEjntEditApply: document.getElementById("btnEjntEditApply"),
@@ -323,14 +356,48 @@ const el = {
   status: document.getElementById("status"),
 };
 
+const CAMERA_FOV = 45;
+const STANDARD_VIEWS = {
+  front: {
+    offset: (span) => new THREE.Vector3(0, -span * 1.8, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  back: {
+    offset: (span) => new THREE.Vector3(0, span * 1.8, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  right: {
+    offset: (span) => new THREE.Vector3(span * 1.8, 0, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  left: {
+    offset: (span) => new THREE.Vector3(-span * 1.8, 0, 0),
+    up: () => new THREE.Vector3(0, 0, 1),
+  },
+  top: {
+    offset: (span) => new THREE.Vector3(0, 0, span * 1.8),
+    up: () => new THREE.Vector3(0, 1, 0),
+  },
+  bottom: {
+    offset: (span) => new THREE.Vector3(0, 0, -span * 1.8),
+    up: () => new THREE.Vector3(0, -1, 0),
+  },
+};
+
 let scene, camera, renderer, controls;
+let cameraProjectionMode = "perspective";
+let orthoViewHeight = 10;
 let modelGroup, labelGroup, forceGroup, forceLabelGroup, axesGroup, selectionGroup, distanceGroup;
+let practiceCenterGroup;
+let colocatedGroup;
 let windGroup, windLabelGroup;
 let uiTheme = "dark";
 let currentModel = null;
 let selectionModeActive = false;
-let pickSubMode = "node";
-const PICK_SUB_MODE_STORAGE_KEY = "stb_gui_pick_sub_mode";
+let pickSubModes = new Set();
+const PICK_SUB_MODE_STORAGE_KEY = "stb_gui_pick_sub_modes";
+const PICK_SUB_MODE_LEGACY_KEY = "stb_gui_pick_sub_mode";
+const PICK_SUB_MODES = ["node", "member", "diaphragm", "wall"];
 let distanceModeActive = false;
 let distanceNodeIds = [];
 let distanceMeters = null;
@@ -338,7 +405,13 @@ let selectedElementIds = new Set();
 let selectedNodeIds = new Set();
 let selectedDmemIds = new Set();
 let selectedWrwIds = new Set();
+let memberVisibilityFilter = "all";
+let visibilityElementIds = new Set();
+let visibilityDmemIds = new Set();
+let visibilityWrwIds = new Set();
+let visibleNodeIdsCache = null;
 let selectionDrag = null;
+let viewportRightDrag = null;
 const _worldProj = new THREE.Vector3();
 const _ndcScratch = new THREE.Vector3();
 const _ndcP0 = new THREE.Vector3();
@@ -362,6 +435,7 @@ const _labelNdc = new THREE.Vector3();
 const SELECTION_PICK_PX = 10;
 const SELECTION_NODE_PICK_PX = 14;
 const SELECTION_DRAG_MIN_PX = 4;
+const VIEWPORT_CONTEXT_MENU_DRAG_PX = 4;
 const SELECTION_LIST_LIMIT = 80;
 const MAX_EDIT_UNDO = 50;
 const WIND_FLOW_SURFACE_GAP_RATIO = 0.06;
@@ -415,6 +489,8 @@ const THEME_RENDER_COLORS = {
 };
 let _nodePointTexture = null;
 let windVisualData = null;
+let practiceSummaryData = null;
+let colocatedSitesCache = null;
 let selectedWindCaseId = null;
 
 function saveLastModelPath(path) {
@@ -620,80 +696,93 @@ function setSelectionMode(active) {
   updateSelectionPanelVisibility();
 }
 
+function normalizePickSubMode(mode) {
+  if (mode === "element") return "member";
+  return PICK_SUB_MODES.includes(mode) ? mode : "node";
+}
+
+function hasPickTargetFilter() {
+  return pickSubModes.size > 0;
+}
+
+function isPickTargetEnabled(mode) {
+  if (!hasPickTargetFilter()) return true;
+  return pickSubModes.has(normalizePickSubMode(mode));
+}
+
 function loadPickSubMode() {
+  pickSubModes = new Set();
   try {
-    const stored = localStorage.getItem(PICK_SUB_MODE_STORAGE_KEY);
-    if (stored === "node" || stored === "element") {
-      pickSubMode = stored;
-    }
+    let stored = localStorage.getItem(PICK_SUB_MODE_STORAGE_KEY);
+    if (!stored) stored = localStorage.getItem(PICK_SUB_MODE_LEGACY_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        for (const m of parsed) pickSubModes.add(normalizePickSubMode(m));
+        return;
+      }
+    } catch (e) { /* legacy single string */ }
+    pickSubModes.add(normalizePickSubMode(stored));
   } catch (e) { /* ignore */ }
 }
 
 function savePickSubMode() {
   try {
-    localStorage.setItem(PICK_SUB_MODE_STORAGE_KEY, pickSubMode);
+    localStorage.setItem(
+      PICK_SUB_MODE_STORAGE_KEY,
+      JSON.stringify(Array.from(pickSubModes).sort())
+    );
   } catch (e) { /* ignore */ }
 }
 
-function clearSelectionForOtherPickSubMode(mode) {
-  if (mode === "node") {
-    selectedElementIds.clear();
-    selectedDmemIds.clear();
-    selectedWrwIds.clear();
-  } else {
-    selectedNodeIds.clear();
-    selectedDmemIds.clear();
-    selectedWrwIds.clear();
-  }
-}
-
-function setPickSubMode(mode, opts) {
-  const next = mode === "element" ? "element" : "node";
-  const clearOther = !(opts && opts.keepSelection);
-  if (pickSubMode === next) {
-    updatePickModeUI();
-    return;
-  }
-  pickSubMode = next;
-  if (clearOther) {
-    clearSelectionForOtherPickSubMode(next);
-    updateSelectionHighlight();
-    updateSelectionPanel();
-  }
+function togglePickSubMode(mode) {
+  const next = normalizePickSubMode(mode);
+  const updated = new Set(pickSubModes);
+  if (updated.has(next)) updated.delete(next);
+  else updated.add(next);
+  pickSubModes = updated;
   savePickSubMode();
   updatePickModeUI();
 }
 
+function pickModeTitle() {
+  if (!hasPickTargetFilter()) return "Pick — All";
+  const labels = [];
+  if (pickSubModes.has("node")) labels.push("Nodes");
+  if (pickSubModes.has("member")) labels.push("Members");
+  if (pickSubModes.has("diaphragm")) labels.push("Diaphragm");
+  if (pickSubModes.has("wall")) labels.push("Wall");
+  return "Pick — " + labels.join(" + ");
+}
+
+function pickModeHintText() {
+  const filter = hasPickTargetFilter()
+    ? "Filtered: " + Array.from(pickSubModes).join(", ") + "."
+    : "All targets (Nodes, Members, Diaphragm, Wall).";
+  return filter + " Toggle Pick target buttons to filter. Click or drag to pick. Ctrl+click toggles. Right-click = menu. Esc clears.";
+}
+
 function updatePickModeUI() {
-  const isNode = pickSubMode === "node";
-  if (el.pickModeNode) {
-    el.pickModeNode.classList.toggle("active", isNode);
-    el.pickModeNode.setAttribute("aria-pressed", isNode ? "true" : "false");
-  }
-  if (el.pickModeElement) {
-    el.pickModeElement.classList.toggle("active", !isNode);
-    el.pickModeElement.setAttribute("aria-pressed", !isNode ? "true" : "false");
+  const pickButtons = [
+    { el: el.pickModeNode, id: "node" },
+    { el: el.pickModeMember, id: "member" },
+    { el: el.pickModeDiaphragm, id: "diaphragm" },
+    { el: el.pickModeWall, id: "wall" },
+  ];
+  for (const btn of pickButtons) {
+    if (!btn.el) continue;
+    const active = pickSubModes.has(btn.id);
+    btn.el.classList.toggle("active", active);
+    btn.el.setAttribute("aria-pressed", active ? "true" : "false");
   }
   if (el.selectionPanelTitle) {
-    el.selectionPanelTitle.textContent = isNode ? "Pick — Nodes" : "Pick — Elements";
+    el.selectionPanelTitle.textContent = pickModeTitle();
   }
   if (el.pickModeHint) {
-    el.pickModeHint.textContent = isNode
-      ? "Node mode: click or drag to pick nodes. Ctrl+click toggles. 3 nodes → DMEM, 4 nodes → WRW. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears."
-      : "Element mode: click or drag to pick elements. Ctrl+click toggles. Right-click = edit menu. Ctrl+Z undo, Ctrl+Y redo. Esc clears.";
+    el.pickModeHint.textContent = pickModeHintText();
   }
-  if (el.pickWrwCreateOptions) {
-    el.pickWrwCreateOptions.hidden = !isNode;
-  }
-  if (el.pickNodeSupportOptions && !isNode) {
-    el.pickNodeSupportOptions.hidden = true;
-  }
-  if (el.pickWrwEditOptions && !isNode) {
-    el.pickWrwEditOptions.hidden = true;
-  }
-  if (isNode) {
-    updatePickWrwOptions();
-  }
+  updatePickWrwOptions();
 }
 
 function clearDistanceMeasurement() {
@@ -851,6 +940,123 @@ function clearSelection() {
   updateSelectionPanel();
 }
 
+function invalidateGeometryVisibilityCache() {
+  visibleNodeIdsCache = null;
+}
+
+function isGeometryItemVisible(itemId, targetIds) {
+  if (memberVisibilityFilter === "all") return true;
+  const inSet = targetIds.has(itemId);
+  if (memberVisibilityFilter === "only") return inSet;
+  if (memberVisibilityFilter === "hide") return !inSet;
+  return true;
+}
+
+function isElementVisible(elemId) {
+  return isGeometryItemVisible(elemId, visibilityElementIds);
+}
+
+function isDmemVisible(dmemId) {
+  return isGeometryItemVisible(dmemId, visibilityDmemIds);
+}
+
+function isWrwVisible(wrwId) {
+  return isGeometryItemVisible(wrwId, visibilityWrwIds);
+}
+
+function buildVisibleNodeIds(model) {
+  const ids = new Set();
+  if (!model) return ids;
+  if (memberVisibilityFilter === "all") {
+    for (const n of model.nodes) ids.add(n.id);
+    return ids;
+  }
+  for (const e of model.elements) {
+    if (!isElementVisible(e.id)) continue;
+    ids.add(e.n0);
+    ids.add(e.n1);
+  }
+  for (const mem of model.membrane_elements || []) {
+    if (!isDmemVisible(mem.id)) continue;
+    for (const nid of mem.nodes || []) ids.add(nid);
+  }
+  for (const wall of model.wood_rated_walls || []) {
+    if (!isWrwVisible(wall.id)) continue;
+    for (const nid of wall.nodes || []) ids.add(nid);
+  }
+  return ids;
+}
+
+function isNodeVisible(nodeId) {
+  if (memberVisibilityFilter === "all") return true;
+  if (!currentModel) return true;
+  if (visibleNodeIdsCache == null) {
+    visibleNodeIdsCache = buildVisibleNodeIds(currentModel);
+  }
+  return visibleNodeIdsCache.has(nodeId);
+}
+
+function isMemberElementVisible(elemId) {
+  return isElementVisible(elemId);
+}
+
+function resetMemberVisibilityFilter() {
+  memberVisibilityFilter = "all";
+  visibilityElementIds = new Set();
+  visibilityDmemIds = new Set();
+  visibilityWrwIds = new Set();
+  invalidateGeometryVisibilityCache();
+}
+
+function pruneMemberVisibilityFilter() {
+  if (!currentModel || memberVisibilityFilter === "all") return;
+  const validElems = new Set(currentModel.elements.map(function (e) { return e.id; }));
+  const validDmem = new Set((currentModel.membrane_elements || []).map(function (m) { return m.id; }));
+  const validWrw = new Set((currentModel.wood_rated_walls || []).map(function (w) { return w.id; }));
+  visibilityElementIds = new Set(
+    Array.from(visibilityElementIds).filter(function (id) { return validElems.has(id); })
+  );
+  visibilityDmemIds = new Set(
+    Array.from(visibilityDmemIds).filter(function (id) { return validDmem.has(id); })
+  );
+  visibilityWrwIds = new Set(
+    Array.from(visibilityWrwIds).filter(function (id) { return validWrw.has(id); })
+  );
+  invalidateGeometryVisibilityCache();
+  if (memberVisibilityFilter === "hide"
+    && visibilityElementIds.size === 0
+    && visibilityDmemIds.size === 0
+    && visibilityWrwIds.size === 0) {
+    resetMemberVisibilityFilter();
+    if (currentModel) buildModelScene(currentModel);
+  }
+}
+
+function applyMemberVisibilityFilter(mode) {
+  if (mode === "all") {
+    resetMemberVisibilityFilter();
+  } else {
+    const hasSel = selectedElementIds.size > 0
+      || selectedDmemIds.size > 0
+      || selectedWrwIds.size > 0;
+    if (!hasSel) return;
+    if (mode === "hide" && memberVisibilityFilter === "hide") {
+      selectedElementIds.forEach(function (id) { visibilityElementIds.add(id); });
+      selectedDmemIds.forEach(function (id) { visibilityDmemIds.add(id); });
+      selectedWrwIds.forEach(function (id) { visibilityWrwIds.add(id); });
+    } else {
+      memberVisibilityFilter = mode;
+      visibilityElementIds = new Set(selectedElementIds);
+      visibilityDmemIds = new Set(selectedDmemIds);
+      visibilityWrwIds = new Set(selectedWrwIds);
+    }
+    invalidateGeometryVisibilityCache();
+  }
+  if (mode === "hide") clearSelection();
+  hideContextMenu();
+  if (currentModel) buildModelScene(currentModel);
+}
+
 function setSelectedWrwIds(ids, mode) {
   const next = mode === "replace" ? new Set() : new Set(selectedWrwIds);
   for (const id of ids) {
@@ -1003,6 +1209,18 @@ function segmentIntersectsRect(ax, ay, bx, by, x0, y0, x1, y1) {
   return false;
 }
 
+function segmentInsideRect(ax, ay, bx, by, x0, y0, x1, y1) {
+  return pointInRect(ax, ay, x0, y0, x1, y1) && pointInRect(bx, by, x0, y0, x1, y1);
+}
+
+function polygonInsideRect(verts, x0, y0, x1, y1) {
+  if (!verts || verts.length === 0) return false;
+  for (const v of verts) {
+    if (!pointInRect(v.x, v.y, x0, y0, x1, y1)) return false;
+  }
+  return true;
+}
+
 function pointInTriangle2d(px, py, ax, ay, bx, by, cx, cy) {
   function sign(p1x, p1y, p2x, p2y, p3x, p3y) {
     return (p1x - p3x) * (p2y - p3y) - (p2x - p3x) * (p1y - p3y);
@@ -1071,6 +1289,7 @@ function pickMembraneAtScreen(px, py, thresholdPx) {
   let bestId = null;
   let bestScore = thresholdPx;
   for (const mem of currentModel.membrane_elements || []) {
+    if (!isDmemVisible(mem.id)) continue;
     const verts = membraneScreenVerts(mem, nm, display);
     if (!verts) continue;
     const inside = pointInTriangle2d(
@@ -1096,6 +1315,7 @@ function pickWoodWallAtScreen(px, py, thresholdPx) {
   let bestId = null;
   let bestScore = thresholdPx;
   for (const wall of currentModel.wood_rated_walls || []) {
+    if (!isWrwVisible(wall.id)) continue;
     const verts = woodWallScreenVerts(wall, nm, display);
     if (!verts) continue;
     const inside = pointInTriangle2d(px, py, verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y)
@@ -1110,26 +1330,36 @@ function pickWoodWallAtScreen(px, py, thresholdPx) {
   return bestId == null ? null : { id: bestId, score: bestScore };
 }
 
-function membranesInScreenRect(x0, y0, x1, y1) {
+function membranesInScreenRect(x0, y0, x1, y1, windowMode) {
   const ids = [];
   if (!currentModel || !(el.chkMembrane && el.chkMembrane.checked)) return ids;
   const display = getSceneDisplayState();
   const nm = nodeMap(currentModel);
   for (const mem of currentModel.membrane_elements || []) {
+    if (!isDmemVisible(mem.id)) continue;
     const verts = membraneScreenVerts(mem, nm, display);
-    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(mem.id);
+    if (!verts) continue;
+    const hit = windowMode
+      ? polygonInsideRect(verts, x0, y0, x1, y1)
+      : polygonIntersectsRect(verts, x0, y0, x1, y1);
+    if (hit) ids.push(mem.id);
   }
   return ids;
 }
 
-function woodWallsInScreenRect(x0, y0, x1, y1) {
+function woodWallsInScreenRect(x0, y0, x1, y1, windowMode) {
   const ids = [];
   if (!currentModel || !(el.chkWoodWall && el.chkWoodWall.checked)) return ids;
   const display = getSceneDisplayState();
   const nm = nodeMap(currentModel);
   for (const wall of currentModel.wood_rated_walls || []) {
+    if (!isWrwVisible(wall.id)) continue;
     const verts = woodWallScreenVerts(wall, nm, display);
-    if (verts && polygonIntersectsRect(verts, x0, y0, x1, y1)) ids.push(wall.id);
+    if (!verts) continue;
+    const hit = windowMode
+      ? polygonInsideRect(verts, x0, y0, x1, y1)
+      : polygonIntersectsRect(verts, x0, y0, x1, y1);
+    if (hit) ids.push(wall.id);
   }
   return ids;
 }
@@ -1152,6 +1382,7 @@ function pickElementAtScreen(px, py, thresholdPx) {
   let bestId = null;
   let bestDist = thresholdPx;
   for (const e of currentModel.elements) {
+    if (!isElementVisible(e.id)) continue;
     const seg = elementScreenSegment(e, nm, display);
     if (!seg) continue;
     const d = distPointToSegment2d(px, py, seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y);
@@ -1163,17 +1394,19 @@ function pickElementAtScreen(px, py, thresholdPx) {
   return bestId == null ? null : { id: bestId, score: bestDist };
 }
 
-function elementsInScreenRect(x0, y0, x1, y1) {
+function elementsInScreenRect(x0, y0, x1, y1, windowMode) {
   const ids = [];
   if (!currentModel) return ids;
   const display = getSceneDisplayState();
   const nm = nodeMap(currentModel);
   for (const e of currentModel.elements) {
+    if (!isElementVisible(e.id)) continue;
     const seg = elementScreenSegment(e, nm, display);
     if (!seg) continue;
-    if (segmentIntersectsRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1)) {
-      ids.push(e.id);
-    }
+    const hit = windowMode
+      ? segmentInsideRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1)
+      : segmentIntersectsRect(seg.s0.x, seg.s0.y, seg.s1.x, seg.s1.y, x0, y0, x1, y1);
+    if (hit) ids.push(e.id);
   }
   return ids;
 }
@@ -1187,6 +1420,7 @@ function nodesInScreenRect(x0, y0, x1, y1) {
   const minY = Math.min(y0, y1);
   const maxY = Math.max(y0, y1);
   for (const n of currentModel.nodes) {
+    if (!isNodeVisible(n.id)) continue;
     const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
     const s = worldToScreenPoint(p);
     if (s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY) {
@@ -1203,6 +1437,7 @@ function pickNodeAtScreen(px, py, thresholdPx) {
   let bestNode = null;
   let bestNodeDist = limit;
   for (const n of currentModel.nodes) {
+    if (!isNodeVisible(n.id)) continue;
     const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
     const s = worldToScreenPoint(p);
     const d = Math.hypot(px - s.x, py - s.y);
@@ -1214,39 +1449,7 @@ function pickNodeAtScreen(px, py, thresholdPx) {
   return bestNode;
 }
 
-function pickTargetForMode(px, py) {
-  if (pickSubMode === "node") {
-    const nodeId = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
-    return nodeId == null ? null : { kind: "node", id: nodeId };
-  }
-  const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestElem != null) return Object.assign({ kind: "elem" }, bestElem);
-  return null;
-}
-
-function pickTargetAtScreen(px, py) {
-  if (!currentModel) return null;
-  const bestNode = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
-  let bestNodeDist = SELECTION_NODE_PICK_PX;
-  if (bestNode != null) {
-    const display = getSceneDisplayState();
-    const nm = nodeMap(currentModel);
-    const n = nm[bestNode];
-    if (n) {
-      const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
-      const s = worldToScreenPoint(p);
-      bestNodeDist = Math.hypot(px - s.x, py - s.y);
-    }
-  }
-
-  const candidates = [];
-  const bestDmem = pickMembraneAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestDmem != null) candidates.push(Object.assign({ kind: "dmem" }, bestDmem));
-  const bestWrw = pickWoodWallAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestWrw != null) candidates.push(Object.assign({ kind: "wrw" }, bestWrw));
-  const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
-  if (bestElem != null) candidates.push(Object.assign({ kind: "elem" }, bestElem));
-
+function pickBestFromCandidates(candidates, bestNode, bestNodeDist) {
   if (bestNode != null && bestNodeDist <= SELECTION_NODE_PICK_PX) {
     if (candidates.length === 0 || bestNodeDist <= SELECTION_PICK_PX * 0.75) {
       return { kind: "node", id: bestNode };
@@ -1262,6 +1465,51 @@ function pickTargetAtScreen(px, py) {
   }
   if (bestNode != null) return { kind: "node", id: bestNode };
   return null;
+}
+
+function pickCandidatesAtScreen(px, py, enabledModes) {
+  const candidates = [];
+  let bestNode = null;
+  let bestNodeDist = SELECTION_NODE_PICK_PX;
+
+  if (!enabledModes || enabledModes.has("node")) {
+    bestNode = pickNodeAtScreen(px, py, SELECTION_NODE_PICK_PX);
+    if (bestNode != null) {
+      const display = getSceneDisplayState();
+      const nm = nodeMap(currentModel);
+      const n = nm[bestNode];
+      if (n) {
+        const p = nodePosition(n, currentModel, display.lc, display.defFac, display.deformed);
+        const s = worldToScreenPoint(p);
+        bestNodeDist = Math.hypot(px - s.x, py - s.y);
+      }
+    }
+  }
+  if (!enabledModes || enabledModes.has("diaphragm")) {
+    const bestDmem = pickMembraneAtScreen(px, py, SELECTION_PICK_PX);
+    if (bestDmem != null) candidates.push(Object.assign({ kind: "dmem" }, bestDmem));
+  }
+  if (!enabledModes || enabledModes.has("wall")) {
+    const bestWrw = pickWoodWallAtScreen(px, py, SELECTION_PICK_PX);
+    if (bestWrw != null) candidates.push(Object.assign({ kind: "wrw" }, bestWrw));
+  }
+  if (!enabledModes || enabledModes.has("member")) {
+    const bestElem = pickElementAtScreen(px, py, SELECTION_PICK_PX);
+    if (bestElem != null) candidates.push(Object.assign({ kind: "elem" }, bestElem));
+  }
+
+  return pickBestFromCandidates(candidates, bestNode, bestNodeDist);
+}
+
+function pickTargetForMode(px, py) {
+  if (!currentModel) return null;
+  if (!hasPickTargetFilter()) return pickCandidatesAtScreen(px, py, null);
+  return pickCandidatesAtScreen(px, py, pickSubModes);
+}
+
+function pickTargetAtScreen(px, py) {
+  if (!currentModel) return null;
+  return pickCandidatesAtScreen(px, py, null);
 }
 
 function elementIJArrowLength(model, elemLen) {
@@ -1676,6 +1924,9 @@ function updateSelectionMarquee(x0, y0, x1, y1) {
   el.selectionMarquee.style.width = width + "px";
   el.selectionMarquee.style.height = height + "px";
   el.selectionMarquee.hidden = width < 1 && height < 1;
+  const windowMode = (x1 - x0) >= 0;
+  el.selectionMarquee.classList.toggle("selection-marquee-window", windowMode);
+  el.selectionMarquee.classList.toggle("selection-marquee-cross", !windowMode);
 }
 
 function hideSelectionMarquee() {
@@ -1683,6 +1934,33 @@ function hideSelectionMarquee() {
   el.selectionMarquee.hidden = true;
   el.selectionMarquee.style.width = "0";
   el.selectionMarquee.style.height = "0";
+}
+
+function replacePickSelectionForKind(kind, ids) {
+  if (kind === "node") setSelectedNodeIds(ids, "replace");
+  else if (kind === "elem") setSelectedElementIds(ids, "replace");
+  else if (kind === "dmem") setSelectedDmemIds(ids, "replace");
+  else if (kind === "wrw") setSelectedWrwIds(ids, "replace");
+}
+
+function targetsInScreenRect(x0, y0, x1, y1, windowMode) {
+  const nodeIds = [];
+  const elemIds = [];
+  const dmemIds = [];
+  const wrwIds = [];
+  if (isPickTargetEnabled("node")) {
+    nodeIds.push.apply(nodeIds, nodesInScreenRect(x0, y0, x1, y1));
+  }
+  if (isPickTargetEnabled("member")) {
+    elemIds.push.apply(elemIds, elementsInScreenRect(x0, y0, x1, y1, windowMode));
+  }
+  if (isPickTargetEnabled("diaphragm")) {
+    dmemIds.push.apply(dmemIds, membranesInScreenRect(x0, y0, x1, y1, windowMode));
+  }
+  if (isPickTargetEnabled("wall")) {
+    wrwIds.push.apply(wrwIds, woodWallsInScreenRect(x0, y0, x1, y1, windowMode));
+  }
+  return { nodeIds, elemIds, dmemIds, wrwIds };
 }
 
 function applyPickedTarget(picked, extend) {
@@ -1694,10 +1972,7 @@ function applyPickedTarget(picked, extend) {
     else if (picked.kind === "wrw") setSelectedWrwIds([picked.id], "toggle");
     return true;
   }
-  if (picked.kind === "node") replacePickSelection([picked.id], [], [], []);
-  else if (picked.kind === "elem") replacePickSelection([], [picked.id], [], []);
-  else if (picked.kind === "dmem") replacePickSelection([], [], [picked.id], []);
-  else if (picked.kind === "wrw") replacePickSelection([], [], [], [picked.id]);
+  replacePickSelectionForKind(picked.kind, [picked.id]);
   return true;
 }
 
@@ -1723,24 +1998,19 @@ function finishSelectionDrag(ev) {
     return;
   }
 
-  if (pickSubMode === "node") {
-    const nodeIds = nodesInScreenRect(drag.startX, drag.startY, end.x, end.y);
-    if (nodeIds.length === 0) {
-      if (!extend) clearSelection();
-      return;
-    }
-    if (extend) addPickSelection(nodeIds, [], [], []);
-    else replacePickSelection(nodeIds, [], [], []);
-    return;
-  }
-
-  const elemIds = elementsInScreenRect(drag.startX, drag.startY, end.x, end.y);
-  if (elemIds.length === 0) {
+  const windowMode = dx >= 0;
+  const picked = targetsInScreenRect(drag.startX, drag.startY, end.x, end.y, windowMode);
+  const total = picked.nodeIds.length + picked.elemIds.length
+    + picked.dmemIds.length + picked.wrwIds.length;
+  if (total === 0) {
     if (!extend) clearSelection();
     return;
   }
-  if (extend) addPickSelection([], elemIds, [], []);
-  else replacePickSelection([], elemIds, [], []);
+  if (extend) {
+    addPickSelection(picked.nodeIds, picked.elemIds, picked.dmemIds, picked.wrwIds);
+  } else {
+    replacePickSelection(picked.nodeIds, picked.elemIds, picked.dmemIds, picked.wrwIds);
+  }
 }
 
 function initSelectionInteraction() {
@@ -1840,6 +2110,112 @@ function findDmemIdByNodes(diapId, nodeIds) {
   return null;
 }
 
+function parseCreatedDmemIdsFromWarnings(warnings) {
+  const ids = [];
+  for (const w of warnings || []) {
+    const m = String(w).match(/^Created DMEM (\d+) for DIAP/);
+    if (m) ids.push(parseInt(m[1], 10));
+  }
+  return ids;
+}
+
+function canCreateDmemFromNodePick() {
+  const diaps = currentModel ? (currentModel.diaphragms || []) : [];
+  return isPickTargetEnabled("node")
+    && selectedNodeIds.size >= 3
+    && selectedElementIds.size === 0
+    && selectedDmemIds.size === 0
+    && selectedWrwIds.size === 0
+    && diaps.length > 0;
+}
+
+function canCreateElemFromNodePick() {
+  const sections = currentModel ? (currentModel.sections || []) : [];
+  return isPickTargetEnabled("node")
+    && selectedNodeIds.size === 2
+    && selectedElementIds.size === 0
+    && selectedDmemIds.size === 0
+    && selectedWrwIds.size === 0
+    && sections.length > 0;
+}
+
+function parseCreatedElemIdFromWarnings(warnings) {
+  for (const w of warnings || []) {
+    const m = String(w).match(/^Created ELEM (\d+)/);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
+
+function findElementIdByNodes(ni, nj) {
+  if (!currentModel) return null;
+  const pair = new Set([ni, nj]);
+  for (const e of currentModel.elements || []) {
+    if (pair.has(e.n0) && pair.has(e.n1)) return e.id;
+  }
+  return null;
+}
+
+function populateElemCreateSectionSelect() {
+  const targets = [el.contextMenuElemCreateSection, el.pickElemCreateSection];
+  if (!currentModel) return;
+  const sections = currentModel.sections || [];
+  for (const sel of targets) {
+    if (!sel) continue;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const s of sections) {
+      const opt = document.createElement("option");
+      opt.value = String(s.id);
+      const mat = s.material_name || ("MAT " + s.material_id);
+      opt.textContent = "SECT " + s.id + " — " + s.name + " (" + mat + ")";
+      sel.appendChild(opt);
+    }
+    if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+      sel.value = prev;
+    } else if (sel.options.length) {
+      sel.selectedIndex = 0;
+    }
+  }
+}
+
+function getPickElemCreateSectionId() {
+  const raw = el.pickElemCreateSection
+    ? el.pickElemCreateSection.value
+    : (el.contextMenuElemCreateSection ? el.contextMenuElemCreateSection.value : "");
+  const sectId = parseInt(raw, 10);
+  return isFinite(sectId) ? sectId : null;
+}
+
+function getPickElemCreateBeta() {
+  const raw = el.pickElemCreateBeta
+    ? el.pickElemCreateBeta.value.trim()
+    : (el.contextMenuElemCreateBeta ? el.contextMenuElemCreateBeta.value.trim() : "0");
+  const beta = parseFloat(raw);
+  return isFinite(beta) ? beta : 0;
+}
+
+function requestCreateElement(sectionId, beta) {
+  if (!canCreateElemFromNodePick()) return;
+  const ids = selectedNodeIdList();
+  const ok = window.confirm(
+    "Create ELEM between nodes " + ids[0] + " and " + ids[1] + " (SECT " + sectionId + ")?"
+  );
+  if (!ok) return;
+  applyModelEdit({ action: "create_element", section_id: sectionId, beta: beta });
+}
+
+function requestCreateDmemMesh(diapId) {
+  if (!canCreateDmemFromNodePick()) return;
+  const ids = selectedNodeIdList();
+  const count = ids.length;
+  const msg = count === 3
+    ? "Create DMEM on DIAP " + diapId + " with nodes " + ids.join(", ") + "?"
+    : "Create DMEM mesh on DIAP " + diapId + " from " + count + " nodes (auto triangulation)?";
+  if (!window.confirm(msg)) return;
+  applyModelEdit({ action: "create_dmem", diap_id: diapId });
+}
+
 function findWrwIdByNodes(nodeIds) {
   if (!currentModel) return null;
   const sorted = nodeIds.slice().sort(function (a, b) { return a - b; });
@@ -1877,21 +2253,26 @@ function populateWrwCreateDiapSelect() {
 }
 
 function populateDmemCreateDiapSelect() {
-  if (!el.contextMenuDmemCreateDiap || !currentModel) return;
-  const sel = el.contextMenuDmemCreateDiap;
-  const prev = sel.value;
-  sel.innerHTML = "";
+  const targets = [el.contextMenuDmemCreateDiap, el.pickDmemCreateDiap];
+  if (!currentModel) return;
   const diaps = currentModel.diaphragms || [];
-  for (const d of diaps) {
-    const opt = document.createElement("option");
-    opt.value = String(d.id);
-    let label = "DIAP " + d.id;
-    if (d.name) label += " — " + d.name;
-    opt.textContent = label;
-    sel.appendChild(opt);
-  }
-  if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
-    sel.value = prev;
+  for (const sel of targets) {
+    if (!sel) continue;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const d of diaps) {
+      const opt = document.createElement("option");
+      opt.value = String(d.id);
+      let label = "DIAP " + d.id;
+      if (d.name) label += " — " + d.name;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+    if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) {
+      sel.value = prev;
+    } else if (sel.options.length) {
+      sel.selectedIndex = 0;
+    }
   }
 }
 
@@ -2072,15 +2453,43 @@ function applyConsChange(fixed) {
 }
 
 function updatePickWrwOptions() {
-  const nodePickMode = pickSubMode === "node";
+  const nodePickEnabled = isPickTargetEnabled("node");
+  if (el.pickElemCreateOptions) {
+    const showElem = canCreateElemFromNodePick();
+    el.pickElemCreateOptions.hidden = !showElem;
+    if (showElem) {
+      populateElemCreateSectionSelect();
+      if (el.pickElemCreateHint) {
+        const ids = selectedNodeIdList();
+        el.pickElemCreateHint.textContent = "Nodes " + ids[0] + " → " + ids[1];
+      }
+    } else if (el.pickElemCreateHint) {
+      el.pickElemCreateHint.textContent = "";
+    }
+  }
+  if (el.pickDmemCreateOptions) {
+    const showDmem = canCreateDmemFromNodePick();
+    el.pickDmemCreateOptions.hidden = !showDmem;
+    if (showDmem) {
+      populateDmemCreateDiapSelect();
+      if (el.pickDmemCreateHint) {
+        const count = selectedNodeIds.size;
+        el.pickDmemCreateHint.textContent = count === 3
+          ? "Nodes " + selectedNodeIdList().join(", ") + " → one triangle"
+          : count + " nodes → auto triangulation inside the picked region";
+      }
+    } else if (el.pickDmemCreateHint) {
+      el.pickDmemCreateHint.textContent = "";
+    }
+  }
   if (el.pickWrwCreateOptions) {
-    const showCreate = nodePickMode && selectedNodeIds.size === 4
+    const showCreate = nodePickEnabled && selectedNodeIds.size === 4
       && selectedElementIds.size === 0 && selectedDmemIds.size === 0
       && selectedWrwIds.size === 0;
     el.pickWrwCreateOptions.hidden = !showCreate;
   }
   if (el.pickWrwEditOptions) {
-    const showEdit = nodePickMode && selectedWrwIds.size > 0
+    const showEdit = isPickTargetEnabled("wall") && selectedWrwIds.size > 0
       && selectedNodeIds.size === 0 && selectedElementIds.size === 0
       && selectedDmemIds.size === 0;
     el.pickWrwEditOptions.hidden = !showEdit;
@@ -2090,7 +2499,7 @@ function updatePickWrwOptions() {
     }
   }
   if (el.pickNodeSupportOptions) {
-    const showSupport = nodePickMode && selectedNodeIds.size > 0
+    const showSupport = nodePickEnabled && selectedNodeIds.size > 0
       && selectedElementIds.size === 0 && selectedDmemIds.size === 0
       && selectedWrwIds.size === 0;
     el.pickNodeSupportOptions.hidden = !showSupport;
@@ -2183,6 +2592,39 @@ function hideContextMenu() {
   if (el.elemContextMenu) el.elemContextMenu.hidden = true;
 }
 
+function beginViewportRightDrag(ev) {
+  viewportRightDrag = {
+    startClientX: ev.clientX,
+    startClientY: ev.clientY,
+    dragged: false,
+  };
+}
+
+function updateViewportRightDrag(ev) {
+  if (!viewportRightDrag || viewportRightDrag.dragged) return;
+  const dx = ev.clientX - viewportRightDrag.startClientX;
+  const dy = ev.clientY - viewportRightDrag.startClientY;
+  if (Math.hypot(dx, dy) >= VIEWPORT_CONTEXT_MENU_DRAG_PX) {
+    viewportRightDrag.dragged = true;
+    hideContextMenu();
+  }
+}
+
+function finishViewportRightDrag(ev) {
+  if (!viewportRightDrag) return;
+  const drag = viewportRightDrag;
+  viewportRightDrag = null;
+
+  const dx = ev.clientX - drag.startClientX;
+  const dy = ev.clientY - drag.startClientY;
+  const moved = drag.dragged || Math.hypot(dx, dy) >= VIEWPORT_CONTEXT_MENU_DRAG_PX;
+  if (moved) {
+    hideContextMenu();
+    return;
+  }
+  showViewportContextMenu(ev.clientX, ev.clientY);
+}
+
 function populateContextMenuCatalog() {
   if (!el.contextMenuSections || !el.contextMenuMaterials || !currentModel) return;
   el.contextMenuSections.innerHTML = "";
@@ -2221,8 +2663,40 @@ function populateContextMenuCatalog() {
   }
 }
 
-function showContextMenu(clientX, clientY) {
-  if (!el.elemContextMenu || !hasPickSelection()) return;
+function positionContextMenu(clientX, clientY) {
+  if (!el.elemContextMenu) return;
+  const margin = 8;
+  el.elemContextMenu.hidden = false;
+  const rect = el.elemContextMenu.getBoundingClientRect();
+  let left = clientX;
+  let top = clientY;
+  if (left + rect.width > window.innerWidth - margin) {
+    left = window.innerWidth - rect.width - margin;
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = window.innerHeight - rect.height - margin;
+  }
+  el.elemContextMenu.style.left = Math.max(margin, left) + "px";
+  el.elemContextMenu.style.top = Math.max(margin, top) + "px";
+}
+
+function updateViewportContextMenuState() {
+  if (el.contextMenuTogglePick) {
+    el.contextMenuTogglePick.textContent = selectionModeActive
+      ? "Exit pick mode (normal)"
+      : "Enter pick mode";
+  }
+  const hasMemberSel = selectedElementIds.size > 0
+    || selectedDmemIds.size > 0
+    || selectedWrwIds.size > 0;
+  if (el.contextMenuShowMembersOnly) el.contextMenuShowMembersOnly.disabled = !hasMemberSel;
+  if (el.contextMenuHideMembers) el.contextMenuHideMembers.disabled = !hasMemberSel;
+  if (el.contextMenuPickSection) {
+    el.contextMenuPickSection.hidden = !hasPickSelection();
+  }
+}
+
+function populatePickContextMenu() {
   if (selectedElementIds.size > 0) populateContextMenuCatalog();
   const elemCount = selectedElementIds.size;
   const nodeCount = selectedNodeIds.size;
@@ -2265,19 +2739,34 @@ function showContextMenu(clientX, clientY) {
     }
   }
   if (el.contextMenuDmemCreate) {
-    const diaps = currentModel ? (currentModel.diaphragms || []) : [];
-    const canCreate = nodeCount === 3 && elemCount === 0 && dmemCount === 0
-      && wrwCount === 0 && diaps.length > 0;
+    const canCreate = canCreateDmemFromNodePick();
     el.contextMenuDmemCreate.hidden = !canCreate;
     if (canCreate) {
       populateDmemCreateDiapSelect();
       if (el.contextMenuDmemCreateHint) {
         const ids = selectedNodeIdList();
-        el.contextMenuDmemCreateHint.textContent =
-          "Nodes " + ids.join(", ") + " → triangle";
+        el.contextMenuDmemCreateHint.textContent = ids.length === 3
+          ? "Nodes " + ids.join(", ") + " → triangle"
+          : ids.length + " nodes → auto triangulation";
       }
     } else if (el.contextMenuDmemCreateHint) {
       el.contextMenuDmemCreateHint.textContent = "";
+    }
+  }
+  if (el.contextMenuElemCreate) {
+    const canCreateElem = canCreateElemFromNodePick();
+    el.contextMenuElemCreate.hidden = !canCreateElem;
+    if (canCreateElem) {
+      populateElemCreateSectionSelect();
+      if (el.contextMenuElemCreateBeta && el.pickElemCreateBeta) {
+        el.contextMenuElemCreateBeta.value = el.pickElemCreateBeta.value;
+      }
+      if (el.contextMenuElemCreateHint) {
+        const ids = selectedNodeIdList();
+        el.contextMenuElemCreateHint.textContent = "Nodes " + ids[0] + " → " + ids[1];
+      }
+    } else if (el.contextMenuElemCreateHint) {
+      el.contextMenuElemCreateHint.textContent = "";
     }
   }
   if (el.contextMenuWrwCreate) {
@@ -2331,19 +2820,13 @@ function showContextMenu(clientX, clientY) {
     }
     el.contextMenuTitle.textContent = titleParts.join(", ") + " picked";
   }
-  el.elemContextMenu.hidden = false;
-  const margin = 8;
-  const rect = el.elemContextMenu.getBoundingClientRect();
-  let left = clientX;
-  let top = clientY;
-  if (left + rect.width > window.innerWidth - margin) {
-    left = window.innerWidth - rect.width - margin;
-  }
-  if (top + rect.height > window.innerHeight - margin) {
-    top = window.innerHeight - rect.height - margin;
-  }
-  el.elemContextMenu.style.left = Math.max(margin, left) + "px";
-  el.elemContextMenu.style.top = Math.max(margin, top) + "px";
+}
+
+function showViewportContextMenu(clientX, clientY) {
+  if (!el.elemContextMenu) return;
+  updateViewportContextMenuState();
+  if (hasPickSelection()) populatePickContextMenu();
+  positionContextMenu(clientX, clientY);
 }
 
 function resetEditHistory() {
@@ -2378,6 +2861,7 @@ function pruneSelectionToModel() {
   selectedWrwIds = new Set(
     Array.from(selectedWrwIds).filter(function (id) { return validWrw.has(id); })
   );
+  pruneMemberVisibilityFilter();
   updateSelectionHighlight();
   updateSelectionPanel();
 }
@@ -2466,7 +2950,7 @@ async function applyModelEdit(extra) {
       node_ids: selectedNodeIdList(),
     };
   } else if (extra.action === "create_dmem") {
-    if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
+    if (selectedNodeIds.size < 3 || selectedElementIds.size > 0
       || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) return;
     const diapId = parseInt(extra.diap_id, 10);
     if (!isFinite(diapId)) return;
@@ -2474,6 +2958,17 @@ async function applyModelEdit(extra) {
       action: "create_dmem",
       node_ids: selectedNodeIdList(),
       diap_id: diapId,
+    };
+  } else if (extra.action === "create_element") {
+    if (!canCreateElemFromNodePick()) return;
+    const sectionId = parseInt(extra.section_id, 10);
+    if (!isFinite(sectionId)) return;
+    const beta = parseFloat(extra.beta);
+    payload = {
+      action: "create_element",
+      node_ids: selectedNodeIdList(),
+      section_id: sectionId,
+      beta: isFinite(beta) ? beta : 0,
     };
   } else if (extra.action === "create_wwll") {
     if (selectedNodeIds.size !== 4 || selectedElementIds.size > 0
@@ -2562,25 +3057,41 @@ async function applyModelEdit(extra) {
       || payload.action === "delete_dmem" || payload.action === "delete_wwll";
     const createdDmem = payload.action === "create_dmem";
     const createdWrw = payload.action === "create_wwll";
+    const createdElem = payload.action === "create_element";
     const prevElems = new Set(selectedElementIds);
     const prevNodes = new Set(selectedNodeIds);
     const prevDmem = new Set(selectedDmemIds);
     const prevWrw = new Set(selectedWrwIds);
     await loadSelectedModel(false, {
-      keepSelection: !destructive && !createdDmem && !createdWrw,
+      keepSelection: !destructive && !createdDmem && !createdWrw && !createdElem,
       keepCamera: true,
     });
     if (createdDmem) {
-      const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
-      if (newId != null) {
-        replacePickSelection([], [], [newId], []);
+      const createdIds = parseCreatedDmemIdsFromWarnings(body.warnings);
+      if (createdIds.length > 1) {
+        replacePickSelection([], [], createdIds, []);
+      } else if (createdIds.length === 1) {
+        replacePickSelection([], [], createdIds, []);
       } else {
-        clearSelection();
+        const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
+        if (newId != null) {
+          replacePickSelection([], [], [newId], []);
+        } else {
+          clearSelection();
+        }
       }
     } else if (createdWrw) {
       const newId = findWrwIdByNodes(payload.node_ids);
       if (newId != null) {
         replacePickSelection([], [], [], [newId]);
+      } else {
+        clearSelection();
+      }
+    } else if (createdElem) {
+      const newId = parseCreatedElemIdFromWarnings(body.warnings)
+        ?? findElementIdByNodes(payload.node_ids[0], payload.node_ids[1]);
+      if (newId != null) {
+        replacePickSelection([], [newId], [], []);
       } else {
         clearSelection();
       }
@@ -2606,22 +3117,50 @@ async function applyModelEdit(extra) {
 function initContextMenu() {
   if (!el.elemContextMenu || !renderer) return;
 
-  renderer.domElement.addEventListener("mousedown", function (ev) {
-    if (!selectionModeActive || ev.button !== 2 || !hasPickSelection()) return;
-    ev.stopPropagation();
+  const canvas = renderer.domElement;
+
+  canvas.addEventListener("mousedown", function (ev) {
+    if (ev.button !== 2) return;
+    hideContextMenu();
+    beginViewportRightDrag(ev);
+    if (selectionModeActive && hasPickSelection()) ev.stopPropagation();
   }, true);
 
-  renderer.domElement.addEventListener("contextmenu", function (ev) {
-    if (!selectionModeActive || !hasPickSelection()) return;
+  window.addEventListener("mousemove", function (ev) {
+    updateViewportRightDrag(ev);
+  });
+
+  window.addEventListener("mouseup", function (ev) {
+    if (ev.button !== 2) return;
+    finishViewportRightDrag(ev);
+  });
+
+  canvas.addEventListener("contextmenu", function (ev) {
     ev.preventDefault();
     ev.stopPropagation();
-    showContextMenu(ev.clientX, ev.clientY);
   });
 
   el.elemContextMenu.addEventListener("click", function (ev) {
     const btn = ev.target.closest("[data-action]");
     if (!btn) return;
     const action = btn.getAttribute("data-action");
+    if (action === "toggle-pick") {
+      hideContextMenu();
+      setSelectionMode(!selectionModeActive);
+      return;
+    }
+    if (action === "members-only") {
+      applyMemberVisibilityFilter("only");
+      return;
+    }
+    if (action === "members-hide") {
+      applyMemberVisibilityFilter("hide");
+      return;
+    }
+    if (action === "members-show-all") {
+      applyMemberVisibilityFilter("all");
+      return;
+    }
     if (action === "delete") {
       const count = selectedElementIds.size;
       const ok = window.confirm("Delete " + count + " element" + (count === 1 ? "" : "s") + "?");
@@ -2679,9 +3218,8 @@ function initContextMenu() {
       return;
     }
     if (action === "create-dmem") {
-      if (selectedNodeIds.size !== 3 || selectedElementIds.size > 0
-        || selectedDmemIds.size > 0 || selectedWrwIds.size > 0) {
-        window.alert("Pick exactly 3 nodes (no elements / DMEM / WRW) to create a DMEM triangle.");
+      if (!canCreateDmemFromNodePick()) {
+        window.alert("Pick at least 3 nodes (no elements / DMEM / WRW) to create DMEM.");
         return;
       }
       const diapRaw = el.contextMenuDmemCreateDiap ? el.contextMenuDmemCreateDiap.value : "";
@@ -2690,12 +3228,20 @@ function initContextMenu() {
         window.alert("Select a DIAP for the new DMEM.");
         return;
       }
-      const ids = selectedNodeIdList();
-      const ok = window.confirm(
-        "Create DMEM on DIAP " + diapId + " with nodes " + ids.join(", ") + "?"
-      );
-      if (!ok) return;
-      applyModelEdit({ action: "create_dmem", diap_id: diapId });
+      requestCreateDmemMesh(diapId);
+      return;
+    }
+    if (action === "create-elem") {
+      if (!canCreateElemFromNodePick()) {
+        window.alert("Pick exactly 2 nodes (no elements / DMEM / WRW) to create a member.");
+        return;
+      }
+      const sectId = getPickElemCreateSectionId();
+      if (sectId == null) {
+        window.alert("Select a section for the new ELEM.");
+        return;
+      }
+      requestCreateElement(sectId, getPickElemCreateBeta());
       return;
     }
     if (action === "create-wrw") {
@@ -2775,6 +3321,55 @@ function initContextMenu() {
       setPickWrwCreateModelValue(el.contextMenuWrwCreateModel.value);
     });
   }
+  if (el.btnPickDmemCreate) {
+    el.btnPickDmemCreate.addEventListener("click", function () {
+      const raw = el.pickDmemCreateDiap ? el.pickDmemCreateDiap.value : "";
+      const diapId = parseInt(raw, 10);
+      if (!isFinite(diapId)) {
+        window.alert("Select a DIAP for the new DMEM.");
+        return;
+      }
+      requestCreateDmemMesh(diapId);
+    });
+  }
+  if (el.btnPickElemCreate) {
+    el.btnPickElemCreate.addEventListener("click", function () {
+      const sectId = getPickElemCreateSectionId();
+      if (sectId == null) {
+        window.alert("Select a section for the new ELEM.");
+        return;
+      }
+      requestCreateElement(sectId, getPickElemCreateBeta());
+    });
+  }
+  if (el.pickElemCreateSection) {
+    el.pickElemCreateSection.addEventListener("change", function () {
+      if (el.contextMenuElemCreateSection) {
+        el.contextMenuElemCreateSection.value = el.pickElemCreateSection.value;
+      }
+    });
+  }
+  if (el.contextMenuElemCreateSection) {
+    el.contextMenuElemCreateSection.addEventListener("change", function () {
+      if (el.pickElemCreateSection) {
+        el.pickElemCreateSection.value = el.contextMenuElemCreateSection.value;
+      }
+    });
+  }
+  if (el.pickElemCreateBeta) {
+    el.pickElemCreateBeta.addEventListener("change", function () {
+      if (el.contextMenuElemCreateBeta) {
+        el.contextMenuElemCreateBeta.value = el.pickElemCreateBeta.value;
+      }
+    });
+  }
+  if (el.contextMenuElemCreateBeta) {
+    el.contextMenuElemCreateBeta.addEventListener("change", function () {
+      if (el.pickElemCreateBeta) {
+        el.pickElemCreateBeta.value = el.contextMenuElemCreateBeta.value;
+      }
+    });
+  }
   if (el.btnPickWrwApplyModel) {
     el.btnPickWrwApplyModel.addEventListener("click", function () {
       const raw = el.pickWrwEditModel ? el.pickWrwEditModel.value : "1";
@@ -2813,6 +3408,7 @@ function initContextMenu() {
   document.addEventListener("mousedown", function (ev) {
     if (!el.elemContextMenu || el.elemContextMenu.hidden) return;
     if (el.elemContextMenu.contains(ev.target)) return;
+    if (ev.button !== 0) return;
     hideContextMenu();
   });
 
@@ -2885,6 +3481,7 @@ function updateViewerInfoOverlay(model) {
       );
     }
   }
+  if (el.chkPracticeCenters && el.chkPracticeCenters.checked) displayLines.push("CoG / CoR");
   if (el.chkReactions && el.chkReactions.checked) displayLines.push("reactions");
   if (el.chkReactionValues && el.chkReactionValues.checked) displayLines.push("reaction values");
   if (!el.chkSupports || el.chkSupports.checked) displayLines.push("supports");
@@ -2900,6 +3497,10 @@ function updateViewerInfoOverlay(model) {
   if (el.chkWoodWall && el.chkWoodWall.checked) {
     const nwrw = model.wood_rated_walls ? model.wood_rated_walls.length : 0;
     displayLines.push("wood walls (" + nwrw + ")");
+  }
+  if (el.chkColocated && el.chkColocated.checked) {
+    const nCol = (colocatedSitesCache || buildColocatedSites(model)).length;
+    displayLines.push("colocated entities (" + nCol + ")");
   }
   if (forceComp !== "None") {
     displayLines.push(
@@ -2968,7 +3569,128 @@ function updateViewerInfoOverlay(model) {
 }
 
 function applyZUpView() {
+  if (!camera) return;
   camera.up.set(0, 0, 1);
+}
+
+function modelCenterAndSpan(model) {
+  const b = model && model.bounds;
+  if (!b) {
+    const target = controls ? controls.target : new THREE.Vector3();
+    return { center: target.clone(), span: 10 };
+  }
+  return {
+    center: new THREE.Vector3(
+      0.5 * (b[0] + b[1]),
+      0.5 * (b[2] + b[3]),
+      0.5 * (b[4] + b[5]),
+    ),
+    span: Math.max(b[1] - b[0], b[3] - b[2], b[5] - b[4], 1.0),
+  };
+}
+
+function applyOrthoProjection() {
+  if (!(camera instanceof THREE.OrthographicCamera)) return;
+  const w = el.viewport ? el.viewport.clientWidth : 1;
+  const h = el.viewport ? el.viewport.clientHeight : 1;
+  const aspect = (w || 1) / (h || 1);
+  camera.left = -orthoViewHeight * aspect / 2;
+  camera.right = orthoViewHeight * aspect / 2;
+  camera.top = orthoViewHeight / 2;
+  camera.bottom = -orthoViewHeight / 2;
+  camera.updateProjectionMatrix();
+}
+
+function updateViewProjectionUi() {
+  if (!el.btnViewProjection) return;
+  const parallel = cameraProjectionMode === "parallel";
+  el.btnViewProjection.textContent = parallel ? "View: Parallel" : "View: Perspective";
+  el.btnViewProjection.classList.toggle("active", parallel);
+  el.btnViewProjection.title = parallel
+    ? "Switch to perspective view"
+    : "Switch to parallel (axonometric) view";
+}
+
+function updateViewPresetUi(name) {
+  if (!el.viewPreset) return;
+  el.viewPreset.value = name && STANDARD_VIEWS[name] ? name : "";
+}
+
+function setCameraProjectionMode(mode, options) {
+  const opts = options || {};
+  if (!camera || !controls || mode === cameraProjectionMode) return;
+
+  const position = camera.position.clone();
+  const target = controls.target.clone();
+  const up = camera.up.clone();
+  const near = camera.near;
+  const far = camera.far;
+  let nextOrthoHeight = orthoViewHeight;
+
+  if (opts.preserveView !== false) {
+    const dist = position.distanceTo(target);
+    if (mode === "parallel") {
+      if (camera instanceof THREE.PerspectiveCamera) {
+        const fovRad = camera.fov * Math.PI / 180;
+        nextOrthoHeight = 2 * Math.tan(fovRad / 2) * dist;
+      }
+    } else if (camera instanceof THREE.OrthographicCamera) {
+      nextOrthoHeight = orthoViewHeight / Math.max(camera.zoom, 1e-6);
+    }
+  } else if (opts.orthoViewHeight != null) {
+    nextOrthoHeight = opts.orthoViewHeight;
+  }
+
+  const w = el.viewport ? el.viewport.clientWidth : 1;
+  const h = el.viewport ? el.viewport.clientHeight : 1;
+  const aspect = (w || 1) / (h || 1);
+
+  if (mode === "parallel") {
+    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, near, far);
+    orthoViewHeight = nextOrthoHeight;
+    camera.zoom = 1;
+    applyOrthoProjection();
+  } else {
+    camera = new THREE.PerspectiveCamera(CAMERA_FOV, aspect, near, far);
+    camera.updateProjectionMatrix();
+  }
+
+  camera.position.copy(position);
+  camera.up.copy(up);
+  controls.object = camera;
+  cameraProjectionMode = mode;
+  controls.update();
+  updateViewProjectionUi();
+}
+
+function toggleCameraProjectionMode() {
+  setCameraProjectionMode(cameraProjectionMode === "parallel" ? "perspective" : "parallel");
+}
+
+function setStandardView(name) {
+  const view = STANDARD_VIEWS[name];
+  if (!view || !camera || !controls) return;
+
+  const { center, span } = modelCenterAndSpan(currentModel);
+  controls.target.copy(center);
+  camera.position.copy(center).add(view.offset(span));
+  camera.up.copy(view.up());
+  camera.near = span * 0.001;
+  camera.far = span * 100;
+
+  if (camera instanceof THREE.OrthographicCamera) {
+    orthoViewHeight = span * 1.35;
+    camera.zoom = 1;
+    applyOrthoProjection();
+  } else {
+    const w = el.viewport ? el.viewport.clientWidth : 1;
+    const h = el.viewport ? el.viewport.clientHeight : 1;
+    camera.aspect = (w || 1) / (h || 1);
+    camera.updateProjectionMatrix();
+  }
+
+  controls.update();
+  updateViewPresetUi(name);
 }
 
 function initThree() {
@@ -2977,9 +3699,10 @@ function initThree() {
 
   const w = el.viewport.clientWidth;
   const h = el.viewport.clientHeight;
-  camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 1e6);
+  camera = new THREE.PerspectiveCamera(CAMERA_FOV, w / h, 0.01, 1e6);
   applyZUpView();
   camera.position.set(8, -8, 6);
+  cameraProjectionMode = "perspective";
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
@@ -2990,6 +3713,7 @@ function initThree() {
   controls.enableDamping = true;
   controls.dampingFactor = 0.2;
   controls.target.set(0, 0, 0);
+  updateViewProjectionUi();
 
   const amb = new THREE.AmbientLight(0xffffff, 0.65);
   scene.add(amb);
@@ -3013,6 +3737,10 @@ function initThree() {
   scene.add(windGroup);
   windLabelGroup = new THREE.Group();
   scene.add(windLabelGroup);
+  practiceCenterGroup = new THREE.Group();
+  scene.add(practiceCenterGroup);
+  colocatedGroup = new THREE.Group();
+  scene.add(colocatedGroup);
   axesGroup = new THREE.Group();
   scene.add(axesGroup);
 
@@ -3024,8 +3752,12 @@ function initThree() {
 function onResize() {
   const w = el.viewport.clientWidth;
   const h = el.viewport.clientHeight;
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  if (camera instanceof THREE.PerspectiveCamera) {
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    applyOrthoProjection();
+  }
   renderer.setSize(w, h);
   updateWideLineResolution(w, h);
 }
@@ -3699,6 +4431,7 @@ function forEachSectionSolidMesh(model, visitor, options) {
   let count = 0;
 
   for (const e of model.elements) {
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     if (!n0 || !n1) continue;
@@ -3989,27 +4722,62 @@ function fitCamera(model) {
   camera.position.set(cx + span * 1.15, cy - span * 1.15, cz + span * 0.55);
   camera.near = span * 0.001;
   camera.far = span * 100;
-  camera.updateProjectionMatrix();
+  if (camera instanceof THREE.OrthographicCamera) {
+    orthoViewHeight = span * 1.35;
+    camera.zoom = 1;
+    applyOrthoProjection();
+  } else {
+    const w = el.viewport ? el.viewport.clientWidth : 1;
+    const h = el.viewport ? el.viewport.clientHeight : 1;
+    camera.aspect = (w || 1) / (h || 1);
+    camera.updateProjectionMatrix();
+  }
   controls.update();
+  updateViewPresetUi("");
 }
 
 function captureCameraState() {
   if (!camera || !controls) return null;
-  return {
+  const state = {
     position: camera.position.clone(),
     target: controls.target.clone(),
+    up: camera.up.clone(),
     near: camera.near,
     far: camera.far,
+    projectionMode: cameraProjectionMode,
   };
+  if (camera instanceof THREE.PerspectiveCamera) {
+    state.fov = camera.fov;
+    state.aspect = camera.aspect;
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    state.orthoViewHeight = orthoViewHeight;
+    state.zoom = camera.zoom;
+  }
+  return state;
 }
 
 function restoreCameraState(state) {
   if (!state || !camera || !controls) return;
+  if (state.projectionMode && state.projectionMode !== cameraProjectionMode) {
+    setCameraProjectionMode(state.projectionMode, {
+      preserveView: false,
+      orthoViewHeight: state.orthoViewHeight,
+    });
+  }
   camera.position.copy(state.position);
   controls.target.copy(state.target);
+  if (state.up) camera.up.copy(state.up);
   camera.near = state.near;
   camera.far = state.far;
-  camera.updateProjectionMatrix();
+  if (camera instanceof THREE.PerspectiveCamera) {
+    if (state.fov != null) camera.fov = state.fov;
+    if (state.aspect != null) camera.aspect = state.aspect;
+    camera.updateProjectionMatrix();
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    if (state.orthoViewHeight != null) orthoViewHeight = state.orthoViewHeight;
+    if (state.zoom != null) camera.zoom = state.zoom;
+    applyOrthoProjection();
+  }
   controls.update();
 }
 
@@ -4114,6 +4882,7 @@ function buildModelScene(model) {
     }, { lc: lc, defFac: 0, deformed: false });
 
     for (const e of model.elements) {
+      if (!isMemberElementVisible(e.id)) continue;
       const n0 = nm[e.n0];
       const n1 = nm[e.n1];
       if (!n0 || !n1) continue;
@@ -4150,6 +4919,7 @@ function buildModelScene(model) {
     }
   } else {
     for (const e of model.elements) {
+      if (!isMemberElementVisible(e.id)) continue;
       const n0 = nm[e.n0];
       const n1 = nm[e.n1];
       if (!n0 || !n1) continue;
@@ -4217,6 +4987,7 @@ function buildModelScene(model) {
 
   const nodePts = [];
   for (const n of model.nodes) {
+    if (!isNodeVisible(n.id)) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
     nodePts.push(p.x, p.y, p.z);
   }
@@ -4237,7 +5008,7 @@ function buildModelScene(model) {
   if (showSupports) {
     for (const s of model.supports) {
       const n = nm[s.node];
-      if (!n) continue;
+      if (!n || !isNodeVisible(n.id)) continue;
       const p = nodePosition(n, model, lc, defFac, deformed);
       const sp = addSupportDisc(
         supportGizmoCenter(p, model, supSize, camera, renderer),
@@ -4287,7 +5058,7 @@ function buildModelScene(model) {
       for (const l of model.point_loads) {
         if (String(l.lc) !== String(lc)) continue;
         const n = nm[l.node];
-        if (!n) continue;
+        if (!n || !isNodeVisible(n.id)) continue;
         const p = nodePosition(n, model, lc, defFac, deformed);
         const fx = l.px, fy = l.py, fz = l.pz;
         const mag = Math.sqrt(fx * fx + fy * fy + fz * fz);
@@ -4355,6 +5126,7 @@ function buildModelScene(model) {
 
   if (showLabels) {
     for (const n of model.nodes) {
+      if (!isNodeVisible(n.id)) continue;
       const p = nodePosition(n, model, lc, defFac, deformed);
       const sprite = makeTextSprite(String(n.id), span, {
         scaleFactor: nodeLabelScale,
@@ -4382,6 +5154,7 @@ function buildModelScene(model) {
   }
 
   for (const e of model.elements) {
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     if (!n0 || !n1) continue;
@@ -4446,9 +5219,29 @@ function buildModelScene(model) {
   }
   updateWindLegendOverlay();
 
+  clearGroup(practiceCenterGroup);
+  if (el.chkPracticeCenters && el.chkPracticeCenters.checked && practiceSummaryData) {
+    drawPracticeCentersOverlay(model, practiceSummaryData, span);
+  }
+
+  clearGroup(colocatedGroup);
+  if (el.chkColocated && el.chkColocated.checked) {
+    drawColocatedOverlay(model, {
+      lc,
+      defFac,
+      deformed,
+      span,
+      nm,
+      group: colocatedGroup,
+    });
+  } else {
+    colocatedSitesCache = null;
+  }
+
   updateWorldAxes(model);
   refreshDisplayStatus(model);
   updateViewerInfoOverlay(model);
+  updateColocatedLegendOverlay();
   updateSelectionHighlight();
   updateDistanceVisual();
 }
@@ -4456,6 +5249,18 @@ function buildModelScene(model) {
 function formatForceValue(val) {
   if (Math.abs(val) < PRES_ZERO) return "0";
   return (val * 1e-3).toFixed(1);
+}
+
+function isForceValueDisplayZero(val) {
+  if (!isFinite(val) || Math.abs(val) < PRES_ZERO) return true;
+  // Match formatForceValue (kN, 1 decimal): |display| < 0.05 → "0.0"
+  return Math.abs(val * 1e-3) < 0.05;
+}
+
+function forceLabelsAllDisplayZero(labels) {
+  return labels.length > 0 && labels.every(function (item) {
+    return isForceValueDisplayZero(item.val);
+  });
 }
 
 function modelSpan(model) {
@@ -4924,6 +5729,7 @@ function drawEJntMarkers(model, opts) {
 
   for (const e of model.elements || []) {
     if (!e) continue;
+    if (!isMemberElementVisible(e.id)) continue;
     const j = ejntMap[e.id];
     const showI = ejntEndHasRelease(j, "i");
     const showJ = ejntEndHasRelease(j, "j");
@@ -4968,6 +5774,7 @@ function drawWoodRatedWalls(model, opts) {
   const edgePts = [];
 
   for (const wall of items) {
+    if (!isWrwVisible(wall.id)) continue;
     const ids = wall.nodes;
     if (!ids || ids.length !== 4) continue;
     const n0 = nm[ids[0]];
@@ -5032,6 +5839,7 @@ function drawMembraneElements(model, opts) {
   const edgePts = [];
 
   for (const mem of items) {
+    if (!isDmemVisible(mem.id)) continue;
     const ids = mem.nodes;
     if (!ids || ids.length !== 3) continue;
     const n0 = nm[ids[0]];
@@ -5873,6 +6681,189 @@ function updateWindLegendOverlay() {
   }
 }
 
+function nodeExactKey(x, y, z) {
+  return String(x) + "\0" + String(y) + "\0" + String(z);
+}
+
+function uniqueSortedIds(ids) {
+  return Array.from(new Set(ids)).sort(function (a, b) { return a - b; });
+}
+
+function pushDuplicateGroups(buckets, buildEntry) {
+  const entries = [];
+  for (const group of Object.values(buckets)) {
+    const ids = uniqueSortedIds(group.ids);
+    if (ids.length < 2) continue;
+    entries.push(buildEntry(ids, group));
+  }
+  return entries;
+}
+
+function buildColocatedSites(model) {
+  if (!model) return [];
+  const nm = nodeMap(model);
+  const entries = [];
+
+  const nodeBuckets = Object.create(null);
+  for (const n of model.nodes || []) {
+    const k = nodeExactKey(n.x, n.y, n.z);
+    if (!nodeBuckets[k]) nodeBuckets[k] = { ids: [], x: n.x, y: n.y, z: n.z };
+    nodeBuckets[k].ids.push(n.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(nodeBuckets, function (ids, group) {
+    return { kind: "node", ids: ids, x: group.x, y: group.y, z: group.z };
+  }));
+
+  const elemBuckets = Object.create(null);
+  for (const e of model.elements || []) {
+    const k = String(e.n0) + ":" + String(e.n1);
+    if (!elemBuckets[k]) elemBuckets[k] = { ids: [], n0: e.n0, n1: e.n1 };
+    elemBuckets[k].ids.push(e.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(elemBuckets, function (ids, group) {
+    return { kind: "element", ids: ids, n0: group.n0, n1: group.n1 };
+  }));
+
+  const wallBuckets = Object.create(null);
+  for (const w of model.wood_rated_walls || []) {
+    const nodes = uniqueSortedIds(w.nodes || []);
+    if (!nodes.length) continue;
+    const k = nodes.join(",");
+    if (!wallBuckets[k]) wallBuckets[k] = { ids: [], nodes: nodes };
+    wallBuckets[k].ids.push(w.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(wallBuckets, function (ids, group) {
+    return { kind: "wall", ids: ids, nodes: group.nodes };
+  }));
+
+  const dmemBuckets = Object.create(null);
+  for (const m of model.membrane_elements || []) {
+    const nodes = uniqueSortedIds(m.nodes || []);
+    if (!nodes.length) continue;
+    const k = nodes.join(",");
+    if (!dmemBuckets[k]) dmemBuckets[k] = { ids: [], nodes: nodes };
+    dmemBuckets[k].ids.push(m.id);
+  }
+  entries.push.apply(entries, pushDuplicateGroups(dmemBuckets, function (ids, group) {
+    return { kind: "dmem", ids: ids, nodes: group.nodes };
+  }));
+
+  const kindOrder = { node: 0, element: 1, wall: 2, dmem: 3 };
+  entries.sort(function (a, b) {
+    const ka = kindOrder[a.kind] - kindOrder[b.kind];
+    if (ka !== 0) return ka;
+    return (a.ids[0] || 0) - (b.ids[0] || 0);
+  });
+  return entries;
+}
+
+function colocatedNodeIds(entry) {
+  if (entry.kind === "node") return entry.ids.slice();
+  if (entry.kind === "element") return [entry.n0, entry.n1];
+  return entry.nodes.slice();
+}
+
+function colocatedEntryPosition(entry, model, nm, lc, defFac, deformed) {
+  const ids = colocatedNodeIds(entry);
+  const pts = [];
+  for (const nid of ids) {
+    const n = nm[nid];
+    if (!n) continue;
+    pts.push(nodePosition(n, model, lc, defFac, deformed));
+  }
+  if (!pts.length) return null;
+  const out = new THREE.Vector3();
+  for (const p of pts) out.add(p);
+  out.multiplyScalar(1 / pts.length);
+  return out;
+}
+
+function colocatedEntrySummary(entry) {
+  if (entry.kind === "node") {
+    return "Nodes N[" + entry.ids.join(",") + "]";
+  }
+  if (entry.kind === "element") {
+    return "Elements E[" + entry.ids.join(",") + "] (" + entry.n0 + "-" + entry.n1 + ")";
+  }
+  if (entry.kind === "wall") {
+    return "Walls W[" + entry.ids.join(",") + "] nodes[" + entry.nodes.join(",") + "]";
+  }
+  return "DMEM D[" + entry.ids.join(",") + "] nodes[" + entry.nodes.join(",") + "]";
+}
+
+function colocatedEntryLabel(entry, model) {
+  const nm = nodeMap(model);
+  let coordText = "";
+  if (entry.kind === "node") {
+    coordText = "(" + formatCoordMm(entry.x) + ", " + formatCoordMm(entry.y) + ", " + formatCoordMm(entry.z) + ") ";
+  } else {
+    const ids = colocatedNodeIds(entry);
+    const anchor = nm[ids[0]];
+    if (anchor) {
+      coordText = "(" + formatCoordMm(anchor.x) + ", " + formatCoordMm(anchor.y) + ", " + formatCoordMm(anchor.z) + ") ";
+    }
+  }
+  return coordText + colocatedEntrySummary(entry);
+}
+
+function formatCoordMm(v) {
+  return (Number(v) * 1000).toFixed(1);
+}
+
+function drawColocatedOverlay(model, opts) {
+  const { lc, defFac, deformed, span, nm, group } = opts;
+  const entries = buildColocatedSites(model);
+  colocatedSitesCache = entries;
+  if (!entries.length) return;
+
+  const r = Math.max(supportGizmoSize(model) * 0.45, span * 0.006, 0.015);
+  const geo = new THREE.SphereGeometry(r, 14, 10);
+  const mat = new THREE.MeshBasicMaterial({
+    color: COLORS.colocated,
+    depthTest: true,
+    transparent: true,
+    opacity: 0.85,
+  });
+
+  for (const entry of entries) {
+    const p = colocatedEntryPosition(entry, model, nm, lc, defFac, deformed);
+    if (!p) continue;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(p);
+    mesh.renderOrder = 20;
+    group.add(mesh);
+  }
+}
+
+function updateColocatedLegendOverlay() {
+  if (!el.colocatedLegendOverlay) return;
+  const show = !!(el.chkColocated && el.chkColocated.checked);
+  if (!show) {
+    el.colocatedLegendOverlay.hidden = true;
+    el.colocatedLegendOverlay.classList.remove("visible");
+    return;
+  }
+  const entries = colocatedSitesCache || (currentModel ? buildColocatedSites(currentModel) : []);
+  el.colocatedLegendOverlay.hidden = false;
+  el.colocatedLegendOverlay.classList.add("visible");
+  if (el.colocatedLegendCount) {
+    el.colocatedLegendCount.textContent = entries.length
+      ? entries.length + " duplicate group(s) — exact node connectivity match"
+      : "No colocated entities found";
+  }
+  if (el.colocatedLegendList) {
+    el.colocatedLegendList.innerHTML = "";
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "colocated-legend-row";
+      row.textContent = currentModel
+        ? colocatedEntryLabel(entry, currentModel)
+        : colocatedEntrySummary(entry);
+      el.colocatedLegendList.appendChild(row);
+    }
+  }
+}
+
 async function loadWindVisualForCurrentModel() {
   const path = getCurrentModelPath();
   windVisualData = null;
@@ -5899,6 +6890,126 @@ async function loadWindVisualForCurrentModel() {
   updateWindControlsAvailability();
 }
 
+async function loadPracticeSummaryForCurrentModel() {
+  const path = getCurrentModelPath();
+  practiceSummaryData = null;
+  if (!path || !currentModel || !analysisComplete(currentModel)) return;
+  try {
+    const view = await fetchApiJson("/api/practice/summary?path=" + encodeURIComponent(path));
+    if (view && view.eccentricity_rows && view.eccentricity_rows.length) {
+      practiceSummaryData = view;
+    }
+  } catch (ex) {
+    console.warn("Practice summary load failed:", ex.message);
+  }
+}
+
+function practiceStoryZMap(practice) {
+  const rows = practice && practice.story_rows ? practice.story_rows.slice() : [];
+  rows.sort(function (a, b) {
+    const za = Number(a.elevation);
+    const zb = Number(b.elevation);
+    if (isFinite(za) && isFinite(zb) && za !== zb) return za - zb;
+    const ra = Number(String(a.story).replace(/[^\d.-]/g, ""));
+    const rb = Number(String(b.story).replace(/[^\d.-]/g, ""));
+    if (isFinite(ra) && isFinite(rb) && ra !== rb) return ra - rb;
+    return String(a.story).localeCompare(String(b.story), "ja", { numeric: true });
+  });
+  const map = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    const s = rows[i];
+    const story = String(s.story);
+    const elev = Number(s.elevation);
+    if (!isFinite(elev)) continue;
+    const nextElev = i + 1 < rows.length ? Number(rows[i + 1].elevation) : NaN;
+    let z;
+    if (isFinite(nextElev)) {
+      z = 0.5 * (elev + nextElev);
+    } else {
+      const top = Number(s.top_elevation != null ? s.top_elevation : s.elevation);
+      const height = Number(s.height);
+      const topElev = isFinite(top) && top !== elev ? top : (isFinite(height) ? elev + height : elev);
+      z = 0.5 * (elev + topElev);
+    }
+    if (isFinite(z)) map.set(story, z);
+  }
+  return map;
+}
+
+function addPracticeCenterMarker(point, color, text, span, group, offsetSign) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute([point.x, point.y, point.z], 3));
+  const mat = nodePointsMaterial({
+    color: color,
+    size: 16,
+    sizeAttenuation: false,
+    depthTest: false,
+  });
+  const marker = new THREE.Points(geo, mat);
+  marker.renderOrder = 24;
+  group.add(marker);
+
+  const label = makeTextSprite(text, span, {
+    scaleFactor: nodeLabelScaleFactor() * 0.9,
+    bg: "rgba(0, 0, 0, 1.0)",
+    fg: colorHex(color),
+  });
+  const d = Math.max(span * 0.012, 0.05);
+  label.position.copy(point).add(new THREE.Vector3(offsetSign * d, d, d));
+  label.renderOrder = 25;
+  group.add(label);
+}
+
+function isPracticeCenterCoord(value) {
+  return value != null && value !== "" && isFinite(Number(value));
+}
+
+function isPracticeCenterPoint(x, y, model) {
+  if (!isPracticeCenterCoord(x) || !isPracticeCenterCoord(y)) return false;
+  if (!model || !Array.isArray(model.bounds) || model.bounds.length < 6) return true;
+  const xmin = Number(model.bounds[0]);
+  const ymin = Number(model.bounds[1]);
+  const xmax = Number(model.bounds[3]);
+  const ymax = Number(model.bounds[4]);
+  if (![xmin, ymin, xmax, ymax].every(isFinite)) return true;
+  const span = Math.max(xmax - xmin, ymax - ymin, 1);
+  const margin = span * 2;
+  const px = Number(x);
+  const py = Number(y);
+  return px >= xmin - margin && px <= xmax + margin && py >= ymin - margin && py <= ymax + margin;
+}
+
+function drawPracticeCentersOverlay(model, practice, span) {
+  if (!practice || !practice.eccentricity_rows || !practice.eccentricity_rows.length) return;
+  const zByStory = practiceStoryZMap(practice);
+  const zFallback = model.bounds ? model.bounds[5] : 0;
+  const lift = Math.max(span * 0.008, 0.03);
+  for (const row of practice.eccentricity_rows) {
+    const story = String(row.story == null ? "" : row.story);
+    const z = (zByStory.has(story) ? zByStory.get(story) : zFallback) + lift;
+    if (isPracticeCenterPoint(row.xg, row.yg, model)) {
+      addPracticeCenterMarker(
+        new THREE.Vector3(Number(row.xg), Number(row.yg), z),
+        COLORS.centerOfMass,
+        "CoG " + story,
+        span,
+        practiceCenterGroup,
+        -1
+      );
+    }
+    if (isPracticeCenterPoint(row.xs, row.ys, model)) {
+      addPracticeCenterMarker(
+        new THREE.Vector3(Number(row.xs), Number(row.ys), z),
+        COLORS.centerOfRigidity,
+        "CoR " + story,
+        span,
+        practiceCenterGroup,
+        1
+      );
+    }
+  }
+}
+
 function syncLcToWindCase(windCase) {
   if (!windCase || !el.lcSelect) return;
   const lcVal = String(windCase.load_case);
@@ -5920,6 +7031,7 @@ function drawElementInputLoads(model, opts) {
     if (!shouldDrawElementLoad(ld)) continue;
     const e = em[ld.elem];
     if (!e) continue;
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     if (!n0 || !n1) continue;
@@ -6684,7 +7796,7 @@ function drawSupportReactions(model, opts) {
     const r = supportReactsForLc(model, s, lcKey);
     if (!r) continue;
     const n = nm[s.node];
-    if (!n) continue;
+    if (!n || !isNodeVisible(n.id)) continue;
     const p = nodePosition(n, model, lc, defFac, deformed);
     const tx = r[0], ty = r[1], tz = r[2];
     const rx = r[3], ry = r[4], rz = r[5];
@@ -7232,6 +8344,7 @@ function buildForceDiagrams(model) {
   const showValues = el.chkForceValues.checked;
 
   for (const e of model.elements) {
+    if (!isMemberElementVisible(e.id)) continue;
     const n0 = nm[e.n0];
     const n1 = nm[e.n1];
     const f = e.forces && e.forces[lcKey];
@@ -7372,7 +8485,7 @@ function buildForceDiagrams(model) {
     }
 
     addForceStemAndSpline(stemPts, splinePts, forceGroup);
-    if (showValues) {
+    if (showValues && !forceLabelsAllDisplayZero(labels)) {
       const span = modelSpan(model);
       for (const item of labels) {
         addForceValueLabelWithLeader(
@@ -7538,6 +8651,7 @@ const CHILD_WINDOW_NAMES = {
   input: "stb_gui_input",
   project: "stb_gui_project",
   loadsVerify: "stb_loads_verify",
+  practiceVerify: "stb_practice_verify",
   results: "stb_gui_results",
 };
 
@@ -8725,6 +9839,34 @@ function openLoadsVerifyWindow() {
   setStatus(path + " — load verification opened");
 }
 
+function openPracticeVerifyWindow() {
+  const path = getCurrentModelPath();
+  if (!path) {
+    setStatus("Open a model before using Practice…");
+    return;
+  }
+  let url;
+  try {
+    url = guiApiUrl(
+      "/static/practice_verify.html?path=" + encodeURIComponent(path),
+      window
+    );
+  } catch (ex) {
+    setStatus("Error: " + ex.message);
+    return;
+  }
+  const w = openNamedChildUrl(
+    "practiceVerify",
+    url,
+    "width=1120,height=860,scrollbars=yes,resizable=yes"
+  );
+  if (!w) {
+    setStatus("Popup blocked — allow popups for this site");
+    return;
+  }
+  setStatus(path + " — structural indices opened");
+}
+
 window.openProjectWindow = openProjectWindow;
 window.reloadCurrentModel = () => loadSelectedModel(false, { keepCamera: true });
 window.refreshWindVisual = () => loadWindVisualForCurrentModel().then(function () {
@@ -9154,6 +10296,7 @@ async function loadSelectedModel(solve, options) {
   if (!path) return;
   const cameraState = options.keepCamera ? captureCameraState() : null;
   if (!options.keepSelection) clearSelection();
+  resetMemberVisibilityFilter();
   if (solve) {
     setStatus("Solving " + path + "…");
   } else {
@@ -9178,6 +10321,10 @@ async function loadSelectedModel(solve, options) {
       if (el.chkDispContour) el.chkDispContour.checked = false;
     }
     await loadWindVisualForCurrentModel();
+    practiceSummaryData = null;
+    if (el.chkPracticeCenters && el.chkPracticeCenters.checked && analysisComplete(currentModel)) {
+      await loadPracticeSummaryForCurrentModel();
+    }
     buildModelScene(currentModel);
     if (!solve || !complete) {
       if (cameraState) {
@@ -9300,13 +10447,31 @@ document.addEventListener("keydown", (ev) => {
     if (ev.key === "n" || ev.key === "N") {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
       ev.preventDefault();
-      setPickSubMode("node");
+      togglePickSubMode("node");
+      return;
+    }
+    if (ev.key === "m" || ev.key === "M") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      togglePickSubMode("member");
       return;
     }
     if (ev.key === "e" || ev.key === "E") {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
       ev.preventDefault();
-      setPickSubMode("element");
+      togglePickSubMode("member");
+      return;
+    }
+    if (ev.key === "i" || ev.key === "I") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      togglePickSubMode("diaphragm");
+      return;
+    }
+    if (ev.key === "w" || ev.key === "W") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.preventDefault();
+      togglePickSubMode("wall");
       return;
     }
   }
@@ -9338,12 +10503,22 @@ if (el.btnToggleSelect) {
 
 if (el.pickModeNode) {
   el.pickModeNode.addEventListener("click", () => {
-    setPickSubMode("node");
+    togglePickSubMode("node");
   });
 }
-if (el.pickModeElement) {
-  el.pickModeElement.addEventListener("click", () => {
-    setPickSubMode("element");
+if (el.pickModeMember) {
+  el.pickModeMember.addEventListener("click", () => {
+    togglePickSubMode("member");
+  });
+}
+if (el.pickModeDiaphragm) {
+  el.pickModeDiaphragm.addEventListener("click", () => {
+    togglePickSubMode("diaphragm");
+  });
+}
+if (el.pickModeWall) {
+  el.pickModeWall.addEventListener("click", () => {
+    togglePickSubMode("wall");
   });
 }
 
@@ -9360,6 +10535,20 @@ if (el.btnTheme) {
   });
 }
 
+if (el.btnViewProjection) {
+  el.btnViewProjection.addEventListener("click", () => {
+    toggleCameraProjectionMode();
+  });
+}
+
+if (el.viewPreset) {
+  el.viewPreset.addEventListener("change", () => {
+    const name = el.viewPreset.value;
+    if (!name) return;
+    setStandardView(name);
+  });
+}
+
 if (el.btnClearSelection) {
   el.btnClearSelection.addEventListener("click", () => clearSelection());
 }
@@ -9367,6 +10556,9 @@ if (el.btnClearSelection) {
 el.btnInput.addEventListener("click", () => openInputWindow());
 el.btnProject.addEventListener("click", () => openProjectWindow());
 el.btnLoads.addEventListener("click", () => openLoadsVerifyWindow());
+if (el.btnPractice) {
+  el.btnPractice.addEventListener("click", () => openPracticeVerifyWindow());
+}
 el.btnOutput.addEventListener("click", () => openResultsWindow());
 el.lcSelect.addEventListener("change", () => {
   dispContourScaleKey = null;
@@ -9436,6 +10628,25 @@ if (el.chkWindLoads) {
     if (el.chkWindLoads.checked && windVisualData) {
       const wc = windCaseById(windVisualData, selectedWindCaseId);
       syncLcToWindCase(wc);
+    }
+    if (currentModel) rebuildScene();
+  });
+}
+if (el.chkPracticeCenters) {
+  el.chkPracticeCenters.addEventListener("change", async () => {
+    onResultsDisplayChanged();
+    if (el.chkPracticeCenters.checked) {
+      if (!currentModel || !analysisComplete(currentModel)) {
+        el.chkPracticeCenters.checked = false;
+        onResultsDisplayChanged();
+        setStatus("CoG / CoR requires analysis — use Solve (F5) first.");
+        return;
+      }
+      if (!practiceSummaryData) {
+        await loadPracticeSummaryForCurrentModel();
+      }
+    } else {
+      practiceSummaryData = null;
     }
     if (currentModel) rebuildScene();
   });
@@ -9511,6 +10722,12 @@ if (el.chkWoodWallEdge) {
     if (currentModel) rebuildScene();
   });
 }
+if (el.chkColocated) {
+  el.chkColocated.addEventListener("change", () => {
+    onResultsDisplayChanged();
+    if (currentModel) rebuildScene();
+  });
+}
 syncRegionEdgeCheckboxes();
 el.forceSelect.addEventListener("change", () => {
   onResultsDisplayChanged();
@@ -9541,6 +10758,7 @@ function readDisplayPrefsFromUi() {
   displayPrefs.loads = !!(el.chkLoads && el.chkLoads.checked);
   displayPrefs.loadValues = !!(el.chkLoadValues && el.chkLoadValues.checked);
   displayPrefs.windLoads = !!(el.chkWindLoads && el.chkWindLoads.checked);
+  displayPrefs.practiceCenters = !!(el.chkPracticeCenters && el.chkPracticeCenters.checked);
   displayPrefs.reactions = !!(el.chkReactions && el.chkReactions.checked);
   displayPrefs.reactionValues = !!(el.chkReactionValues && el.chkReactionValues.checked);
   displayPrefs.nodeLabels = !!(el.chkLabels && el.chkLabels.checked);
@@ -9552,6 +10770,7 @@ function readDisplayPrefsFromUi() {
   displayPrefs.membraneEdge = !!(el.chkMembraneEdge && el.chkMembraneEdge.checked);
   displayPrefs.woodWall = !!(el.chkWoodWall && el.chkWoodWall.checked);
   displayPrefs.woodWallEdge = !!(el.chkWoodWallEdge && el.chkWoodWallEdge.checked);
+  displayPrefs.colocated = !!(el.chkColocated && el.chkColocated.checked);
   displayPrefs.forceComponent = parseInt(el.forceSelect.value, 10) || 0;
   displayPrefs.forceDiv = parseInt(el.frcDiv.value, 10) || RESULTS_DISPLAY_DEFAULTS.forceDiv;
   displayPrefs.forceFactor = parseFloat(el.frcFactor.value) || RESULTS_DISPLAY_DEFAULTS.forceFactor;
@@ -9574,6 +10793,7 @@ function applyDisplayPrefsToUi() {
   if (el.chkLoads) el.chkLoads.checked = !!displayPrefs.loads;
   if (el.chkLoadValues) el.chkLoadValues.checked = !!displayPrefs.loadValues;
   if (el.chkWindLoads && !el.chkWindLoads.disabled) el.chkWindLoads.checked = !!displayPrefs.windLoads;
+  if (el.chkPracticeCenters) el.chkPracticeCenters.checked = !!displayPrefs.practiceCenters;
   if (el.chkReactions && !el.chkReactions.disabled) el.chkReactions.checked = !!displayPrefs.reactions;
   if (el.chkReactionValues && !el.chkReactionValues.disabled) {
     el.chkReactionValues.checked = !!displayPrefs.reactionValues;
@@ -9587,6 +10807,7 @@ function applyDisplayPrefsToUi() {
   if (el.chkMembraneEdge) el.chkMembraneEdge.checked = !!displayPrefs.membraneEdge;
   if (el.chkWoodWall) el.chkWoodWall.checked = !!displayPrefs.woodWall;
   if (el.chkWoodWallEdge) el.chkWoodWallEdge.checked = !!displayPrefs.woodWallEdge;
+  if (el.chkColocated) el.chkColocated.checked = !!displayPrefs.colocated;
   if (!el.forceSelect.disabled) el.forceSelect.value = String(displayPrefs.forceComponent);
   if (!el.frcDiv.disabled) {
     el.frcDiv.value = String(displayPrefs.forceDiv);
@@ -9632,6 +10853,7 @@ function loadDisplayPrefs() {
     if (typeof st.loads === "boolean") displayPrefs.loads = st.loads;
     if (typeof st.loadValues === "boolean") displayPrefs.loadValues = st.loadValues;
     if (typeof st.windLoads === "boolean") displayPrefs.windLoads = st.windLoads;
+    if (typeof st.practiceCenters === "boolean") displayPrefs.practiceCenters = st.practiceCenters;
     if (typeof st.reactions === "boolean") displayPrefs.reactions = st.reactions;
     if (typeof st.reactionValues === "boolean") displayPrefs.reactionValues = st.reactionValues;
     if (typeof st.nodeLabels === "boolean") displayPrefs.nodeLabels = st.nodeLabels;
@@ -9643,6 +10865,7 @@ function loadDisplayPrefs() {
     if (typeof st.membraneEdge === "boolean") displayPrefs.membraneEdge = st.membraneEdge;
     if (typeof st.woodWall === "boolean") displayPrefs.woodWall = st.woodWall;
     if (typeof st.woodWallEdge === "boolean") displayPrefs.woodWallEdge = st.woodWallEdge;
+    if (typeof st.colocated === "boolean") displayPrefs.colocated = st.colocated;
     if (typeof st.forceComponent === "number") displayPrefs.forceComponent = st.forceComponent;
     if (typeof st.forceDiv === "number") displayPrefs.forceDiv = st.forceDiv;
     if (typeof st.forceFactor === "number") displayPrefs.forceFactor = st.forceFactor;

@@ -25,6 +25,16 @@ namespace StbGrasshopper
                 };
             }
 
+            if (string.IsNullOrWhiteSpace(datPath))
+            {
+                return new StbAnalyzeResult
+                {
+                    Success = false,
+                    ExitCode = 1,
+                    Summary = "DAT path is empty. Set STB Assemble Write to true first."
+                };
+            }
+
             datPath = Path.GetFullPath(datPath);
             repoRoot = Path.GetFullPath(repoRoot);
             pythonExe = ResolvePythonExe(pythonExe, repoRoot);
