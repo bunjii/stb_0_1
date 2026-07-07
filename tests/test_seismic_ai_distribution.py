@@ -18,6 +18,7 @@ from stb_loads import (
     compute_story_seismic_forces,
     generate_dlod_records,
     replace_seismic_dlod_block,
+    replace_wind_dlod_block,
 )
 from stb_loads.mass_level import build_mass_level_summaries
 from stb_project import load_project_file, validate_project_dict, effective_seismic_ci
@@ -121,6 +122,20 @@ class TestSeismicAiDistribution(unittest.TestCase):
         self.assertEqual(updated.count("# --- SEISMIC DLOD (auto) ---"), 1)
         self.assertIn("0.3", "\n".join(updated))
 
+    def test_wind_block_is_inserted_after_existing_seismic_block(self):
+        lines = [
+            "# header",
+            "# --- SEISMIC DLOD (auto) ---",
+            "DLOD, 10, 2, 0, 0.2, 0.0",
+            "# --- END SEISMIC DLOD (auto) ---",
+            "PLOD, 1, 1, 0, 0, -1, 0, 0, 0",
+        ]
+        block = "# --- WIND DLOD (auto) ---\nDLOD, 10, 4, 0, 0.3, 0.0\n# --- END WIND DLOD (auto) ---\n"
+        updated = replace_wind_dlod_block(lines, block)
+        seismic_end = updated.index("# --- END SEISMIC DLOD (auto) ---")
+        wind_start = updated.index("# --- WIND DLOD (auto) ---")
+        self.assertGreater(wind_start, seismic_end)
+
     def test_stories_without_diaphragm_emit_warning(self):
         weights = [50.0, 100.0, 80.0]
         heights = [1.5, 4.5, 7.5]
@@ -195,12 +210,12 @@ class TestUkSeismicSample(unittest.TestCase):
     def test_uk_wi_above_and_alpha_i(self):
         result = compute_seismic_distribution(self.mdl, self.project)
         by_story = {s.story_name: s for s in result.stories}
-        self.assertAlmostEqual(result.total_weight_kN, 341.897, places=2)
-        self.assertAlmostEqual(by_story["3"].w_supported_above_kN, 60.617, places=2)
-        self.assertAlmostEqual(by_story["2"].w_supported_above_kN, 125.771, places=2)
-        self.assertAlmostEqual(by_story["1"].w_supported_above_kN, 341.897, places=2)
-        self.assertAlmostEqual(by_story["3"].beta, 60.617 / 341.897, places=3)
-        self.assertAlmostEqual(by_story["2"].beta, 125.771 / 341.897, places=3)
+        self.assertAlmostEqual(result.total_weight_kN, 330.935, places=2)
+        self.assertAlmostEqual(by_story["3"].w_supported_above_kN, 60.725, places=2)
+        self.assertAlmostEqual(by_story["2"].w_supported_above_kN, 125.988, places=2)
+        self.assertAlmostEqual(by_story["1"].w_supported_above_kN, 330.935, places=2)
+        self.assertAlmostEqual(by_story["3"].beta, 60.725 / 330.935, places=3)
+        self.assertAlmostEqual(by_story["2"].beta, 125.988 / 330.935, places=3)
         self.assertAlmostEqual(by_story["1"].beta, 1.0, places=3)
 
     def test_uk_wi_matches_fem_applied_loads(self):
@@ -277,10 +292,10 @@ class TestUkSeismicSample(unittest.TestCase):
     def test_uk_per_story_ci_values(self):
         result = compute_seismic_distribution(self.mdl, self.project)
         by_story = {s.story_name: s for s in result.stories}
-        self.assertAlmostEqual(by_story["3"].ci_story, 0.455, places=3)
-        self.assertAlmostEqual(by_story["2"].ci_story, 0.390, places=3)
+        self.assertAlmostEqual(by_story["3"].ci_story, 0.451, places=3)
+        self.assertAlmostEqual(by_story["2"].ci_story, 0.387, places=3)
         self.assertAlmostEqual(by_story["1"].ci_story, 0.300, places=3)
-        self.assertAlmostEqual(result.fi_dlod_output_kN, 49.066, places=2)
+        self.assertAlmostEqual(result.fi_dlod_output_kN, 48.788, places=2)
 
     def test_uk_base_mass_warning_and_no_first_floor_dlod(self):
         result = compute_seismic_distribution(self.mdl, self.project)
@@ -301,9 +316,9 @@ class TestUkSeismicSample(unittest.TestCase):
         row = eq[0]
         self.assertEqual(row["load_case"], 1)
         self.assertEqual(row["direction"], "X+")
-        self.assertAlmostEqual(row["fi_dlod_output_kN"], 49.066, places=2)
-        self.assertAlmostEqual(row["fx_applied_kN"], 49.053, places=2)
-        self.assertAlmostEqual(row["sum_reaction_kN"], -49.053, places=2)
+        self.assertAlmostEqual(row["fi_dlod_output_kN"], 48.788, places=2)
+        self.assertAlmostEqual(row["fx_applied_kN"], 48.788, places=2)
+        self.assertAlmostEqual(row["sum_reaction_kN"], -48.788, places=2)
         self.assertLess(row["equilibrium_residual_kN"], 0.05)
         self.assertFalse(row["other_loads"])
         self.assertFalse(row["pressure_mismatches"])
@@ -352,6 +367,34 @@ class TestUkSeismicSample(unittest.TestCase):
         result = compute_seismic_distribution(self.mdl, legacy_proj)
         story_names = {s.story_name for s in result.stories}
         self.assertNotIn("1", story_names)
+
+
+class TestCurrentUkSeismicModel(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dat_path = os.path.join(_STB_ROOT, "data", "UK_240416.dat")
+        cls.project_path = os.path.join(_STB_ROOT, "data", "UK_240416.project.json")
+        cls.project = load_project_file(cls.project_path)
+        cls.mdl = parse_input(_read_dat_lines(cls.dat_path))
+
+    def test_diaphragm_areas_are_valid_for_seismic_dlod(self):
+        from stb_loads.story import diaphragm_area_m2
+
+        self.assertAlmostEqual(diaphragm_area_m2(self.mdl, 20), 44.1945, places=3)
+        self.assertAlmostEqual(diaphragm_area_m2(self.mdl, 30), 44.1945, places=3)
+
+    def test_dlod_uses_story_fi_not_diaphragm_area_or_qi(self):
+        result = compute_seismic_distribution(self.mdl, self.project)
+        by_story = {s.story_name: s for s in result.stories}
+        by_diap_lc = {(d.diaphragm_id, d.load_case): d for d in result.diaphragm_loads}
+
+        self.assertAlmostEqual(by_diap_lc[(20, 2)].fi_kN, by_story["2"].fi_kN, places=3)
+        self.assertAlmostEqual(by_diap_lc[(30, 2)].fi_kN, by_story["3"].fi_kN, places=3)
+        self.assertLess(by_diap_lc[(20, 2)].fi_kN, by_story["2"].qi_kN)
+        self.assertLess(by_diap_lc[(30, 2)].fi_kN, by_story["3"].qi_kN)
+        self.assertLess(by_diap_lc[(20, 2)].pressure_kN_m2, 1.0)
+        self.assertLess(by_diap_lc[(30, 2)].pressure_kN_m2, 1.0)
 
 
 if __name__ == "__main__":

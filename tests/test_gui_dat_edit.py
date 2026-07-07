@@ -15,6 +15,7 @@ from stb_gui.dat_edit import (
     delete_dmem,
     delete_elements,
     delete_nodes,
+    delete_selection,
     delete_wwll,
     ejnt_lines_for_elements,
     set_diap_timber_multiplier,
@@ -230,6 +231,21 @@ DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
         validate_dat_text(out)
         self.assertTrue(any("Created 2 DMEM element(s)" in w for w in warnings))
 
+    def test_create_dmem_mesh_from_three_by_two_grid(self):
+        sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
+NODE, 1, 0.0, 0.0, 3.0
+NODE, 2, 1.0, 0.0, 3.0
+NODE, 3, 2.0, 0.0, 3.0
+NODE, 4, 0.0, 1.0, 3.0
+NODE, 5, 1.0, 1.0, 3.0
+NODE, 6, 2.0, 1.0, 3.0
+DIAP, 10, 2F_MAIN, 1, 1, 2.0, 1000, 0.0, 0.006667, 1820
+"""
+        out, warnings = create_dmem(sample, 10, [1, 2, 3, 4, 5, 6])
+        self.assertEqual(len([ln for ln in out.splitlines() if ln.lstrip().startswith("DMEM,")]), 4)
+        validate_dat_text(out)
+        self.assertTrue(any("Created 4 DMEM element(s)" in w for w in warnings))
+
     def test_create_dmem_mesh_skips_existing_triangles(self):
         sample = """MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20
 NODE, 1, 0.0, 0.0, 3.0
@@ -299,6 +315,32 @@ NODE, 4, 0.5, 0.0, 2.0
         self.assertNotIn("WWLL, 1,", out)
         validate_dat_text(out)
         self.assertTrue(any("WWLL" in w for w in warnings))
+
+    def test_delete_selection_mixed_types(self):
+        mixed = SAMPLE + DIAPHRAGM_SAMPLE.split("MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20\n", 1)[1] + WWLL_SAMPLE.split("MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20\n", 1)[1]
+        out, warnings = delete_selection(
+            mixed,
+            element_ids=[3],
+            dmem_ids=[1001],
+            wwll_ids=[1],
+        )
+        self.assertNotIn("ELEM, 3,", out)
+        self.assertNotIn("DMEM, 1001,", out)
+        self.assertNotIn("WWLL, 1,", out)
+        self.assertIn("ELEM, 1,", out)
+        validate_dat_text(out)
+        self.assertEqual(len(warnings), 3)
+
+    def test_apply_edit_action_delete_selection(self):
+        out, _ = apply_edit_action(SAMPLE, {
+            "action": "delete_selection",
+            "element_ids": [1],
+            "node_ids": [4],
+        })
+        self.assertNotIn("ELEM, 1,", out)
+        self.assertNotIn("NODE, 4,", out)
+        self.assertNotIn("ELEM, 3,", out)
+        validate_dat_text(out)
 
     def test_set_wwll_multiplier(self):
         out, _ = set_wwll_multiplier(WWLL_SAMPLE, [1], 3.5)

@@ -168,6 +168,40 @@ def _point_in_polygon(x: float, y: float, polygon: Sequence[Point2D]) -> bool:
     return inside
 
 
+def _convex_hull_node_ids(
+    node_ids: Sequence[int],
+    coords: Dict[int, Point2D],
+) -> List[int]:
+    """Return selected outer boundary nodes in counter-clockwise order."""
+
+    ordered = sorted(set(node_ids), key=lambda n: (coords[n][0], coords[n][1], n))
+    if len(ordered) <= 3:
+        return list(ordered)
+
+    def cross(o: int, a: int, b: int) -> float:
+        ox, oy = coords[o]
+        ax, ay = coords[a]
+        bx, by = coords[b]
+        return (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+
+    lower: List[int] = []
+    for n in ordered:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], n) <= 1.0e-12:
+            lower.pop()
+        lower.append(n)
+
+    upper: List[int] = []
+    for n in reversed(ordered):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], n) <= 1.0e-12:
+            upper.pop()
+        upper.append(n)
+
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        raise ValueError("Selected nodes are collinear in plan")
+    return hull
+
+
 def triangulate_node_selection(
     coords3d: Dict[int, Tuple[float, float, float]],
     node_ids: Sequence[int],
@@ -189,7 +223,10 @@ def triangulate_node_selection(
     coords = project_nodes_2d(coords3d, nodes)
     spacing = _min_pairwise_distance(coords, nodes)
     adj = _build_neighbor_graph(nodes, coords, spacing, elem_adj=elem_adj)
-    boundary = _trace_boundary_ccw(nodes, coords, adj)
+    try:
+        boundary = _trace_boundary_ccw(nodes, coords, adj)
+    except ValueError:
+        boundary = _convex_hull_node_ids(nodes, coords)
     boundary_poly = [coords[n] for n in boundary]
 
     id_list = list(nodes)

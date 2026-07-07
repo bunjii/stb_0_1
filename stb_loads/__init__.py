@@ -3,6 +3,7 @@ from stb_loads.apply import (
     apply_wind_to_dat,
     replace_seismic_dlod_block,
     replace_wind_dlod_block,
+    sync_seismic_dlod_lines,
 )
 from stb_loads.format import render_seismic_markdown
 from stb_loads.seismic import (
@@ -37,6 +38,7 @@ __all__ = [
     "generate_dlod_records",
     "apply_seismic_to_dat",
     "replace_seismic_dlod_block",
+    "sync_seismic_dlod_lines",
     "render_seismic_markdown",
     "compute_er",
     "compute_kz",

@@ -419,20 +419,22 @@ def _member_global_shear(e, mdl, lc: int) -> Optional[Tuple[float, float]]:
 
 
 def _stiffness_components(qx_x, qy_x, dx_x, dy_x, qx_y, qy_y, dx_y, dy_y):
+    dxx = (qx_x / dx_x) if qx_x is not None and dx_x not in (None, 0.0) and abs(dx_x) > TOLERANCE else None
+    dyy = (qy_y / dy_y) if qy_y is not None and dy_y not in (None, 0.0) and abs(dy_y) > TOLERANCE else None
+    dxy = 0.0
     if None not in (qx_x, qy_x, dx_x, dy_x, qx_y, qy_y, dx_y, dy_y):
         delta = np.array([[dx_x, dx_y], [dy_x, dy_y]], dtype=float)
         force = np.array([[qx_x, qx_y], [qy_x, qy_y]], dtype=float)
         det = float(np.linalg.det(delta))
-        if abs(det) > TOLERANCE:
+        scale = max(abs(float(dx_x)), abs(float(dx_y)), abs(float(dy_x)), abs(float(dy_y)), TOLERANCE)
+        if abs(det) > TOLERANCE and abs(det) / (scale * scale) > 0.05:
             d = force @ np.linalg.inv(delta)
             dxy = 0.5 * (float(d[0, 1]) + float(d[1, 0]))
             return float(d[0, 0]), dxy, float(d[1, 1]), "OK"
 
-    dxx = (qx_x / dx_x) if qx_x is not None and dx_x not in (None, 0.0) and abs(dx_x) > TOLERANCE else None
-    dyy = (qy_y / dy_y) if qy_y is not None and dy_y not in (None, 0.0) and abs(dy_y) > TOLERANCE else None
     if dxx is None and dyy is None:
         return None, None, None, "insufficient_data"
-    return dxx, 0.0, dyy, "diagonal_fallback"
+    return dxx, dxy, dyy, "diagonal_fallback"
 
 
 def _element_xy(e) -> Tuple[float, float]:
@@ -508,9 +510,9 @@ def _build_eccentricity_rows(mdl, project, stories, stiffness_rows) -> List[Ecce
         if not valid:
             out.append(EccentricityRow(story.name, xg, yg, None, None, None, None, None, None, None, None, None, None, None, None, None, "no_stiffness"))
             continue
-        kxx = sum(float(r.dxx_kN_m or 0.0) for r in valid)
-        kxy = sum(float(r.dxy_kN_m or 0.0) for r in valid)
-        kyy = sum(float(r.dyy_kN_m or 0.0) for r in valid)
+        kxx = sum(_positive_stiffness(r.dxx_kN_m) for r in valid)
+        kxy = sum(abs(float(r.dxy_kN_m or 0.0)) for r in valid)
+        kyy = sum(_positive_stiffness(r.dyy_kN_m) for r in valid)
         xs, ys = _directional_rigidity_center(valid)
         status = "OK"
         if xs is None or ys is None:

@@ -43,6 +43,16 @@ class TestDmemTriangulate(unittest.TestCase):
         tris = triangulate_node_selection(coords, list(range(1, 10)))
         self.assertEqual(len(tris), 8)
 
+    def test_three_by_two_grid_produces_four_triangles(self):
+        coords = {}
+        nid = 1
+        for j in range(2):
+            for i in range(3):
+                coords[nid] = (float(i), float(j), 3.0)
+                nid += 1
+        tris = triangulate_node_selection(coords, list(range(1, 7)))
+        self.assertEqual(len(tris), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

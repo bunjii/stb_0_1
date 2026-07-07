@@ -171,6 +171,83 @@ class TestProjectSchema(unittest.TestCase):
         self.assertFalse(masses[0].generate_diaphragm_load)
         self.assertEqual(masses[1].application_diaphragm, 10)
 
+    def test_seismic_weight_load_cases_round_trip(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "ci": 0.2,
+                "weight_load_cases": [
+                    {"name": "DL", "load_case": 1, "factor": 1.0, "role": "DL"},
+                    {"name": "LL(E)", "load_case": 2, "factor": 0.5, "role": "LL_E"},
+                ],
+            },
+        }
+        project = validate_project_dict(data)
+        cases = project.load_conditions.seismic.weight_load_cases
+        self.assertEqual(len(cases), 2)
+        self.assertEqual(cases[0].load_case, 1)
+        self.assertAlmostEqual(cases[1].factor, 0.5)
+        reparsed = validate_project_dict(project.to_dict())
+        self.assertEqual(reparsed.load_conditions.seismic.weight_load_cases[1].role, "LL_E")
+
+    def test_floor_loads_round_trip_and_lle_weight_case(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "diaphragms": [{"id": 10, "story": "2"}],
+            "floor_loads": [
+                {
+                    "story": "2",
+                    "diaphragm_id": 10,
+                    "role": "LL",
+                    "load_case": 2,
+                    "name": "LL",
+                    "pressure_kN_m2": 1.8,
+                },
+                {
+                    "story": "2",
+                    "diaphragm_id": 10,
+                    "role": "LL_E",
+                    "load_case": 3,
+                    "name": "LL(E)",
+                    "pressure_kN_m2": 0.8,
+                },
+            ],
+        }
+        project = validate_project_dict(data)
+        loads = project.load_conditions.floor_loads
+        self.assertEqual(len(loads), 2)
+        self.assertEqual(loads[1].role, "LL_E")
+        self.assertAlmostEqual(loads[1].pressure_kN_m2, 0.8)
+        weight_cases = project.load_conditions.seismic.weight_load_cases
+        self.assertEqual(len(weight_cases), 1)
+        self.assertEqual(weight_cases[0].load_case, 3)
+        self.assertEqual(weight_cases[0].role, "LL_E")
+
+        reparsed = validate_project_dict(project.to_dict())
+        self.assertEqual(reparsed.load_conditions.floor_loads[0].diaphragm_id, 10)
+        self.assertEqual(reparsed.load_conditions.seismic.weight_load_cases[0].role, "LL_E")
+
+    def test_floor_load_rejects_conflicting_weight_case_role(self):
+        data = _minimal_project()
+        data["load_conditions"] = {
+            "seismic": {
+                "weight_load_cases": [
+                    {"name": "Custom", "load_case": 3, "factor": 1.0, "role": "OTHER"},
+                ],
+            },
+            "floor_loads": [
+                {
+                    "diaphragm_id": 10,
+                    "role": "LL_E",
+                    "load_case": 3,
+                    "name": "LL(E)",
+                    "pressure_kN_m2": 0.8,
+                },
+            ],
+        }
+        with self.assertRaises(ProjectSchemaError):
+            validate_project_dict(data)
+
     def test_seismic_masses_diaphragm_requires_application_diaphragm(self):
         data = _minimal_project()
         data["load_conditions"] = {

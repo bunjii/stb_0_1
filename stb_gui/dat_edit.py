@@ -972,6 +972,37 @@ def delete_wwll(text: str, wwll_ids: list[int]) -> tuple[str, list[str]]:
     return _ensure_trailing_newline("\n".join(out)), warnings
 
 
+def delete_selection(
+    text: str,
+    *,
+    node_ids: list[int] | None = None,
+    element_ids: list[int] | None = None,
+    dmem_ids: list[int] | None = None,
+    wwll_ids: list[int] | None = None,
+) -> tuple[str, list[str]]:
+    nodes = [int(n) for n in (node_ids or [])]
+    elems = [int(e) for e in (element_ids or [])]
+    dmems = [int(v) for v in (dmem_ids or [])]
+    wwlls = [int(v) for v in (wwll_ids or [])]
+    if not nodes and not elems and not dmems and not wwlls:
+        raise ValueError("Nothing selected to delete")
+
+    warnings: list[str] = []
+    if dmems:
+        text, w = delete_dmem(text, dmems)
+        warnings.extend(w)
+    if wwlls:
+        text, w = delete_wwll(text, wwlls)
+        warnings.extend(w)
+    if elems:
+        text, w = delete_elements(text, elems)
+        warnings.extend(w)
+    if nodes:
+        text, w = delete_nodes(text, nodes)
+        warnings.extend(w)
+    return text, warnings
+
+
 def set_wwll_multiplier(text: str, wwll_ids: list[int], multiplier: float) -> tuple[str, list[str]]:
     targets = {int(v) for v in wwll_ids}
     m = float(multiplier)
@@ -1249,6 +1280,14 @@ def apply_edit_action(text: str, action: dict[str, Any]) -> tuple[str, list[str]
         return delete_dmem(text, dmem_ids)
     if op == "delete_wwll":
         return delete_wwll(text, wwll_ids)
+    if op == "delete_selection":
+        return delete_selection(
+            text,
+            node_ids=node_ids,
+            element_ids=element_ids,
+            dmem_ids=dmem_ids,
+            wwll_ids=wwll_ids,
+        )
     if op == "set_wwll_multiplier":
         return set_wwll_multiplier(text, wwll_ids, action["multiplier"])
     if op == "set_wwll_model":

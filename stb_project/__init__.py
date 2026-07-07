@@ -1,5 +1,6 @@
 from stb_project.schema import (
     ALLOWED_BASE_MASS_POLICIES,
+    ALLOWED_FLOOR_LOAD_ROLES,
     ALLOWED_LOAD_COMBINATION_DURATIONS,
     ALLOWED_MASS_ROLES,
     ALLOWED_ROUGHNESS_CATEGORIES,
@@ -28,6 +29,7 @@ from stb_project.schema import (
     DesignCheckSettings,
     DesignerInfo,
     DiaphragmAssignment,
+    FloorLoadSettings,
     GridLine,
     LoadConditionSettings,
     LoadCombinationSettings,
@@ -35,6 +37,7 @@ from stb_project.schema import (
     SeismicDirectionSettings,
     SeismicLoadSettings,
     SeismicMassEntry,
+    SeismicWeightLoadCaseSettings,
     Story,
     MemberClass,
     ReportSettings,

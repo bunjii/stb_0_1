@@ -10,6 +10,7 @@
     tabs: document.getElementById("lvTabs"),
     main: document.getElementById("lvMain"),
     status: document.getElementById("lvStatus"),
+    btnApply: document.getElementById("btnLvApply"),
     btnRefresh: document.getElementById("btnLvRefresh"),
   };
 
@@ -340,6 +341,30 @@
       + escapeHtml(label) + "</button></section>";
   }
 
+  function applyButtonLabel(view) {
+    const kind = (view && view.kind) || activeTab;
+    if (kind === "wind") return "風DLODを .dat へ反映";
+    if (kind === "seismic") return "地震DLODを .dat へ反映";
+    return "DLODを .dat へ反映";
+  }
+
+  function syncApplyButton(view) {
+    if (!el.btnApply) return;
+    const kind = (view && view.kind) || activeTab;
+    const supportsApply = kind === "seismic" || kind === "wind";
+    el.btnApply.style.display = supportsApply ? "" : "none";
+    el.btnApply.textContent = applyButtonLabel(view);
+    el.btnApply.disabled = !(supportsApply && view && view.can_apply_dlod);
+    if (!supportsApply) {
+      el.btnApply.title = "";
+    } else if (view && view.can_apply_dlod) {
+      const count = view.dlod_record_count || 0;
+      el.btnApply.title = count ? String(count) + " 件の DLOD レコードを書き込みます" : "";
+    } else {
+      el.btnApply.title = "書き込み可能な DLOD レコードがありません。地震方向やダイアフラム設定を確認してください。";
+    }
+  }
+
   function renderSeismic(view) {
     let html = renderSummary(view);
     html += renderNotice(view.report_notice);
@@ -534,6 +559,7 @@
     const proj = view.project_path ? " · " + view.project_path : "";
     el.path.textContent = pathLine + proj;
     renderTabs(view);
+    syncApplyButton(view);
 
     if (view.kind === "dead" || view.kind === "live") {
       el.main.innerHTML = renderGravity(view);
@@ -556,6 +582,7 @@
       return;
     }
     setStatus("読み込み中…");
+    syncApplyButton({ kind: activeTab, can_apply_dlod: false });
     try {
       const view = await fetchJson(
         apiPathForTab(activeTab) + apiQueryForTab(activeTab, modelPath)
@@ -594,6 +621,7 @@
     }
   }
 
+  if (el.btnApply) el.btnApply.addEventListener("click", applyDlod);
   el.btnRefresh.addEventListener("click", loadView);
 
   if (window.opener) {

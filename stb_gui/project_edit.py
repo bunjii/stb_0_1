@@ -6,11 +6,14 @@ from typing import Any, Dict, List
 
 from stb_project.schema import (
     ALLOWED_BASE_MASS_POLICIES,
+    ALLOWED_FLOOR_LOAD_ROLES,
     ALLOWED_LOAD_COMBINATION_DURATIONS,
+    ALLOWED_MASS_ROLES,
     ALLOWED_MEMBER_KINDS,
     ALLOWED_REPORT_FORMATS,
     ALLOWED_REPORT_MODES,
     ALLOWED_ROUGHNESS_CATEGORIES,
+    ALLOWED_SEISMIC_WEIGHT_ROLES,
     ALLOWED_WIND_DIAPHRAGM_INPUT_MODES,
     ALLOWED_WIND_DIRECTIONS,
     ALLOWED_WIND_FACES,
@@ -187,13 +190,13 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
                 },
                 {
                     "path": "load_conditions.seismic.dead_load_lc",
-                    "label": "DL 荷重ケース (override)",
+                    "label": "DL 荷重ケース (legacy override)",
                     "type": "optional_int",
                     "value": seismic.dead_load_lc,
                 },
                 {
                     "path": "load_conditions.seismic.live_load_lc",
-                    "label": "LL 荷重ケース (override)",
+                    "label": "LL 荷重ケース (legacy override)",
                     "type": "optional_int",
                     "value": seismic.live_load_lc,
                 },
@@ -221,6 +224,114 @@ def build_project_edit_form(project: ProjectDefinition) -> Dict[str, Any]:
                 "rows": [
                     {"id": d.diaphragm_id, "story": d.story}
                     for d in project.load_conditions.diaphragms
+                ],
+            },
+        },
+        {
+            "id": "floor_loads",
+            "title": "床荷重",
+            "table": {
+                "path": "load_conditions.floor_loads",
+                "label": "Project 管理の床積載荷重（.dat へ DLOD TYPE 4 として同期）",
+                "columns": [
+                    {"path": "diaphragm_id", "label": "DIAP ID", "type": "number"},
+                    {"path": "story", "label": "階", "type": "text"},
+                    {"path": "role", "label": "用途", "type": "select", "options": list(ALLOWED_FLOOR_LOAD_ROLES)},
+                    {"path": "load_case", "label": "LC", "type": "number"},
+                    {"path": "name", "label": "LNME 名称", "type": "text"},
+                    {"path": "pressure_kN_m2", "label": "荷重 kN/m2", "type": "number"},
+                ],
+                "rows": [
+                    {
+                        "story": f.story,
+                        "diaphragm_id": f.diaphragm_id,
+                        "role": f.role,
+                        "load_case": f.load_case,
+                        "name": f.name,
+                        "pressure_kN_m2": f.pressure_kN_m2,
+                    }
+                    for f in project.load_conditions.floor_loads
+                ],
+            },
+        },
+        {
+            "id": "seismic_weight_load_cases",
+            "title": "地震重量LC",
+            "table": {
+                "path": "load_conditions.seismic.weight_load_cases",
+                "label": "地震重量に用いる荷重ケース",
+                "columns": [
+                    {"path": "load_case", "label": "LC", "type": "number"},
+                    {"path": "name", "label": "名称", "type": "text"},
+                    {"path": "factor", "label": "係数", "type": "number"},
+                    {"path": "role", "label": "用途", "type": "select", "options": list(ALLOWED_SEISMIC_WEIGHT_ROLES)},
+                ],
+                "rows": [
+                    {
+                        "name": c.name,
+                        "load_case": c.load_case,
+                        "factor": c.factor,
+                        "role": c.role,
+                    }
+                    for c in seismic.weight_load_cases
+                ],
+            },
+        },
+        {
+            "id": "seismic_directions",
+            "title": "地震方向",
+            "table": {
+                "path": "load_conditions.seismic.directions",
+                "label": "地震方向 ↔ 荷重ケース",
+                "columns": [
+                    {"path": "name", "label": "名称", "type": "text"},
+                    {"path": "axis", "label": "軸", "type": "select", "options": ["x", "y"]},
+                    {"path": "load_case", "label": "LC", "type": "number"},
+                    {"path": "sign", "label": "符号 (+1/-1)", "type": "number"},
+                ],
+                "rows": [
+                    {
+                        "name": d.name,
+                        "axis": d.axis,
+                        "load_case": d.load_case,
+                        "sign": d.sign,
+                    }
+                    for d in seismic.directions
+                ],
+            },
+        },
+        {
+            "id": "seismic_masses",
+            "title": "地震質量",
+            "table": {
+                "path": "load_conditions.seismic_masses",
+                "label": "地震質量 ↔ DLOD 出力先",
+                "columns": [
+                    {"path": "name", "label": "名称", "type": "text"},
+                    {"path": "mass_role", "label": "役割", "type": "select", "options": list(ALLOWED_MASS_ROLES)},
+                    {"path": "story", "label": "階", "type": "text"},
+                    {"path": "weight", "label": "重量 kN (空欄=LC集計)", "type": "number"},
+                    {"path": "include_in_total_seismic_weight", "label": "ΣWiに含む", "type": "bool"},
+                    {"path": "include_in_alpha_denominator", "label": "αi分母に含む", "type": "bool"},
+                    {"path": "generate_diaphragm_load", "label": "DLOD出力", "type": "bool"},
+                    {"path": "application_level", "label": "適用レベル", "type": "text"},
+                    {"path": "application_diaphragm", "label": "適用DIAP", "type": "optional_int"},
+                ],
+                "rows": [
+                    {
+                        "name": m.name,
+                        "mass_role": m.mass_role,
+                        "story": m.story or "",
+                        "weight": m.weight if m.weight is not None else "",
+                        "include_in_total_seismic_weight": m.include_in_total_seismic_weight,
+                        "include_in_alpha_denominator": m.include_in_alpha_denominator,
+                        "generate_diaphragm_load": m.generate_diaphragm_load,
+                        "application_level": m.application_level or "",
+                        "application_diaphragm": (
+                            m.application_diaphragm if m.application_diaphragm is not None else ""
+                        ),
+                    }
+                    for m in project.load_conditions.seismic_masses
                 ],
             },
         },

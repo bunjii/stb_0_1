@@ -115,6 +115,14 @@ def apply_project_load_combinations_to_dat(dat_path: str, project: Any) -> int:
     return len(combinations)
 
 
+def sync_project_lcmb_lines(lines: Iterable[str], project: Any) -> list[str]:
+    combinations = tuple(getattr(project.load_conditions, "load_combinations", ()))
+    if not combinations:
+        return list(lines)
+    block = build_lcmb_block(combinations)
+    return replace_project_lcmb_block(lines, block)
+
+
 def _remove_lcmb_records(lines: Sequence[str]) -> list[str]:
     out = []
     for line in lines:

@@ -32,6 +32,8 @@ ALLOWED_BASE_MASS_POLICIES = (
     "APPLY_TO_WALL_NODES",
 )
 DEFAULT_BASE_MASS_POLICY = "LUMP_TO_ABOVE_DIAPHRAGM"
+ALLOWED_SEISMIC_WEIGHT_ROLES = ("DL", "LL_E", "OTHER")
+ALLOWED_FLOOR_LOAD_ROLES = ("LL", "LL_E")
 ALLOWED_MASS_ROLES = ("BASE_MASS", "DIAPHRAGM_MASS")
 ALLOWED_WIND_DIRECTIONS = ("X_PLUS", "X_MINUS", "Y_PLUS", "Y_MINUS")
 ALLOWED_WIND_FACES = ("X_MIN", "X_MAX", "Y_MIN", "Y_MAX")
@@ -166,6 +168,20 @@ PROJECT_JSON_SCHEMA = {
                         "dead_load_lc": {"type": "integer"},
                         "live_load_lc": {"type": ["integer", "null"]},
                         "live_load_factor": {"type": "number"},
+                        "weight_load_cases": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["load_case"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "load_case": {"type": "integer"},
+                                    "factor": {"type": "number"},
+                                    "role": {"enum": list(ALLOWED_SEISMIC_WEIGHT_ROLES)},
+                                },
+                            },
+                        },
                         "directions": {
                             "type": "array",
                             "items": {
@@ -191,6 +207,22 @@ PROJECT_JSON_SCHEMA = {
                         "properties": {
                             "id": {"type": "integer"},
                             "story": {"type": "string"},
+                        },
+                    },
+                },
+                "floor_loads": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["diaphragm_id", "load_case", "role", "pressure_kN_m2"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "story": {"type": "string"},
+                            "diaphragm_id": {"type": "integer"},
+                            "load_case": {"type": "integer"},
+                            "role": {"enum": list(ALLOWED_FLOOR_LOAD_ROLES)},
+                            "name": {"type": "string"},
+                            "pressure_kN_m2": {"type": "number"},
                         },
                     },
                 },
@@ -347,6 +379,14 @@ class SeismicDirectionSettings:
 
 
 @dataclass(frozen=True)
+class SeismicWeightLoadCaseSettings:
+    load_case: int
+    factor: float = 1.0
+    role: str = "OTHER"
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class SeismicLoadSettings:
     ci: float = 0.0
     c0: Optional[float] = None
@@ -362,6 +402,7 @@ class SeismicLoadSettings:
     dead_load_lc: Optional[int] = None
     live_load_lc: Optional[int] = None
     live_load_factor: float = 0.0
+    weight_load_cases: Tuple[SeismicWeightLoadCaseSettings, ...] = ()
     directions: Tuple[SeismicDirectionSettings, ...] = ()
 
 
@@ -393,6 +434,16 @@ def effective_seismic_ci(seismic: SeismicLoadSettings) -> float:
 class DiaphragmAssignment:
     diaphragm_id: int
     story: str
+
+
+@dataclass(frozen=True)
+class FloorLoadSettings:
+    diaphragm_id: int
+    load_case: int
+    role: str
+    pressure_kN_m2: float
+    story: str = ""
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -722,6 +773,7 @@ def direction_to_axis_sign(direction: str) -> Tuple[str, int]:
 class LoadConditionSettings:
     seismic: SeismicLoadSettings = field(default_factory=SeismicLoadSettings)
     diaphragms: Tuple[DiaphragmAssignment, ...] = ()
+    floor_loads: Tuple[FloorLoadSettings, ...] = ()
     seismic_masses: Tuple[SeismicMassEntry, ...] = ()
     wind: WindLoadSettings = field(default_factory=WindLoadSettings)
     load_combinations: Tuple[LoadCombinationSettings, ...] = ()
@@ -795,6 +847,10 @@ class ProjectDefinition:
                     {"id": d.diaphragm_id, "story": d.story}
                     for d in self.load_conditions.diaphragms
                 ],
+                "floor_loads": [
+                    _floor_load_settings_to_dict(entry)
+                    for entry in self.load_conditions.floor_loads
+                ] if self.load_conditions.floor_loads else [],
                 "seismic_masses": [
                     _seismic_mass_entry_to_dict(entry)
                     for entry in self.load_conditions.seismic_masses
@@ -838,6 +894,7 @@ def _seismic_settings_to_dict(seismic: SeismicLoadSettings):
         and seismic.dead_load_lc is None
         and seismic.live_load_lc is None
         and seismic.live_load_factor == 0.0
+        and not seismic.weight_load_cases
         and not seismic.directions
     ):
         return {}
@@ -847,6 +904,15 @@ def _seismic_settings_to_dict(seismic: SeismicLoadSettings):
         "dead_load_lc": seismic.dead_load_lc,
         "live_load_lc": seismic.live_load_lc,
         "live_load_factor": seismic.live_load_factor,
+        "weight_load_cases": [
+            {
+                "name": c.name,
+                "load_case": c.load_case,
+                "factor": c.factor,
+                "role": c.role,
+            }
+            for c in seismic.weight_load_cases
+        ],
         "directions": [
             {
                 "name": d.name,
@@ -1365,13 +1431,17 @@ def _parse_load_conditions(raw):
     _require_type(raw, dict, "project.load_conditions")
     _reject_unknown(
         raw,
-        ["seismic", "diaphragms", "seismic_masses", "wind", "load_combinations"],
+        ["seismic", "diaphragms", "floor_loads", "seismic_masses", "wind", "load_combinations"],
         "project.load_conditions",
     )
     seismic_raw = raw.get("seismic")
+    floor_loads = tuple(_parse_floor_load_settings(raw.get("floor_loads", [])))
+    seismic = _parse_seismic_load_settings(seismic_raw) if seismic_raw else SeismicLoadSettings()
+    seismic = _with_floor_load_weight_cases(seismic, floor_loads)
     return LoadConditionSettings(
-        seismic=_parse_seismic_load_settings(seismic_raw) if seismic_raw else SeismicLoadSettings(),
+        seismic=seismic,
         diaphragms=tuple(_parse_diaphragm_assignments(raw.get("diaphragms", []))),
+        floor_loads=floor_loads,
         seismic_masses=tuple(_parse_seismic_mass_entries(raw.get("seismic_masses", []))),
         wind=_parse_wind_load_settings(raw.get("wind", {})),
         load_combinations=tuple(_parse_load_combinations(raw.get("load_combinations", []))),
@@ -1432,10 +1502,34 @@ def _parse_seismic_load_settings(raw):
             "dead_load_lc",
             "live_load_lc",
             "live_load_factor",
+            "weight_load_cases",
             "directions",
         ],
         "project.load_conditions.seismic",
     )
+    weight_cases_raw = raw.get("weight_load_cases", [])
+    _require_type(weight_cases_raw, list, "project.load_conditions.seismic.weight_load_cases")
+    weight_cases = []
+    seen_weight_lcs = set()
+    for idx, item in enumerate(weight_cases_raw):
+        path = "project.load_conditions.seismic.weight_load_cases[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(item, ["name", "load_case", "factor", "role"], path)
+        load_case = int(_required_number(item, "load_case", path))
+        if load_case in seen_weight_lcs:
+            raise ProjectSchemaError(path + " duplicates load_case " + str(load_case))
+        seen_weight_lcs.add(load_case)
+        factor = _optional_number(item, "factor", path, default=1.0)
+        role = (_optional_string(item, "role", path, default="OTHER") or "OTHER").upper()
+        if role not in ALLOWED_SEISMIC_WEIGHT_ROLES:
+            raise ProjectSchemaError(path + ".role is not supported: " + role)
+        weight_cases.append(SeismicWeightLoadCaseSettings(
+            name=_optional_string(item, "name", path, default=""),
+            load_case=load_case,
+            factor=factor,
+            role=role,
+        ))
+
     directions_raw = raw.get("directions", [])
     _require_type(directions_raw, list, "project.load_conditions.seismic.directions")
     directions = []
@@ -1559,6 +1653,7 @@ def _parse_seismic_load_settings(raw):
         live_load_factor=_optional_number(
             raw, "live_load_factor", "project.load_conditions.seismic", default=0.0
         ),
+        weight_load_cases=tuple(weight_cases),
         directions=tuple(directions),
     )
 
@@ -1580,6 +1675,106 @@ def _parse_diaphragm_assignments(raw):
             story=_required_string(item, "story", path),
         ))
     return out
+
+
+def _floor_load_settings_to_dict(entry: FloorLoadSettings):
+    out = {
+        "diaphragm_id": entry.diaphragm_id,
+        "load_case": entry.load_case,
+        "role": entry.role,
+        "name": entry.name,
+        "pressure_kN_m2": entry.pressure_kN_m2,
+    }
+    if entry.story:
+        out["story"] = entry.story
+    return out
+
+
+def _parse_floor_load_settings(raw):
+    _require_type(raw, list, "project.load_conditions.floor_loads")
+    seen = {}
+    out = []
+    for idx, item in enumerate(raw):
+        path = "project.load_conditions.floor_loads[" + str(idx) + "]"
+        _require_type(item, dict, path)
+        _reject_unknown(
+            item,
+            ["story", "diaphragm_id", "load_case", "role", "name", "pressure_kN_m2"],
+            path,
+        )
+        role = _required_string(item, "role", path).upper()
+        if role not in ALLOWED_FLOOR_LOAD_ROLES:
+            raise ProjectSchemaError(path + ".role is not supported: " + role)
+        pressure = _required_number(item, "pressure_kN_m2", path)
+        if pressure < 0.0:
+            raise ProjectSchemaError(path + ".pressure_kN_m2 must be non-negative")
+        diaphragm_id = int(_required_number(item, "diaphragm_id", path))
+        load_case = int(_required_number(item, "load_case", path))
+        name = _optional_string(item, "name", path, default=role)
+        story = _optional_string(item, "story", path, default="")
+        key = (diaphragm_id, load_case)
+        current = (role, name, pressure)
+        if key in seen and seen[key] != current:
+            raise ProjectSchemaError(
+                path + " duplicates DIAP/LC with different floor load settings: "
+                + str(diaphragm_id) + "/" + str(load_case)
+            )
+        seen[key] = current
+        out.append(FloorLoadSettings(
+            diaphragm_id=diaphragm_id,
+            load_case=load_case,
+            role=role,
+            pressure_kN_m2=pressure,
+            story=story,
+            name=name,
+        ))
+    return out
+
+
+def _with_floor_load_weight_cases(seismic: SeismicLoadSettings, floor_loads):
+    cases = list(seismic.weight_load_cases)
+    by_lc = {c.load_case: c for c in cases}
+    for entry in floor_loads:
+        if entry.role != "LL_E":
+            continue
+        existing = by_lc.get(entry.load_case)
+        if existing is not None:
+            if existing.role != "LL_E":
+                raise ProjectSchemaError(
+                    "project.load_conditions.floor_loads LL_E load case "
+                    + str(entry.load_case)
+                    + " conflicts with seismic.weight_load_cases role "
+                    + existing.role
+                )
+            continue
+        added = SeismicWeightLoadCaseSettings(
+            name=entry.name or "LL(E)",
+            load_case=entry.load_case,
+            factor=1.0,
+            role="LL_E",
+        )
+        cases.append(added)
+        by_lc[entry.load_case] = added
+    if len(cases) == len(seismic.weight_load_cases):
+        return seismic
+    return SeismicLoadSettings(
+        ci=seismic.ci,
+        c0=seismic.c0,
+        z=seismic.z,
+        rt=seismic.rt,
+        design_period_s=seismic.design_period_s,
+        height_m=seismic.height_m,
+        steel_ratio_alpha=seismic.steel_ratio_alpha,
+        tc=seismic.tc,
+        base_level=seismic.base_level,
+        base_elevation=seismic.base_elevation,
+        base_mass_policy=seismic.base_mass_policy,
+        dead_load_lc=seismic.dead_load_lc,
+        live_load_lc=seismic.live_load_lc,
+        live_load_factor=seismic.live_load_factor,
+        weight_load_cases=tuple(cases),
+        directions=seismic.directions,
+    )
 
 
 def _parse_wood_check_settings(raw):

@@ -4,7 +4,10 @@ from typing import Optional, Sequence, Tuple
 from stb_project import Story
 
 
-DEFAULT_TOLERANCE = 1.0e-6
+# Project story elevations are often rounded while model nodes keep source
+# coordinates. Treat floor-level loads within 1 cm of a story elevation as
+# belonging to the upper story; story_for_z iterates from top to bottom.
+DEFAULT_TOLERANCE = 1.0e-2
 
 
 def sorted_stories(stories: Sequence[Story]) -> Tuple[Story, ...]:

@@ -12,6 +12,7 @@ from stb_practice.structural_indices import (
     StoryIndex,
     _build_shear_panel_stiffness_rows,
     _directional_rigidity_center,
+    _stiffness_components,
     _story_for_member,
     _story_indices,
 )
@@ -104,7 +105,7 @@ class TestStructuralIndices(unittest.TestCase):
         self.assertGreater(story1.ys, -10.0)
         self.assertLess(story1.ys, 10.0)
         self.assertEqual(story1.status, "OK")
-        self.assertAlmostEqual(story1.xs, 1.78, places=1)
+        self.assertAlmostEqual(story1.xs, 3.14, places=1)
         self.assertAlmostEqual(story1.ys, 3.78, places=1)
         self.assertIsNotNone(story1.rex_m)
         self.assertIsNotNone(story1.rey_m)
@@ -148,6 +149,22 @@ class TestStructuralIndices(unittest.TestCase):
         xs, ys = _directional_rigidity_center(rows)
         self.assertAlmostEqual(xs, 7.5)
         self.assertAlmostEqual(ys, 0.0)
+
+    def test_stiffness_components_keep_directional_diagonal_terms_stable(self):
+        dxx, _dxy, dyy, status = _stiffness_components(
+            -0.02262796207547869,
+            -2.5523537486659664e-11,
+            0.0002032027446953362,
+            -8.538640220604311e-05,
+            0.028451442474771757,
+            1.5134602660646994e-09,
+            1.1004385840419712e-05,
+            -9.896220019808052e-06,
+        )
+
+        self.assertEqual(status, "diagonal_fallback")
+        self.assertAlmostEqual(dxx, -111.35657694685675, places=6)
+        self.assertAlmostEqual(dyy, -0.00015293316670763092, places=9)
 
     def test_second_story_center_of_rigidity_is_available_for_uk_diaphragm_sample(self):
         dat_path = _data_path("UK_240416_floors_1to3_diaphragm.dat")

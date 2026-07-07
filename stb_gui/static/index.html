@@ -61,7 +61,7 @@
       </div>
       <div id="contextMenuPickSection">
       <div id="contextMenuTitle" class="context-menu-title"></div>
-      <button type="button" id="contextMenuDeleteElems" class="context-menu-item context-menu-danger" data-action="delete">Delete elements…</button>
+      <button type="button" id="contextMenuDeleteMember" class="context-menu-item context-menu-danger" data-action="delete-members">Delete Member…</button>
       <div id="contextMenuNodeSupport" class="context-menu-group">
         <div class="context-menu-label">Support (CONS)</div>
         <div class="pick-cons-grid context-menu-cons-grid">
@@ -79,9 +79,6 @@
         </div>
         <button type="button" class="context-menu-item" data-action="set-cons">Apply support</button>
       </div>
-      <button type="button" id="contextMenuDeleteNodes" class="context-menu-item context-menu-danger" data-action="delete-nodes">Delete nodes…</button>
-      <button type="button" id="contextMenuDeleteDmem" class="context-menu-item context-menu-danger" data-action="delete-dmem">Delete DMEM…</button>
-      <button type="button" id="contextMenuDeleteWrw" class="context-menu-item context-menu-danger" data-action="delete-wrw">Delete WRW…</button>
       <div id="contextMenuWrwEdits" class="context-menu-group">
         <div class="context-menu-label">WRW type / multiplier</div>
         <div class="context-menu-field-row">
@@ -221,6 +218,15 @@
           <span>Def. ×</span>
           <input type="number" id="defFactor" value="50" min="0" max="500" step="5">
         </label>
+        <label class="panel-row">
+          <span>Disp.</span>
+          <select id="dispComponent">
+            <option value="mag">|U|</option>
+            <option value="ux">UX</option>
+            <option value="uy">UY</option>
+            <option value="uz">UZ</option>
+          </select>
+        </label>
         <label class="panel-check">
           <input type="checkbox" id="chkDeformed"> Deformed shape
         </label>
@@ -351,7 +357,7 @@
           <button type="button" id="pickModeWall" class="pick-mode-btn" data-pick-mode="wall" aria-pressed="false" title="Toggle wall pick (W)">Wall</button>
         </div>
       </section>
-      <p id="pickModeHint" class="panel-hint">All targets (Nodes, Members, Diaphragm, Wall). Toggle Pick target buttons to filter. Click or drag to pick. Ctrl+click toggles. Right-click = menu. Esc clears.</p>
+      <p id="pickModeHint" class="panel-hint">All targets (Nodes, Members, Diaphragm, Wall). Toggle Pick target buttons to filter. Click or drag to pick. Shift+click adds. Ctrl+click removes. Right-click = menu. Esc clears.</p>
       <section id="pickElemCreateOptions" class="panel-section pick-options-section" hidden>
         <div class="panel-section-title">New ELEM (2 nodes)</div>
         <label class="panel-row">
