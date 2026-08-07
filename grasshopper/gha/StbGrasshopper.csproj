@@ -8,6 +8,9 @@
     <TargetExt>.gha</TargetExt>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- GH_Component.Icon requires System.Drawing.Bitmap. Rhino/Grasshopper
+         provides the supported host environment on each target platform. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
@@ -26,6 +29,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.Drawing.Common" Version="8.0.10" PrivateAssets="all" />
+    <EmbeddedResource Include="Resources\Icons\*.png" />
     <Reference Include="Grasshopper">
       <HintPath>$(GrasshopperPath)</HintPath>
       <Private>false</Private>

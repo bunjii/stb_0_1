@@ -20,6 +20,7 @@ namespace StbGrasshopper
         public List<NodalDisplacement> Displacements { get; } = new List<NodalDisplacement>();
         public List<ReactionForce> Reactions { get; } = new List<ReactionForce>();
         public List<ElementForce> ElementForces { get; } = new List<ElementForce>();
+        public List<StbSectionProperties> Sections { get; } = new List<StbSectionProperties>();
         public List<StbNodeGeometry> Nodes { get; } = new List<StbNodeGeometry>();
         public List<StbElementGeometry> Elements { get; } = new List<StbElementGeometry>();
     }
@@ -66,5 +67,13 @@ namespace StbGrasshopper
         public double Mzj { get; set; }
         public double Myc { get; set; }
         public double Mzc { get; set; }
+    }
+
+    public sealed class StbSectionProperties
+    {
+        public int SectionId { get; set; }
+        public double Area { get; set; }
+        public double Wy { get; set; }
+        public double Wz { get; set; }
     }
 }

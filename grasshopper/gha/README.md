@@ -12,12 +12,13 @@ environment and makes classroom Windows deployment easier.
 - `STB Load Cases`: lists available load cases in parsed results
 - `STB Displacements`: exposes load case, node id, translation, and rotation rows
 - `STB Forces`: exposes parsed element force rows
+- `STB Stress`: previews maximum normal stress with a viewport color legend
 - `STB DAT Nodes`: reads original node points from an existing `.dat` file
 - `STB DAT Beams`: reads element connectivity from an existing `.dat` file
 - `STB Element`: input `Name`, `Line`, `Section`, `Beta` → output typed `Element`
 - `STB Material`: input `Name`, `E`, `G`, `Gamma`, `Alpha`, `Fy` → output typed `Mat`
 - `STB Section`: input `Name`, `Mat`, `Type`, `Dim` → output typed `Section`
-- `STB Support`: input `Point`, restraint flags → output typed `Support`
+- `STB Support`: input `Point`, six on-component restraint toggles → output typed `Support`
 - `STB Load`: input `Point`, `LC`, `F`, `M` → output typed `Load`
 - `STB Assemble Model`: input typed `Element`, `Load`, `Support`, `Write` → output `Text`, `DAT`
 - `STB Deformed Shape`: preview placeholder for the next step

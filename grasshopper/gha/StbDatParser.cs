@@ -17,6 +17,7 @@ namespace StbGrasshopper
         public int ElementId { get; set; }
         public int NodeI { get; set; }
         public int NodeJ { get; set; }
+        public int SectionId { get; set; }
     }
 
     public static class StbDatParser
@@ -99,6 +100,7 @@ namespace StbGrasshopper
                     ElementId = int.Parse(parts[1].Trim(), CultureInfo.InvariantCulture),
                     NodeI = int.Parse(parts[2].Trim(), CultureInfo.InvariantCulture),
                     NodeJ = int.Parse(parts[3].Trim(), CultureInfo.InvariantCulture),
+                    SectionId = int.Parse(parts[4].Trim(), CultureInfo.InvariantCulture),
                 };
                 return true;
             }

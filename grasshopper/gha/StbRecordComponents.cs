@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using GH_IO.Serialization;
 using Grasshopper.Kernel;
 using Rhino;
 using Rhino.Geometry;
@@ -132,7 +133,7 @@ namespace StbGrasshopper
         public StbElementComponent() : base("STB Element", "STB Elem", "Create an STB element from a line and section.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("e9ac94fe-4ee4-4d15-b16b-7881e3b1f622");
 
-        protected override Bitmap Icon => StbIcons.Beam;
+        protected override Bitmap Icon => StbIcons.Element;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
@@ -286,20 +287,29 @@ namespace StbGrasshopper
 
     public sealed class StbSupportComponent : GH_Component
     {
+        private readonly bool[] _restraints = { true, true, true, true, true, true };
+
         public StbSupportComponent() : base("STB Support", "STB Sup", "Create STB support objects from points.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("54816191-f022-43a1-b094-9bb5cf4bc371");
 
         protected override Bitmap Icon => StbIcons.Support;
 
+        internal bool IsRestrained(int index) => _restraints[index];
+
+        internal void ToggleRestraint(int index)
+        {
+            _restraints[index] = !_restraints[index];
+            ExpireSolution(true);
+        }
+
+        public override void CreateAttributes()
+        {
+            m_attributes = new StbSupportAttributes(this);
+        }
+
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddPointParameter("Point", "P", "Support location in meters.", GH_ParamAccess.list);
-            pManager.AddBooleanParameter("TX", "TX", "Fix translation X.", GH_ParamAccess.item, true);
-            pManager.AddBooleanParameter("TY", "TY", "Fix translation Y.", GH_ParamAccess.item, true);
-            pManager.AddBooleanParameter("TZ", "TZ", "Fix translation Z.", GH_ParamAccess.item, true);
-            pManager.AddBooleanParameter("RX", "RX", "Fix rotation X.", GH_ParamAccess.item, true);
-            pManager.AddBooleanParameter("RY", "RY", "Fix rotation Y.", GH_ParamAccess.item, true);
-            pManager.AddBooleanParameter("RZ", "RZ", "Fix rotation Z.", GH_ParamAccess.item, true);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -310,14 +320,7 @@ namespace StbGrasshopper
         protected override void SolveInstance(IGH_DataAccess da)
         {
             var points = new List<Point3d>();
-            bool tx = true, ty = true, tz = true, rx = true, ry = true, rz = true;
             if (!da.GetDataList(0, points)) return;
-            da.GetData(1, ref tx);
-            da.GetData(2, ref ty);
-            da.GetData(3, ref tz);
-            da.GetData(4, ref rx);
-            da.GetData(5, ref ry);
-            da.GetData(6, ref rz);
 
             var supports = new List<StbSupportGoo>();
             foreach (var point in points)
@@ -325,16 +328,40 @@ namespace StbGrasshopper
                 supports.Add(new StbSupportGoo(new StbSupportModel
                 {
                     Point = point,
-                    Tx = tx,
-                    Ty = ty,
-                    Tz = tz,
-                    Rx = rx,
-                    Ry = ry,
-                    Rz = rz,
+                    Tx = _restraints[0],
+                    Ty = _restraints[1],
+                    Tz = _restraints[2],
+                    Rx = _restraints[3],
+                    Ry = _restraints[4],
+                    Rz = _restraints[5],
                 }));
             }
 
             da.SetDataList(0, supports);
+        }
+
+        public override bool Write(GH_IWriter writer)
+        {
+            for (var i = 0; i < _restraints.Length; i++)
+            {
+                writer.SetBoolean("Restraint" + i, _restraints[i]);
+            }
+
+            return base.Write(writer);
+        }
+
+        public override bool Read(GH_IReader reader)
+        {
+            for (var i = 0; i < _restraints.Length; i++)
+            {
+                var key = "Restraint" + i;
+                if (reader.ItemExists(key))
+                {
+                    _restraints[i] = reader.GetBoolean(key);
+                }
+            }
+
+            return base.Read(reader);
         }
     }
 
