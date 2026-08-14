@@ -27,6 +27,26 @@ class TestProjectEditForm(unittest.TestCase):
         self.assertIn("load_conditions.seismic.rt", paths)
         self.assertIn("table", load_section)
         self.assertEqual(load_section["table"]["path"], "load_conditions.diaphragms")
+        directions_section = next(s for s in form["sections"] if s["id"] == "seismic_directions")
+        self.assertEqual(directions_section["table"]["path"], "load_conditions.seismic.directions")
+        direction_columns = [c["path"] for c in directions_section["table"]["columns"]]
+        self.assertEqual(direction_columns, ["name", "axis", "load_case", "sign"])
+        weight_lc_section = next(s for s in form["sections"] if s["id"] == "seismic_weight_load_cases")
+        self.assertEqual(weight_lc_section["table"]["path"], "load_conditions.seismic.weight_load_cases")
+        weight_lc_columns = [c["path"] for c in weight_lc_section["table"]["columns"]]
+        self.assertEqual(weight_lc_columns, ["load_case", "name", "factor", "role"])
+        floor_section = next(s for s in form["sections"] if s["id"] == "floor_loads")
+        self.assertEqual(floor_section["table"]["path"], "load_conditions.floor_loads")
+        floor_columns = [c["path"] for c in floor_section["table"]["columns"]]
+        self.assertEqual(
+            floor_columns,
+            ["diaphragm_id", "story", "role", "load_case", "name", "pressure_kN_m2"],
+        )
+        masses_section = next(s for s in form["sections"] if s["id"] == "seismic_masses")
+        self.assertEqual(masses_section["table"]["path"], "load_conditions.seismic_masses")
+        mass_columns = [c["path"] for c in masses_section["table"]["columns"]]
+        self.assertIn("mass_role", mass_columns)
+        self.assertIn("application_diaphragm", mass_columns)
 
     def test_default_project_template_for_missing_sidecar(self):
         raw = default_project_dict_for_dat("data/UK_240416panel.dat")

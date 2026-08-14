@@ -49,6 +49,8 @@ def _find_dlod_insert_index(lines: Sequence[str]) -> int:
             continue
         if in_dlod_section and stripped.startswith("# ---") and "DLOD" not in stripped.upper():
             return i
+        if stripped.startswith("# --- END ") and "DLOD (AUTO)" in stripped.upper():
+            last_dlod = i
         if stripped.startswith("DLOD,"):
             last_dlod = i
 
@@ -57,6 +59,14 @@ def _find_dlod_insert_index(lines: Sequence[str]) -> int:
     if in_dlod_section:
         return len(lines)
     return len(lines)
+
+
+def sync_seismic_dlod_lines(lines: Iterable[str], dloads: Sequence) -> list:
+    if not dloads:
+        return list(lines)
+    cleaned = _remove_dlod_for_records(lines, dloads)
+    block = build_seismic_block(dloads)
+    return replace_seismic_dlod_block(cleaned, block)
 
 
 def _remove_dlod_for_records(lines: Iterable[str], dloads: Sequence) -> list:

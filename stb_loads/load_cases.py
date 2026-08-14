@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from load_case_types import (
     LC_TYPE_CUSTOM,
@@ -23,16 +23,23 @@ def resolve_load_cases_by_type(mdl, load_type: int) -> Tuple[List[int], List[str
     return typed, []
 
 
-def resolve_seismic_weight_load_cases(mdl, seismic_settings=None) -> Tuple[List[int], List[str]]:
-    """Return LC ids used for Wi aggregation (TYPE 1 DL + TYPE 3 LL(E))."""
-
+def resolve_seismic_weight_load_case_factors(mdl, seismic_settings=None) -> Tuple[Dict[int, float], List[str]]:
+    """Return LC factors used for Wi aggregation."""
     warnings = []
+    if seismic_settings is not None:
+        explicit = getattr(seismic_settings, "weight_load_cases", ()) or ()
+        if explicit:
+            return {
+                int(c.load_case): float(getattr(c, "factor", 1.0))
+                for c in explicit
+            }, warnings
+
     typed = sorted(
         lc.lc for lc in _lcases(mdl)
         if getattr(lc, "load_type", None) in SEISMIC_WEIGHT_TYPES
     )
     if typed:
-        return typed, warnings
+        return {int(lc): 1.0 for lc in typed}, warnings
 
     if seismic_settings is not None:
         dead_lc = getattr(seismic_settings, "dead_load_lc", None)
@@ -42,10 +49,10 @@ def resolve_seismic_weight_load_cases(mdl, seismic_settings=None) -> Tuple[List[
             warnings.append(
                 "LNME TYPE 1/3 not found; using project.load_conditions.seismic.dead_load_lc override."
             )
-            lcs = [int(dead_lc)]
+            factors = {int(dead_lc): 1.0}
             if live_lc is not None and live_factor != 0.0:
-                lcs.append(int(live_lc))
-            return lcs, warnings
+                factors[int(live_lc)] = live_factor
+            return factors, warnings
 
     glod_lcs = sorted({
         g.lc for g in getattr(mdl, "glds", [])
@@ -55,7 +62,7 @@ def resolve_seismic_weight_load_cases(mdl, seismic_settings=None) -> Tuple[List[
         warnings.append(
             "LNME TYPE 1/3 not found; using sole GLOD load case LC {0} as DL.".format(glod_lcs[0])
         )
-        return glod_lcs, warnings
+        return {int(glod_lcs[0]): 1.0}, warnings
 
     legacy_dl = sorted(
         lc.lc for lc in _lcases(mdl)
@@ -64,9 +71,15 @@ def resolve_seismic_weight_load_cases(mdl, seismic_settings=None) -> Tuple[List[
     )
     if legacy_dl:
         warnings.append("LNME TYPE 1/3 not found; using legacy DL-named load cases.")
-        return legacy_dl, warnings
+        return {int(lc): 1.0 for lc in legacy_dl}, warnings
 
-    return [], warnings + ["No seismic weight load cases (LNME TYPE 1 or 3) were resolved."]
+    return {}, warnings + ["No seismic weight load cases (LNME TYPE 1 or 3) were resolved."]
+
+
+def resolve_seismic_weight_load_cases(mdl, seismic_settings=None) -> Tuple[List[int], List[str]]:
+    """Return LC ids used for Wi aggregation (TYPE 1 DL + TYPE 3 LL(E))."""
+    factors, warnings = resolve_seismic_weight_load_case_factors(mdl, seismic_settings)
+    return sorted(factors.keys()), warnings
 
 
 def resolve_seismic_directions(mdl, project_directions=()) -> Tuple[list, List[str]]:

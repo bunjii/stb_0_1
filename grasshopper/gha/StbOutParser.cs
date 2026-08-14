@@ -24,7 +24,17 @@ namespace StbGrasshopper
                     parts[i] = parts[i].Trim();
                 }
 
-                if (parts[0] == "NDSP" && parts.Length >= 9)
+                if (parts[0] == "SPRP" && parts.Length >= 10)
+                {
+                    results.Sections.Add(new StbSectionProperties
+                    {
+                        SectionId = ParseInt(parts[1]),
+                        Area = ParseDouble(parts[2]),
+                        Wy = ParseDouble(parts[8]),
+                        Wz = ParseDouble(parts[9]),
+                    });
+                }
+                else if (parts[0] == "NDSP" && parts.Length >= 9)
                 {
                     var lc = ParseInt(parts[1]);
                     if (loadCase.HasValue && lc != loadCase.Value)

@@ -27,6 +27,11 @@
       "name": "2",
       "elevation": 3.035,
       "height": 3.01
+    },
+    {
+      "name": "3",
+      "elevation": 6.045,
+      "height": 3.0
     }
   ],
   "member_classes": [],

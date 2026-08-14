@@ -5,7 +5,7 @@ from typing import Dict, List, Sequence, Tuple
 
 import common
 
-from stb_loads.load_cases import resolve_seismic_weight_load_cases
+from stb_loads.load_cases import resolve_seismic_weight_load_case_factors
 from stb_loads.story import sorted_stories, story_for_z
 from stb_project import LoadConditionSettings, ProjectDefinition
 
@@ -91,15 +91,17 @@ def aggregate_story_weights(
         raise ValueError("project.stories is required for seismic weight aggregation")
 
     warnings: List[str] = []
-    weight_lcs, lc_warnings = resolve_seismic_weight_load_cases(mdl, seismic)
+    weight_lc_factors, lc_warnings = resolve_seismic_weight_load_case_factors(mdl, seismic)
     warnings.extend(lc_warnings)
+    weight_lcs = sorted(weight_lc_factors.keys())
 
     weights: Dict[str, float] = {s.name: 0.0 for s in stories}
     if weight_lcs:
         by_lc = _fem_story_weights_by_lc(mdl, stories, weight_lcs)
         for lc in weight_lcs:
+            factor = float(weight_lc_factors.get(lc, 1.0))
             for name, w in by_lc.get(lc, {}).items():
-                weights[name] += max(0.0, w)
+                weights[name] += max(0.0, w * factor)
 
     summaries = []
     for story in stories:

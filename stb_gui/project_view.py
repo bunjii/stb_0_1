@@ -12,12 +12,18 @@ from stb_project import (
     ProjectDefinition,
     ProjectSchemaError,
     SCHEMA_VERSION,
-    apply_project_load_combinations_to_dat,
     effective_seismic_ci,
     load_project_for_dat,
     project_path_for_dat,
     validate_project_dict,
 )
+from stb_project.floor_loads import sync_project_floor_dlod_lines
+from stb_project.load_combinations import sync_project_lcmb_lines
+from stb_project.load_names import sync_project_lnme_lines
+from stb_loads import compute_seismic_distribution, generate_dlod_records, sync_seismic_dlod_lines
+from stb_engine import parse_input
+from stb_gui.dat_edit import validate_dat_text
+from stb_gui.dat_format_headers import write_dat_text
 from stb_gui.project_edit import build_project_edit_form
 from stb_gui.model_json import normalize_model_relpath, project_root, resolve_model_path
 
@@ -178,14 +184,48 @@ def save_project_json_for_model(dat_relpath: str, raw: dict) -> Dict[str, Any]:
     except ProjectSchemaError as ex:
         raise ValueError(str(ex))
 
+    with open(full, "r", encoding="utf-8") as fh:
+        dat_lines = fh.read().splitlines()
+
+    updated_lines = sync_project_lnme_lines(dat_lines, project)
+    updated_lines = sync_project_floor_dlod_lines(updated_lines, project)
+    updated_lines = _sync_project_seismic_dlod_lines(updated_lines, project, full)
+    updated_lines = sync_project_lcmb_lines(updated_lines, project)
+    updated_text = _join_dat_lines(updated_lines)
+    validate_dat_text(updated_text)
+
     os.makedirs(os.path.dirname(project_path) or ".", exist_ok=True)
     with open(project_path, "w", encoding="utf-8") as fh:
         json.dump(project.to_dict(), fh, indent=2, ensure_ascii=False)
         fh.write("\n")
 
-    apply_project_load_combinations_to_dat(full, project)
+    write_dat_text(full, updated_text)
 
     return load_project_view_for_model(dat_relpath)
+
+
+def _join_dat_lines(lines: List[str]) -> str:
+    text = "\n".join(lines)
+    if lines and lines[-1] != "":
+        text += "\n"
+    return text
+
+
+def _sync_project_seismic_dlod_lines(lines: List[str], project: ProjectDefinition, dat_path: str) -> List[str]:
+    if not project.load_conditions.floor_loads:
+        return lines
+    input_text = _join_dat_lines(lines)
+    validate_dat_text(input_text)
+    mdl = parse_input(input_text.splitlines())
+    mdl.filepath = dat_path
+    try:
+        result = compute_seismic_distribution(mdl, project)
+    except ValueError:
+        return lines
+    dloads = generate_dlod_records(result)
+    if not dloads:
+        return lines
+    return sync_seismic_dlod_lines(lines, dloads)
 
 
 def build_project_view(
@@ -348,6 +388,17 @@ def build_project_view(
         }
     else:
         dir_table = None
+    if seismic.weight_load_cases:
+        weight_lc_table = {
+            "title": "地震重量LC",
+            "columns": ["LC", "名称", "係数", "用途"],
+            "rows": [
+                [str(c.load_case), _display(c.name), _num(c.factor), c.role]
+                for c in seismic.weight_load_cases
+            ],
+        }
+    else:
+        weight_lc_table = None
 
     load_section: Dict[str, Any] = {
         "id": "load_conditions",
@@ -355,6 +406,8 @@ def build_project_view(
         "rows": seismic_rows,
     }
     tables = []
+    if weight_lc_table:
+        tables.append(weight_lc_table)
     if dir_table:
         tables.append(dir_table)
     tables.append({
@@ -364,6 +417,21 @@ def build_project_view(
             [str(d.diaphragm_id), d.story]
             for d in project.load_conditions.diaphragms
         ] or [["—", "—"]],
+    })
+    tables.append({
+        "title": "床荷重 (Project 管理 / DLOD TYPE 4)",
+        "columns": ["階", "DIAP ID", "用途", "LC", "名称", "kN/m2"],
+        "rows": [
+            [
+                _display(f.story),
+                str(f.diaphragm_id),
+                f.role,
+                str(f.load_case),
+                _display(f.name),
+                _num(f.pressure_kN_m2),
+            ]
+            for f in project.load_conditions.floor_loads
+        ] or [["—", "—", "—", "—", "—", "—"]],
     })
     load_section["tables"] = tables
     sections.append(load_section)

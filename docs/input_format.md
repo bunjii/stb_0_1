@@ -416,7 +416,16 @@ LNME, 5, 7, COMB1
 
 Legacy text names (`DL`, `EQX`, etc.) in the TYPE column are still accepted and mapped to the codes above.
 
-For Ai seismic weight aggregation (`stb loads seismic`), **Wi uses TYPE 1 (DL) + TYPE 3 (LL(E))** on the referenced load cases. Mass levels are defined per `project.json` **`load_conditions.seismic_masses`** when present; each entry has a **`mass_role`**:
+For Ai seismic weight aggregation (`stb loads seismic`), **Wi uses TYPE 1 (DL) + TYPE 3 (LL(E))** on the referenced load cases. This can be overridden in `project.json` with **`load_conditions.seismic.weight_load_cases`**:
+
+```json
+"weight_load_cases": [
+  { "load_case": 0, "factor": 1.0, "role": "DL", "name": "DL" },
+  { "load_case": 3, "factor": 0.5, "role": "LL_E", "name": "LL(E)" }
+]
+```
+
+Mass levels are defined per `project.json` **`load_conditions.seismic_masses`** when present; each entry has a **`mass_role`**:
 
 - **`BASE_MASS`** (e.g. 1F floor supported on foundation, not on upper-structure diaphragms): included in ΣWi and αi denominator; **no DLOD** output.
 - **`DIAPHRAGM_MASS`** (upper floors / roof): included in ΣWi and αi; **Fi** is written to **`application_diaphragm`** as TYPE 6 DLOD AREA.

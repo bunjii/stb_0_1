@@ -38,6 +38,12 @@ const COLORS = {
 const PRES_ZERO = 1e-10;
 const FORCE_LABELS = ["", "Nx", "Vy", "Vz", "Mx", "My", "Mz"];
 const FORCE_UNITS = ["", "kN", "kN", "kN", "kNm", "kNm", "kNm"];
+const DISP_COMPONENTS = {
+  mag: { label: "|U|", index: null },
+  ux: { label: "UX", index: 0 },
+  uy: { label: "UY", index: 1 },
+  uz: { label: "UZ", index: 2 },
+};
 
 const ALPHA = {
   labelElem: 1.0,
@@ -121,6 +127,7 @@ const RESULTS_DISPLAY_DEFAULTS = {
   defFactor: 50,
   deformed: false,
   dispContour: false,
+  dispComponent: "mag",
   supports: true,
   ejnt: false,
   loads: true,
@@ -181,6 +188,7 @@ const el = {
   btnOutput: document.getElementById("btnOutput"),
   lcSelect: document.getElementById("lcSelect"),
   defFactor: document.getElementById("defFactor"),
+  dispComponent: document.getElementById("dispComponent"),
   chkDeformed: document.getElementById("chkDeformed"),
   chkDispContour: document.getElementById("chkDispContour"),
   dispLegendOverlay: document.getElementById("dispLegendOverlay"),
@@ -289,10 +297,7 @@ const el = {
   contextMenuTitle: document.getElementById("contextMenuTitle"),
   contextMenuSections: document.getElementById("contextMenuSections"),
   contextMenuMaterials: document.getElementById("contextMenuMaterials"),
-  contextMenuDeleteElems: document.getElementById("contextMenuDeleteElems"),
-  contextMenuDeleteNodes: document.getElementById("contextMenuDeleteNodes"),
-  contextMenuDeleteDmem: document.getElementById("contextMenuDeleteDmem"),
-  contextMenuDeleteWrw: document.getElementById("contextMenuDeleteWrw"),
+  contextMenuDeleteMember: document.getElementById("contextMenuDeleteMember"),
   contextMenuWrwEdits: document.getElementById("contextMenuWrwEdits"),
   contextMenuDmemEdits: document.getElementById("contextMenuDmemEdits"),
   contextMenuDmemCreate: document.getElementById("contextMenuDmemCreate"),
@@ -760,7 +765,7 @@ function pickModeHintText() {
   const filter = hasPickTargetFilter()
     ? "Filtered: " + Array.from(pickSubModes).join(", ") + "."
     : "All targets (Nodes, Members, Diaphragm, Wall).";
-  return filter + " Toggle Pick target buttons to filter. Click or drag to pick. Ctrl+click toggles. Right-click = menu. Esc clears.";
+  return filter + " Toggle Pick target buttons to filter. Click or drag to pick. Shift+click adds. Ctrl+click removes. Right-click = menu. Esc clears.";
 }
 
 function updatePickModeUI() {
@@ -1032,6 +1037,31 @@ function pruneMemberVisibilityFilter() {
   }
 }
 
+function addMemberVisibilityIds(elemIds, dmemIds, wrwIds) {
+  if (memberVisibilityFilter !== "only") return false;
+  let changed = false;
+  for (const id of elemIds || []) {
+    if (!visibilityElementIds.has(id)) {
+      visibilityElementIds.add(id);
+      changed = true;
+    }
+  }
+  for (const id of dmemIds || []) {
+    if (!visibilityDmemIds.has(id)) {
+      visibilityDmemIds.add(id);
+      changed = true;
+    }
+  }
+  for (const id of wrwIds || []) {
+    if (!visibilityWrwIds.has(id)) {
+      visibilityWrwIds.add(id);
+      changed = true;
+    }
+  }
+  if (changed) invalidateGeometryVisibilityCache();
+  return changed;
+}
+
 function applyMemberVisibilityFilter(mode) {
   if (mode === "all") {
     resetMemberVisibilityFilter();
@@ -1060,7 +1090,9 @@ function applyMemberVisibilityFilter(mode) {
 function setSelectedWrwIds(ids, mode) {
   const next = mode === "replace" ? new Set() : new Set(selectedWrwIds);
   for (const id of ids) {
-    if (mode === "toggle") {
+    if (mode === "remove") {
+      next.delete(id);
+    } else if (mode === "toggle") {
       if (next.has(id)) next.delete(id);
       else next.add(id);
     } else {
@@ -1075,7 +1107,9 @@ function setSelectedWrwIds(ids, mode) {
 function setSelectedDmemIds(ids, mode) {
   const next = mode === "replace" ? new Set() : new Set(selectedDmemIds);
   for (const id of ids) {
-    if (mode === "toggle") {
+    if (mode === "remove") {
+      next.delete(id);
+    } else if (mode === "toggle") {
       if (next.has(id)) next.delete(id);
       else next.add(id);
     } else {
@@ -1090,7 +1124,9 @@ function setSelectedDmemIds(ids, mode) {
 function setSelectedElementIds(ids, mode) {
   const next = mode === "replace" ? new Set() : new Set(selectedElementIds);
   for (const id of ids) {
-    if (mode === "toggle") {
+    if (mode === "remove") {
+      next.delete(id);
+    } else if (mode === "toggle") {
       if (next.has(id)) next.delete(id);
       else next.add(id);
     } else {
@@ -1105,7 +1141,9 @@ function setSelectedElementIds(ids, mode) {
 function setSelectedNodeIds(ids, mode) {
   const next = mode === "replace" ? new Set() : new Set(selectedNodeIds);
   for (const id of ids) {
-    if (mode === "toggle") {
+    if (mode === "remove") {
+      next.delete(id);
+    } else if (mode === "toggle") {
       if (next.has(id)) next.delete(id);
       else next.add(id);
     } else {
@@ -1129,6 +1167,13 @@ function addPickSelection(nodeIds, elemIds, dmemIds, wrwIds) {
   setSelectedElementIds(elemIds, "add");
   setSelectedDmemIds(dmemIds == null ? [] : dmemIds, "add");
   setSelectedWrwIds(wrwIds == null ? [] : wrwIds, "add");
+}
+
+function removePickSelection(nodeIds, elemIds, dmemIds, wrwIds) {
+  setSelectedNodeIds(nodeIds, "remove");
+  setSelectedElementIds(elemIds, "remove");
+  setSelectedDmemIds(dmemIds == null ? [] : dmemIds, "remove");
+  setSelectedWrwIds(wrwIds == null ? [] : wrwIds, "remove");
 }
 
 function viewportMousePoint(ev) {
@@ -1963,13 +2008,20 @@ function targetsInScreenRect(x0, y0, x1, y1, windowMode) {
   return { nodeIds, elemIds, dmemIds, wrwIds };
 }
 
-function applyPickedTarget(picked, extend) {
+function applyPickedTarget(picked, addToSelection, removeFromSelection) {
   if (picked == null) return false;
-  if (extend) {
-    if (picked.kind === "node") setSelectedNodeIds([picked.id], "toggle");
-    else if (picked.kind === "elem") setSelectedElementIds([picked.id], "toggle");
-    else if (picked.kind === "dmem") setSelectedDmemIds([picked.id], "toggle");
-    else if (picked.kind === "wrw") setSelectedWrwIds([picked.id], "toggle");
+  if (removeFromSelection) {
+    if (picked.kind === "node") setSelectedNodeIds([picked.id], "remove");
+    else if (picked.kind === "elem") setSelectedElementIds([picked.id], "remove");
+    else if (picked.kind === "dmem") setSelectedDmemIds([picked.id], "remove");
+    else if (picked.kind === "wrw") setSelectedWrwIds([picked.id], "remove");
+    return true;
+  }
+  if (addToSelection) {
+    if (picked.kind === "node") setSelectedNodeIds([picked.id], "add");
+    else if (picked.kind === "elem") setSelectedElementIds([picked.id], "add");
+    else if (picked.kind === "dmem") setSelectedDmemIds([picked.id], "add");
+    else if (picked.kind === "wrw") setSelectedWrwIds([picked.id], "add");
     return true;
   }
   replacePickSelectionForKind(picked.kind, [picked.id]);
@@ -1986,14 +2038,15 @@ function finishSelectionDrag(ev) {
   const end = viewportMousePoint(ev);
   const dx = end.x - drag.startX;
   const dy = end.y - drag.startY;
-  const extend = !!(ev.ctrlKey || ev.metaKey);
+  const addToSelection = !!ev.shiftKey;
+  const removeFromSelection = !!(ev.ctrlKey || ev.metaKey);
 
   if (Math.hypot(dx, dy) < SELECTION_DRAG_MIN_PX) {
     const picked = pickTargetForMode(end.x, end.y);
     if (picked == null) {
-      if (!extend) clearSelection();
+      if (!addToSelection && !removeFromSelection) clearSelection();
     } else {
-      applyPickedTarget(picked, extend);
+      applyPickedTarget(picked, addToSelection, removeFromSelection);
     }
     return;
   }
@@ -2003,10 +2056,12 @@ function finishSelectionDrag(ev) {
   const total = picked.nodeIds.length + picked.elemIds.length
     + picked.dmemIds.length + picked.wrwIds.length;
   if (total === 0) {
-    if (!extend) clearSelection();
+    if (!addToSelection && !removeFromSelection) clearSelection();
     return;
   }
-  if (extend) {
+  if (removeFromSelection) {
+    removePickSelection(picked.nodeIds, picked.elemIds, picked.dmemIds, picked.wrwIds);
+  } else if (addToSelection) {
     addPickSelection(picked.nodeIds, picked.elemIds, picked.dmemIds, picked.wrwIds);
   } else {
     replacePickSelection(picked.nodeIds, picked.elemIds, picked.dmemIds, picked.wrwIds);
@@ -2622,7 +2677,21 @@ function finishViewportRightDrag(ev) {
     hideContextMenu();
     return;
   }
+  if (ev && ev.preventDefault) ev.preventDefault();
   showViewportContextMenu(ev.clientX, ev.clientY);
+}
+
+function isViewportContextMenuArea(target) {
+  if (!target) return false;
+  if (el.viewport && el.viewport.contains(target)) return true;
+  if (el.elemContextMenu && el.elemContextMenu.contains(target)) return true;
+  return false;
+}
+
+function suppressBrowserContextMenu(ev) {
+  if (!isViewportContextMenuArea(ev.target)) return;
+  ev.preventDefault();
+  ev.stopPropagation();
 }
 
 function populateContextMenuCatalog() {
@@ -2702,11 +2771,8 @@ function populatePickContextMenu() {
   const nodeCount = selectedNodeIds.size;
   const dmemCount = selectedDmemIds.size;
   const wrwCount = selectedWrwIds.size;
-  if (el.contextMenuDeleteElems) {
-    el.contextMenuDeleteElems.hidden = elemCount === 0;
-  }
-  if (el.contextMenuDeleteNodes) {
-    el.contextMenuDeleteNodes.hidden = nodeCount === 0;
+  if (el.contextMenuDeleteMember) {
+    el.contextMenuDeleteMember.hidden = !hasPickSelection();
   }
   if (el.contextMenuNodeSupport) {
     const showSupport = nodeCount > 0 && elemCount === 0 && dmemCount === 0 && wrwCount === 0;
@@ -2715,12 +2781,6 @@ function populatePickContextMenu() {
       const fixed = commonNodeSupportFixed();
       syncConsCheckboxGroups(fixed, fixed == null);
     }
-  }
-  if (el.contextMenuDeleteDmem) {
-    el.contextMenuDeleteDmem.hidden = dmemCount === 0;
-  }
-  if (el.contextMenuDeleteWrw) {
-    el.contextMenuDeleteWrw.hidden = wrwCount === 0;
   }
   if (el.contextMenuElemEdits) {
     el.contextMenuElemEdits.hidden = elemCount === 0;
@@ -2879,7 +2939,11 @@ async function restoreEditHistoryEntry(snapshot, redoTarget) {
     const current = await fetchInputText(path);
     redoTarget.push({ path: path, text: current });
     await saveInputText(path, snapshot.text);
-    await loadSelectedModel(false, { keepSelection: true, keepCamera: true });
+    await loadSelectedModel(false, {
+      keepSelection: true,
+      keepCamera: true,
+      keepMemberVisibility: true,
+    });
     pruneSelectionToModel();
     return true;
   } catch (ex) {
@@ -2939,6 +3003,45 @@ function initEditHistoryShortcuts() {
   });
 }
 
+function pickSelectionCount() {
+  return selectedNodeIds.size + selectedElementIds.size
+    + selectedDmemIds.size + selectedWrwIds.size;
+}
+
+function pickSelectionDeleteSummary() {
+  const parts = [];
+  if (selectedNodeIds.size > 0) {
+    parts.push(selectedNodeIds.size + " node" + (selectedNodeIds.size === 1 ? "" : "s"));
+  }
+  if (selectedElementIds.size > 0) {
+    parts.push(selectedElementIds.size + " element" + (selectedElementIds.size === 1 ? "" : "s"));
+  }
+  if (selectedDmemIds.size > 0) {
+    parts.push(selectedDmemIds.size + " diaphragm" + (selectedDmemIds.size === 1 ? "" : "s"));
+  }
+  if (selectedWrwIds.size > 0) {
+    parts.push(selectedWrwIds.size + " wall" + (selectedWrwIds.size === 1 ? "" : "s"));
+  }
+  return parts.join(", ");
+}
+
+function confirmDeletePickSelection() {
+  if (!hasPickSelection()) return false;
+  const total = pickSelectionCount();
+  let msg = "Delete " + total + " selected member" + (total === 1 ? "" : "s") + "?";
+  const summary = pickSelectionDeleteSummary();
+  if (summary) msg += "\n(" + summary + ")";
+  if (selectedNodeIds.size > 0) {
+    msg += "\nDeleting node(s) will also remove connected elements and related records.";
+  }
+  return window.confirm(msg);
+}
+
+function deletePickSelection() {
+  if (!confirmDeletePickSelection()) return;
+  applyModelEdit({ action: "delete_selection" });
+}
+
 async function applyModelEdit(extra) {
   const path = getCurrentModelPath();
   if (!path) return;
@@ -2986,6 +3089,15 @@ async function applyModelEdit(extra) {
       const diapId = parseInt(extra.diap_id, 10);
       if (isFinite(diapId)) payload.diap_id = diapId;
     }
+  } else if (extra.action === "delete_selection") {
+    if (!hasPickSelection()) return;
+    payload = {
+      action: "delete_selection",
+      node_ids: selectedNodeIdList(),
+      element_ids: selectedElementIdList(),
+      dmem_ids: selectedDmemIdList(),
+      wwll_ids: selectedWrwIdList(),
+    };
   } else if (extra.action === "delete_dmem") {
     if (selectedDmemIds.size === 0) return;
     payload = {
@@ -3054,7 +3166,8 @@ async function applyModelEdit(extra) {
     }
     const body = await res.json();
     const destructive = payload.action === "delete" || payload.action === "delete_nodes"
-      || payload.action === "delete_dmem" || payload.action === "delete_wwll";
+      || payload.action === "delete_dmem" || payload.action === "delete_wwll"
+      || payload.action === "delete_selection";
     const createdDmem = payload.action === "create_dmem";
     const createdWrw = payload.action === "create_wwll";
     const createdElem = payload.action === "create_element";
@@ -3065,17 +3178,22 @@ async function applyModelEdit(extra) {
     await loadSelectedModel(false, {
       keepSelection: !destructive && !createdDmem && !createdWrw && !createdElem,
       keepCamera: true,
+      keepMemberVisibility: true,
     });
+    let visibilityChanged = false;
     if (createdDmem) {
       const createdIds = parseCreatedDmemIdsFromWarnings(body.warnings);
       if (createdIds.length > 1) {
         replacePickSelection([], [], createdIds, []);
+        visibilityChanged = addMemberVisibilityIds([], createdIds, []);
       } else if (createdIds.length === 1) {
         replacePickSelection([], [], createdIds, []);
+        visibilityChanged = addMemberVisibilityIds([], createdIds, []);
       } else {
         const newId = findDmemIdByNodes(payload.diap_id, payload.node_ids);
         if (newId != null) {
           replacePickSelection([], [], [newId], []);
+          visibilityChanged = addMemberVisibilityIds([], [newId], []);
         } else {
           clearSelection();
         }
@@ -3084,6 +3202,7 @@ async function applyModelEdit(extra) {
       const newId = findWrwIdByNodes(payload.node_ids);
       if (newId != null) {
         replacePickSelection([], [], [], [newId]);
+        visibilityChanged = addMemberVisibilityIds([], [], [newId]);
       } else {
         clearSelection();
       }
@@ -3092,6 +3211,7 @@ async function applyModelEdit(extra) {
         ?? findElementIdByNodes(payload.node_ids[0], payload.node_ids[1]);
       if (newId != null) {
         replacePickSelection([], [newId], [], []);
+        visibilityChanged = addMemberVisibilityIds([newId], [], []);
       } else {
         clearSelection();
       }
@@ -3102,6 +3222,7 @@ async function applyModelEdit(extra) {
       selectedWrwIds = prevWrw;
       pruneSelectionToModel();
     }
+    if (visibilityChanged && currentModel) buildModelScene(currentModel);
     let msg = path + " — edit saved";
     if (body.warnings && body.warnings.length) {
       msg += " (" + body.warnings[0] + ")";
@@ -3123,6 +3244,7 @@ function initContextMenu() {
     if (ev.button !== 2) return;
     hideContextMenu();
     beginViewportRightDrag(ev);
+    ev.preventDefault();
     if (selectionModeActive && hasPickSelection()) ev.stopPropagation();
   }, true);
 
@@ -3135,10 +3257,11 @@ function initContextMenu() {
     finishViewportRightDrag(ev);
   });
 
-  canvas.addEventListener("contextmenu", function (ev) {
-    ev.preventDefault();
-    ev.stopPropagation();
-  });
+  document.addEventListener("contextmenu", suppressBrowserContextMenu, true);
+  if (el.viewport) {
+    el.viewport.addEventListener("contextmenu", suppressBrowserContextMenu, true);
+  }
+  el.elemContextMenu.addEventListener("contextmenu", suppressBrowserContextMenu, true);
 
   el.elemContextMenu.addEventListener("click", function (ev) {
     const btn = ev.target.closest("[data-action]");
@@ -3161,35 +3284,8 @@ function initContextMenu() {
       applyMemberVisibilityFilter("all");
       return;
     }
-    if (action === "delete") {
-      const count = selectedElementIds.size;
-      const ok = window.confirm("Delete " + count + " element" + (count === 1 ? "" : "s") + "?");
-      if (!ok) return;
-      applyModelEdit({ action: "delete" });
-      return;
-    }
-    if (action === "delete-nodes") {
-      const count = selectedNodeIds.size;
-      const ok = window.confirm(
-        "Delete " + count + " node" + (count === 1 ? "" : "s") +
-        " and all elements connected to them?"
-      );
-      if (!ok) return;
-      applyModelEdit({ action: "delete_nodes" });
-      return;
-    }
-    if (action === "delete-dmem") {
-      const count = selectedDmemIds.size;
-      const ok = window.confirm("Delete " + count + " DMEM record" + (count === 1 ? "" : "s") + "?");
-      if (!ok) return;
-      applyModelEdit({ action: "delete_dmem" });
-      return;
-    }
-    if (action === "delete-wrw") {
-      const count = selectedWrwIds.size;
-      const ok = window.confirm("Delete " + count + " WRW record" + (count === 1 ? "" : "s") + "?");
-      if (!ok) return;
-      applyModelEdit({ action: "delete_wwll" });
+    if (action === "delete-members") {
+      deletePickSelection();
       return;
     }
     if (action === "set-wrw-model") {
@@ -3460,6 +3556,7 @@ function updateViewerInfoOverlay(model) {
   const lc = String(el.lcSelect.value || "");
   const solved = analysisComplete(model);
   const defFac = parseFloat(el.defFactor.value) || 0;
+  const dispLabel = dispComponentLabel(currentDispComponent());
   const forceComp = selectedForceLabel();
 
   const pointLoads = model.point_loads ? model.point_loads.length : 0;
@@ -3467,8 +3564,8 @@ function updateViewerInfoOverlay(model) {
   const supports = model.supports ? model.supports.length : 0;
 
   const displayLines = [];
-  if (el.chkDeformed.checked) displayLines.push("deformed shape x" + defFac.toFixed(1));
-  if (el.chkDispContour && el.chkDispContour.checked) displayLines.push("disp contour");
+  if (el.chkDeformed.checked) displayLines.push("deformed shape " + dispLabel + " x" + defFac.toFixed(1));
+  if (el.chkDispContour && el.chkDispContour.checked) displayLines.push("disp contour " + dispLabel);
   if (el.chkLoads.checked) {
     displayLines.push("input loads (" + loadTypeFilterValue() + ")");
     if (el.chkLoadValues.checked) displayLines.push("load values");
@@ -3791,47 +3888,74 @@ function nodeMap(model) {
   return m;
 }
 
-function nodePosition(n, model, lc, defFac, deformed) {
+function nodePosition(n, model, lc, defFac, deformed, component) {
   let x = n.x, y = n.y, z = n.z;
   if (deformed && n.disps && n.disps[String(lc)]) {
     const d = n.disps[String(lc)];
-    x += d[0] * defFac;
-    y += d[1] * defFac;
-    z += d[2] * defFac;
+    const dispComponent = component == null ? currentDispComponent() : component;
+    const dv = displacementVectorForComponent(new THREE.Vector3(d[0], d[1], d[2]), dispComponent);
+    x += dv.x * defFac;
+    y += dv.y * defFac;
+    z += dv.z * defFac;
   }
   return new THREE.Vector3(x, y, z);
 }
 
-function nodeDispMagnitude(n, lc, defFac) {
-  if (!n.disps || !n.disps[String(lc)]) return 0;
-  const d = n.disps[String(lc)];
-  const ux = d[0];
-  const uy = d[1];
-  const uz = d[2];
-  return Math.hypot(ux, uy, uz);
+function normalizeDispComponent(component) {
+  return Object.prototype.hasOwnProperty.call(DISP_COMPONENTS, component) ? component : "mag";
 }
 
-function dispMagnitudeRange(model, lc, defFac) {
+function currentDispComponent() {
+  return normalizeDispComponent(el.dispComponent ? el.dispComponent.value : RESULTS_DISPLAY_DEFAULTS.dispComponent);
+}
+
+function dispComponentLabel(component) {
+  const comp = DISP_COMPONENTS[normalizeDispComponent(component)];
+  return comp.label;
+}
+
+function displacementComponentValue(vec, component) {
+  const comp = DISP_COMPONENTS[normalizeDispComponent(component)];
+  if (comp.index == null) return vec.length();
+  return vec.getComponent(comp.index);
+}
+
+function displacementVectorForComponent(vec, component) {
+  const comp = DISP_COMPONENTS[normalizeDispComponent(component)];
+  if (comp.index == null) return vec.clone();
+  const out = new THREE.Vector3(0, 0, 0);
+  out.setComponent(comp.index, vec.getComponent(comp.index));
+  return out;
+}
+
+function nodeDispValue(n, lc, component) {
+  if (!n.disps || !n.disps[String(lc)]) return 0;
+  const d = n.disps[String(lc)];
+  return displacementComponentValue(new THREE.Vector3(d[0], d[1], d[2]), component);
+}
+
+function dispValueRange(model, lc, component) {
   let min = Infinity;
   let max = -Infinity;
   for (const n of model.nodes || []) {
-    const m = nodeDispMagnitude(n, lc, defFac);
-    if (m < min) min = m;
-    if (m > max) max = m;
+    const v = nodeDispValue(n, lc, component);
+    if (v < min) min = v;
+    if (v > max) max = v;
   }
   if (!isFinite(max)) return { min: 0, max: 0 };
   if (max - min < 1e-15) max = min + 1e-15;
   return { min: min, max: max };
 }
 
-function maxDispNodeInfo(model, lc, defFac) {
+function maxDispNodeInfo(model, lc, defFac, component) {
   let best = null;
   for (const n of model.nodes || []) {
-    const mag = nodeDispMagnitude(n, lc, defFac);
-    if (!best || mag > best.mag) {
+    const value = nodeDispValue(n, lc, component);
+    const absValue = Math.abs(value);
+    if (!best || absValue > best.absValue) {
       const p0 = nodePosition(n, model, lc, defFac, false);
-      const p1 = nodePosition(n, model, lc, defFac, true);
-      best = { node: n, mag: mag, p0: p0, p1: p1 };
+      const p1 = nodePosition(n, model, lc, defFac, true, component);
+      best = { node: n, value: value, absValue: absValue, p0: p0, p1: p1 };
     }
   }
   if (!best) return null;
@@ -3952,7 +4076,7 @@ function applyJointEffectiveEndRotations(dl, e, lcKey) {
   return out;
 }
 
-function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv) {
+function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv, component) {
   const lcKey = String(lc);
   const p0u = nodePosition(n0, model, lc, defFac, false);
   const p1u = nodePosition(n1, model, lc, defFac, false);
@@ -3962,11 +4086,11 @@ function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv) {
     n0.disps && n1.disps && n0.disps[lcKey] && n1.disps[lcKey];
 
   if (!hasShape) {
-    const p0d = nodePosition(n0, model, lc, defFac, true);
-    const p1d = nodePosition(n1, model, lc, defFac, true);
+    const p0d = nodePosition(n0, model, lc, defFac, true, component);
+    const p1d = nodePosition(n1, model, lc, defFac, true, component);
     return {
       pts: [p0d, p1d],
-      mags: [nodeDispMagnitude(n0, lc, defFac), nodeDispMagnitude(n1, lc, defFac)],
+      values: [nodeDispValue(n0, lc, component), nodeDispValue(n1, lc, component)],
     };
   }
 
@@ -3983,20 +4107,21 @@ function elemDeformedPoints(e, n0, n1, model, lc, defFac, nDiv) {
   const dlEff = applyJointEffectiveEndRotations(dl, e, lcKey);
 
   const pts = [];
-  const mags = [];
+  const values = [];
   for (let i = 0; i <= nDiv; i++) {
     const t = i / nDiv;
     const pl = beamDispLocalAtT(dlEff, e.len, t);
     const pg = localVecToGlobal(pl, e);
+    const pgDisplay = displacementVectorForComponent(pg, component);
     const pBase = elemPointAlong(p0u, p1u, t);
-    pts.push(pBase.clone().addScaledVector(pg, defFac));
-    mags.push(pg.length());
+    pts.push(pBase.clone().addScaledVector(pgDisplay, defFac));
+    values.push(displacementComponentValue(pg, component));
   }
-  return { pts: pts, mags: mags };
+  return { pts: pts, values: values };
 }
 
-function maxDispPointInfo(model, lc, defFac, nm) {
-  let best = maxDispNodeInfo(model, lc, defFac);
+function maxDispPointInfo(model, lc, defFac, nm, component) {
+  let best = maxDispNodeInfo(model, lc, defFac, component);
   const nDiv = 20;
   for (const e of model.elements || []) {
     const n0 = nm[e.n0];
@@ -4029,10 +4154,12 @@ function maxDispPointInfo(model, lc, defFac, nm) {
       const t = i / nDiv;
       const pl = beamDispLocalAtT(dlEff, e.len, t);
       const pg = localVecToGlobal(pl, e);
-      const mag = pg.length();
-      if (!best || mag > best.mag) {
+      const value = displacementComponentValue(pg, component);
+      const absValue = Math.abs(value);
+      if (!best || absValue > best.absValue) {
         const pBase = elemPointAlong(p0u, p1u, t);
-        best = { mag: mag, p0: pBase, p1: pBase.clone().addScaledVector(pg, defFac), elem: e, t: t };
+        const pgDisplay = displacementVectorForComponent(pg, component);
+        best = { value: value, absValue: absValue, p0: pBase, p1: pBase.clone().addScaledVector(pgDisplay, defFac), elem: e, t: t };
       }
     }
   }
@@ -4084,9 +4211,9 @@ function dispContourGradientCss() {
   return "linear-gradient(to top, " + stops.join(", ") + ")";
 }
 
-function syncDispContourInputs(autoRange, lc, defFac, force) {
+function syncDispContourInputs(autoRange, lc, defFac, component, force) {
   if (!el.dispContourMin || !el.dispContourMax) return;
-  const key = String(lc) + ":" + defFac;
+  const key = String(lc) + ":" + defFac + ":" + normalizeDispComponent(component);
   if (force || dispContourScaleKey !== key) {
     dispContourScaleKey = key;
     el.dispContourMin.value = formatDispInputValue(autoRange.min);
@@ -4138,7 +4265,7 @@ function dispContourT(mag, range) {
   return Math.min(1, Math.max(0, (mag - range.min) / span));
 }
 
-function updateDispContourOverlay(visible, autoRange, lc, defFac, syncInputs) {
+function updateDispContourOverlay(visible, autoRange, lc, defFac, component, syncInputs) {
   if (!el.dispLegendOverlay) return;
   if (!visible || !autoRange || lc == null) {
     el.dispLegendOverlay.classList.remove("visible");
@@ -4148,12 +4275,13 @@ function updateDispContourOverlay(visible, autoRange, lc, defFac, syncInputs) {
     return;
   }
 
-  if (syncInputs) syncDispContourInputs(autoRange, lc, defFac, false);
+  const dispComponent = normalizeDispComponent(component);
+  if (syncInputs) syncDispContourInputs(autoRange, lc, defFac, dispComponent, false);
 
   el.dispLegendOverlay.hidden = false;
   el.dispLegendOverlay.classList.add("visible");
   if (el.dispLegendTitle) {
-    el.dispLegendTitle.textContent = "|u| (mm, ×" + defFac + ")";
+    el.dispLegendTitle.textContent = dispComponentLabel(dispComponent) + " (mm, ×" + defFac + ")";
   }
   if (el.dispLegendLc) {
     el.dispLegendLc.textContent = "LC " + lc;
@@ -4168,9 +4296,10 @@ function applyDispContourAutoRange() {
   if (!currentModel || !analysisComplete(currentModel)) return;
   const lc = el.lcSelect.value;
   const defFac = parseFloat(el.defFactor.value) || 0;
-  const autoRange = dispMagnitudeRange(currentModel, lc, defFac);
+  const dispComponent = currentDispComponent();
+  const autoRange = dispValueRange(currentModel, lc, dispComponent);
   dispContourScaleKey = null;
-  syncDispContourInputs(autoRange, lc, defFac, true);
+  syncDispContourInputs(autoRange, lc, defFac, dispComponent, true);
   onResultsDisplayChanged();
   rebuildScene();
 }
@@ -4206,11 +4335,11 @@ function addDispContourLineSegments(positions, colors, group) {
   }
 }
 
-function addMaxDisplacementMarker(model, lc, defFac, span, deformed, group, labelGroup) {
+function addMaxDisplacementMarker(model, lc, defFac, span, deformed, component, group, labelGroup) {
   if (!deformed) return;
   const nm = nodeMap(model);
-  const info = maxDispPointInfo(model, lc, defFac, nm);
-  if (!info || info.mag < 1e-12 || !info.p0 || !info.p1) return;
+  const info = maxDispPointInfo(model, lc, defFac, nm, component);
+  if (!info || info.absValue < 1e-12 || !info.p0 || !info.p1) return;
 
   const p0 = info.p0.clone();
   const p1 = info.p1.clone();
@@ -4243,7 +4372,7 @@ function addMaxDisplacementMarker(model, lc, defFac, span, deformed, group, labe
 
   const labelPos = p1.clone().addScaledVector(udir, span * 0.012);
   addReactionValueLabel(
-    formatDispAbsValue(info.mag),
+    dispComponentLabel(component) + "=" + formatDispAbsValue(info.value),
     labelPos,
     span,
     Math.max(reactionLabelScaleFactor(), 0.03) * 0.4,
@@ -4811,6 +4940,7 @@ function buildModelScene(model) {
   const lc = el.lcSelect.value;
   const lcKey = String(lc);
   const defFac = parseFloat(el.defFactor.value) || 0;
+  const dispComponent = currentDispComponent();
   const complete = analysisComplete(model);
   const deformed = el.chkDeformed.checked && complete;
   const showDispContour = el.chkDispContour && el.chkDispContour.checked && complete;
@@ -4855,12 +4985,12 @@ function buildModelScene(model) {
   let dispDisplayRange = null;
 
   if (showDispContour) {
-    dispAutoRange = dispMagnitudeRange(model, lc, defFac);
-    syncDispContourInputs(dispAutoRange, lc, defFac, false);
+    dispAutoRange = dispValueRange(model, lc, dispComponent);
+    syncDispContourInputs(dispAutoRange, lc, defFac, dispComponent, false);
     dispDisplayRange = getDispContourDisplayRange();
-    updateDispContourOverlay(true, dispAutoRange, lc, defFac, false);
+    updateDispContourOverlay(true, dispAutoRange, lc, defFac, dispComponent, false);
   } else {
-    updateDispContourOverlay(false, null, null, defFac, false);
+    updateDispContourOverlay(false, null, null, defFac, dispComponent, false);
   }
 
   const defDiv = 16;
@@ -4928,7 +5058,7 @@ function buildModelScene(model) {
       linePts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
 
       const needCurve = (deformed && !showDispContour) || (showDispContour && deformed && dispDisplayRange);
-      const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv) : null;
+      const curve = needCurve ? elemDeformedPoints(e, n0, n1, model, lc, defFac, defDiv, dispComponent) : null;
 
       if (showDispContour && dispDisplayRange) {
         if (deformed && curve) {
@@ -4936,16 +5066,16 @@ function buildModelScene(model) {
             const a = curve.pts[i];
             const b = curve.pts[i + 1];
             contourPts.push(a.x, a.y, a.z, b.x, b.y, b.z);
-            const ca = dispContourColor(dispContourT(curve.mags[i], dispDisplayRange));
-            const cb = dispContourColor(dispContourT(curve.mags[i + 1], dispDisplayRange));
+            const ca = dispContourColor(dispContourT(curve.values[i], dispDisplayRange));
+            const cb = dispContourColor(dispContourT(curve.values[i + 1], dispDisplayRange));
             contourColors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b);
           }
         } else {
           contourPts.push(p0u.x, p0u.y, p0u.z, p1u.x, p1u.y, p1u.z);
-          const m0 = nodeDispMagnitude(n0, lc, defFac);
-          const m1 = nodeDispMagnitude(n1, lc, defFac);
-          const c0 = dispContourColor(dispContourT(m0, dispDisplayRange));
-          const c1 = dispContourColor(dispContourT(m1, dispDisplayRange));
+          const v0 = nodeDispValue(n0, lc, dispComponent);
+          const v1 = nodeDispValue(n1, lc, dispComponent);
+          const c0 = dispContourColor(dispContourT(v0, dispDisplayRange));
+          const c1 = dispContourColor(dispContourT(v1, dispDisplayRange));
           contourColors.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
         }
       }
@@ -5002,7 +5132,7 @@ function buildModelScene(model) {
     modelGroup.add(new THREE.Points(ngeo, nmat));
   }
 
-  addMaxDisplacementMarker(model, lc, defFac, span, deformed, modelGroup, labelGroup);
+  addMaxDisplacementMarker(model, lc, defFac, span, deformed, dispComponent, modelGroup, labelGroup);
 
   const supSize = supportGizmoSize(model);
   if (showSupports) {
@@ -8189,9 +8319,10 @@ function setReactionControlsEnabled(enabled) {
 function setDispContourControlsEnabled(enabled) {
   if (!el.chkDispContour) return;
   el.chkDispContour.disabled = !enabled;
+  if (el.dispComponent) el.dispComponent.disabled = !enabled;
   if (!enabled) {
     el.chkDispContour.checked = false;
-    updateDispContourOverlay(false, null, null, 0, false);
+    updateDispContourOverlay(false, null, null, 0, currentDispComponent(), false);
   }
 }
 
@@ -9078,6 +9209,53 @@ function normalizeSeismicSettings(project) {
   }
   if (seismic.live_load_lc === "" || seismic.live_load_lc == null) {
     delete seismic.live_load_lc;
+  }
+  if (Array.isArray(seismic.weight_load_cases)) {
+    for (const item of seismic.weight_load_cases) {
+      if (!item || typeof item !== "object") continue;
+      if (item.name != null) {
+        item.name = String(item.name).trim();
+      }
+      if (item.load_case != null && item.load_case !== "") {
+        const lc = Number(item.load_case);
+        if (Number.isFinite(lc)) item.load_case = Math.trunc(lc);
+      }
+      if (item.factor === "" || item.factor == null) {
+        item.factor = 1.0;
+      } else {
+        const factor = Number(item.factor);
+        if (Number.isFinite(factor)) item.factor = factor;
+      }
+      if (item.role == null || String(item.role).trim() === "") {
+        item.role = "OTHER";
+      } else {
+        item.role = String(item.role).trim().toUpperCase();
+      }
+    }
+  }
+  if (Array.isArray(seismic.weight_load_cases) && seismic.weight_load_cases.length === 0) {
+    delete seismic.weight_load_cases;
+  }
+  if (Array.isArray(seismic.directions)) {
+    for (const direction of seismic.directions) {
+      if (!direction || typeof direction !== "object") continue;
+      if (direction.name != null) {
+        direction.name = String(direction.name).trim();
+      }
+      if (direction.axis != null) {
+        direction.axis = String(direction.axis).trim().toLowerCase();
+      }
+      if (direction.load_case != null && direction.load_case !== "") {
+        const lc = Number(direction.load_case);
+        if (Number.isFinite(lc)) direction.load_case = Math.trunc(lc);
+      }
+      if (direction.sign === "" || direction.sign == null) {
+        delete direction.sign;
+      } else {
+        const sign = Number(direction.sign);
+        if (Number.isFinite(sign)) direction.sign = sign < 0 ? -1 : 1;
+      }
+    }
   }
   if (Array.isArray(seismic.directions) && seismic.directions.length === 0) {
     delete seismic.directions;
@@ -10296,7 +10474,7 @@ async function loadSelectedModel(solve, options) {
   if (!path) return;
   const cameraState = options.keepCamera ? captureCameraState() : null;
   if (!options.keepSelection) clearSelection();
-  resetMemberVisibilityFilter();
+  if (!options.keepMemberVisibility) resetMemberVisibilityFilter();
   if (solve) {
     setStatus("Solving " + path + "…");
   } else {
@@ -10325,6 +10503,7 @@ async function loadSelectedModel(solve, options) {
     if (el.chkPracticeCenters && el.chkPracticeCenters.checked && analysisComplete(currentModel)) {
       await loadPracticeSummaryForCurrentModel();
     }
+    if (options.keepMemberVisibility) pruneMemberVisibilityFilter();
     buildModelScene(currentModel);
     if (!solve || !complete) {
       if (cameraState) {
@@ -10474,6 +10653,13 @@ document.addEventListener("keydown", (ev) => {
       togglePickSubMode("wall");
       return;
     }
+    if (ev.key === "Delete" || ev.code === "Delete") {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if (!hasPickSelection()) return;
+      ev.preventDefault();
+      deletePickSelection();
+      return;
+    }
   }
 
   if (ev.key === "d" || ev.key === "D") {
@@ -10576,6 +10762,13 @@ el.defFactor.addEventListener("change", () => {
   onResultsDisplayChanged();
   if (currentModel) rebuildScene();
 });
+if (el.dispComponent) {
+  el.dispComponent.addEventListener("change", () => {
+    dispContourScaleKey = null;
+    onResultsDisplayChanged();
+    if (currentModel) rebuildScene();
+  });
+}
 el.chkDeformed.addEventListener("change", () => {
   onResultsDisplayChanged();
   if (currentModel) rebuildScene();
@@ -10753,6 +10946,7 @@ function readDisplayPrefsFromUi() {
   if (!isFinite(displayPrefs.defFactor)) displayPrefs.defFactor = RESULTS_DISPLAY_DEFAULTS.defFactor;
   displayPrefs.deformed = !!(el.chkDeformed && el.chkDeformed.checked);
   displayPrefs.dispContour = !!(el.chkDispContour && el.chkDispContour.checked);
+  displayPrefs.dispComponent = currentDispComponent();
   displayPrefs.supports = !el.chkSupports || el.chkSupports.checked;
   displayPrefs.ejnt = !!(el.chkEJnt && el.chkEJnt.checked);
   displayPrefs.loads = !!(el.chkLoads && el.chkLoads.checked);
@@ -10784,6 +10978,7 @@ function readDisplayPrefsFromUi() {
 
 function applyDisplayPrefsToUi() {
   el.defFactor.value = String(displayPrefs.defFactor);
+  if (el.dispComponent) el.dispComponent.value = normalizeDispComponent(displayPrefs.dispComponent);
   if (el.chkDeformed && !el.chkDeformed.disabled) el.chkDeformed.checked = !!displayPrefs.deformed;
   if (el.chkDispContour && !el.chkDispContour.disabled) {
     el.chkDispContour.checked = !!displayPrefs.dispContour;
@@ -10848,6 +11043,7 @@ function loadDisplayPrefs() {
     if (typeof st.defFactor === "number" && isFinite(st.defFactor)) displayPrefs.defFactor = st.defFactor;
     if (typeof st.deformed === "boolean") displayPrefs.deformed = st.deformed;
     if (typeof st.dispContour === "boolean") displayPrefs.dispContour = st.dispContour;
+    if (typeof st.dispComponent === "string") displayPrefs.dispComponent = normalizeDispComponent(st.dispComponent);
     if (typeof st.supports === "boolean") displayPrefs.supports = st.supports;
     if (typeof st.ejnt === "boolean") displayPrefs.ejnt = st.ejnt;
     if (typeof st.loads === "boolean") displayPrefs.loads = st.loads;

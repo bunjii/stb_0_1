@@ -105,6 +105,76 @@ class TestLnmeLoadTypes(unittest.TestCase):
         self.assertEqual(result.weight_load_cases, (1, 2))
         self.assertAlmostEqual(result.total_weight_kN, 12.0, places=3)
 
+    def test_project_weight_load_cases_override_lnme_types_with_factors(self):
+        lines = [
+            "NODE, 1, 0, 0, 3",
+            "NODE, 2, 0, 1, 3",
+            "MATE, 1, M, 9500, 633, 5, 0, 20",
+            "SECT, 1, S, 1, 0, 120, 240",
+            "ELEM, 1, 1, 2, 1, 0",
+            "LNME, 1, 1",
+            "LNME, 2, 2",
+            "PLOD, 1, 1, 0, 0, -10, 0, 0, 0",
+            "PLOD, 2, 2, 0, 0, -4, 0, 0, 0",
+        ]
+        mdl = parse_input(lines)
+        from stb_loads.weight import aggregate_story_weights
+        from stb_project import validate_project_dict
+
+        project = validate_project_dict({
+            "schema": 1,
+            "model": {"dat": "x.dat"},
+            "building": {"name": "t", "location": "", "use": "", "structure": "", "calculation_route": "", "designer": {}},
+            "grids": [],
+            "stories": [{"name": "1", "elevation": 0.0, "height": 3.0}],
+            "member_classes": [],
+            "load_conditions": {
+                "seismic": {
+                    "ci": 0.3,
+                    "weight_load_cases": [
+                        {"load_case": 1, "factor": 1.0, "role": "DL"},
+                        {"load_case": 2, "factor": 0.5, "role": "LL_E"},
+                    ],
+                }
+            },
+            "report": {"title": "", "mode": "practice", "language": "ja", "format": "markdown"},
+        })
+        result = aggregate_story_weights(mdl, project)
+        self.assertEqual(result.weight_load_cases, (1, 2))
+        self.assertAlmostEqual(result.total_weight_kN, 12.0, places=3)
+
+    def test_floor_level_weight_uses_upper_story_with_rounded_project_elevation(self):
+        lines = [
+            "NODE, 1, 0, 0, 3.035",
+            "NODE, 2, 0, 1, 3.035",
+            "MATE, 1, M, 9500, 633, 5, 0, 20",
+            "SECT, 1, S, 1, 0, 120, 240",
+            "ELEM, 1, 1, 2, 1, 0",
+            "LNME, 1, 1",
+            "PLOD, 1, 1, 0, 0, -10, 0, 0, 0",
+        ]
+        mdl = parse_input(lines)
+        from stb_loads.weight import aggregate_story_weights
+        from stb_project import validate_project_dict
+
+        project = validate_project_dict({
+            "schema": 1,
+            "model": {"dat": "x.dat"},
+            "building": {"name": "t", "location": "", "use": "", "structure": "", "calculation_route": "", "designer": {}},
+            "grids": [],
+            "stories": [
+                {"name": "1", "elevation": 0.3, "height": 2.74},
+                {"name": "2", "elevation": 3.04, "height": 3.0},
+            ],
+            "member_classes": [],
+            "load_conditions": {"seismic": {"ci": 0.3}},
+            "report": {"title": "", "mode": "practice", "language": "ja", "format": "markdown"},
+        })
+        result = aggregate_story_weights(mdl, project)
+        by_story = {s.story_name: s.weight_kN for s in result.stories}
+        self.assertAlmostEqual(by_story["1"], 0.0, places=6)
+        self.assertAlmostEqual(by_story["2"], 10.0, places=6)
+
     def test_uk_model_uses_lnme_type_1_for_glc0(self):
         dat_path = os.path.join(_STB_ROOT, "data", "UK_240416_floors_1to3_diaphragm.dat")
         if not os.path.isfile(dat_path):

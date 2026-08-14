@@ -59,7 +59,34 @@
       "dead_load_lc": null,
       "live_load_lc": null,
       "live_load_factor": 0.0,
-      "directions": [],
+      "weight_load_cases": [
+        {
+          "name": "DL",
+          "load_case": 0,
+          "factor": 1.0,
+          "role": "DL"
+        },
+        {
+          "name": "LL",
+          "load_case": 1,
+          "factor": 1.0,
+          "role": "LL_E"
+        }
+      ],
+      "directions": [
+        {
+          "name": "EX+",
+          "axis": "x",
+          "load_case": 2,
+          "sign": 1
+        },
+        {
+          "name": "EY+",
+          "axis": "y",
+          "load_case": 3,
+          "sign": 1
+        }
+      ],
       "rt": 1.0,
       "base_mass_policy": "IGNORE_AT_BASE"
     },
@@ -81,7 +108,62 @@
         "story": "R"
       }
     ],
-    "seismic_masses": [],
+    "floor_loads": [
+      {
+        "diaphragm_id": 20,
+        "load_case": 1,
+        "role": "LL_E",
+        "name": "LL(E)",
+        "pressure_kN_m2": 0.8,
+        "story": "2"
+      },
+      {
+        "diaphragm_id": 30,
+        "load_case": 1,
+        "role": "LL_E",
+        "name": "LL(E)",
+        "pressure_kN_m2": 0.8,
+        "story": "3"
+      }
+    ],
+    "seismic_masses": [
+      {
+        "name": "1",
+        "mass_role": "BASE_MASS",
+        "include_in_total_seismic_weight": false,
+        "include_in_alpha_denominator": false,
+        "generate_diaphragm_load": false,
+        "story": "1",
+        "application_level": "base"
+      },
+      {
+        "name": "2",
+        "mass_role": "DIAPHRAGM_MASS",
+        "include_in_total_seismic_weight": true,
+        "include_in_alpha_denominator": true,
+        "generate_diaphragm_load": true,
+        "story": "2",
+        "application_diaphragm": 20
+      },
+      {
+        "name": "3",
+        "mass_role": "DIAPHRAGM_MASS",
+        "include_in_total_seismic_weight": true,
+        "include_in_alpha_denominator": true,
+        "generate_diaphragm_load": true,
+        "story": "3",
+        "application_diaphragm": 30
+      },
+      {
+        "name": "R",
+        "mass_role": "DIAPHRAGM_MASS",
+        "include_in_total_seismic_weight": true,
+        "include_in_alpha_denominator": true,
+        "generate_diaphragm_load": true,
+        "story": "R",
+        "application_diaphragm": 40
+      }
+    ],
     "wind": {
       "cases": [
         {
