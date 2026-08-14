@@ -54,6 +54,7 @@
       "dead_load_lc": null,
       "live_load_lc": null,
       "live_load_factor": 0.0,
+      "weight_load_cases": [],
       "directions": [],
       "rt": 1.0,
       "base_level": "1",
@@ -70,6 +71,7 @@
         "story": "3"
       }
     ],
+    "floor_loads": [],
     "seismic_masses": [
       {
         "name": "1F_floor",

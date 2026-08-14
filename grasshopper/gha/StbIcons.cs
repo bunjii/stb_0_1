@@ -17,6 +17,9 @@ namespace StbGrasshopper
         public static Bitmap Element => ElementIcon.Value;
         public static Bitmap Support => SupportIcon.Value;
         public static Bitmap Load => LoadIcon.Value;
+        public static Bitmap PointLoad => PointLoadIcon.Value;
+        public static Bitmap LineLoad => LineLoadIcon.Value;
+        public static Bitmap AreaLoad => AreaLoadIcon.Value;
         public static Bitmap Assemble => AssembleIcon.Value;
         public static Bitmap LoadCases => LoadCasesIcon.Value;
         public static Bitmap Displacements => DisplacementsIcon.Value;
@@ -33,6 +36,9 @@ namespace StbGrasshopper
         private static readonly Lazy<Bitmap> ElementIcon = Icon("Element");
         private static readonly Lazy<Bitmap> SupportIcon = Icon("Support");
         private static readonly Lazy<Bitmap> LoadIcon = Icon("Load");
+        private static readonly Lazy<Bitmap> PointLoadIcon = Icon("PointLoad");
+        private static readonly Lazy<Bitmap> LineLoadIcon = Icon("LineLoad");
+        private static readonly Lazy<Bitmap> AreaLoadIcon = Icon("AreaLoad");
         private static readonly Lazy<Bitmap> AssembleIcon = Icon("Assemble");
         private static readonly Lazy<Bitmap> LoadCasesIcon = Icon("LoadCases");
         private static readonly Lazy<Bitmap> DisplacementsIcon = Icon("Displacements");

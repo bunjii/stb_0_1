@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using GH_IO.Serialization;
 using Grasshopper.Kernel;
+using Grasshopper.Kernel.Parameters;
 using Rhino;
 using Rhino.Geometry;
 
@@ -223,17 +224,28 @@ namespace StbGrasshopper
 
     public sealed class StbSectionComponent : GH_Component
     {
+        private const string SectionTypeKey = "SectionType";
+        private int _sectionType;
+
         public StbSectionComponent() : base("STB Section", "STB Sec", "Create an STB section object.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("fd94f3c4-1574-45dc-bd80-6635f18517dd");
 
         protected override Bitmap Icon => StbIcons.Section;
 
+        internal int SectionType => _sectionType;
+
+        internal string SectionTypeName => StbSectionDimensions.TypeName(_sectionType);
+
+        public override void CreateAttributes()
+        {
+            m_attributes = new StbSectionAttributes(this);
+        }
+
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddTextParameter("Name", "Name", "Section name.", GH_ParamAccess.item, "SEC");
             pManager.AddParameter(new StbMaterialParameter(), "Mat", "Mat", "Material definition.", GH_ParamAccess.item);
-            pManager.AddIntegerParameter("Type", "Type", "0 rectangle, 1 circle, 2 I, 3 CHS, 4 RHS.", GH_ParamAccess.item, 0);
-            pManager.AddNumberParameter("Dim", "Dim", "Section dimensions in mm. Type 0: B,H. Type 1: D. Type 2/4: H,B,tw,tf or H,B,t,t. Type 3: D,t.", GH_ParamAccess.list);
+            AddDimensionParameters(pManager, _sectionType);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -243,18 +255,26 @@ namespace StbGrasshopper
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            int type = 0;
             string name = "SEC";
             var dims = new List<double>();
             da.GetData(0, ref name);
             if (!StbModelGooUtil.TryGetMaterial(da, 1, out var material)) return;
-            da.GetData(2, ref type);
-            da.GetDataList(3, dims);
+
+            for (var i = 2; i < Params.Input.Count; i++)
+            {
+                double value = 0.0;
+                if (!da.GetData(i, ref value))
+                {
+                    return;
+                }
+
+                dims.Add(value);
+            }
 
             List<double> resolvedDims;
             try
             {
-                resolvedDims = StbSectionDimensions.Resolve(type, dims, useDefaultsWhenEmpty: true);
+                resolvedDims = StbSectionDimensions.Resolve(_sectionType, dims, useDefaultsWhenEmpty: false);
             }
             catch (InvalidOperationException ex)
             {
@@ -262,26 +282,95 @@ namespace StbGrasshopper
                 return;
             }
 
-            if (dims.Count == 0)
-            {
-                AddRuntimeMessage(
-                    GH_RuntimeMessageLevel.Remark,
-                    "Dim was empty. Using defaults for type "
-                    + type
-                    + ": "
-                    + string.Join(", ", resolvedDims)
-                    + " mm.");
-            }
-
             var section = new StbSectionModel
             {
                 Name = name,
                 Material = material,
-                Type = type,
+                Type = _sectionType,
             };
             section.Dimensions.AddRange(resolvedDims);
 
             da.SetData(0, new StbSectionGoo(section));
+        }
+
+        internal void SetSectionType(int type)
+        {
+            if (type == _sectionType || type < 0 || type >= StbSectionDimensions.TypeCount)
+            {
+                return;
+            }
+
+            RecordUndoEvent("Change section type");
+            _sectionType = type;
+            RebuildDimensionInputs();
+        }
+
+        public override bool Write(GH_IWriter writer)
+        {
+            writer.SetInt32(SectionTypeKey, _sectionType);
+            return base.Write(writer);
+        }
+
+        public override bool Read(GH_IReader reader)
+        {
+            if (reader.ItemExists(SectionTypeKey))
+            {
+                var type = reader.GetInt32(SectionTypeKey);
+                if (type >= 0 && type < StbSectionDimensions.TypeCount)
+                {
+                    _sectionType = type;
+                    RebuildDimensionInputs(expireSolution: false);
+                }
+            }
+
+            return base.Read(reader);
+        }
+
+        private static void AddDimensionParameters(GH_InputParamManager pManager, int type)
+        {
+            var names = StbSectionDimensions.ParameterNames(type);
+            var defaults = StbSectionDimensions.Defaults(type);
+            for (var i = 0; i < names.Count; i++)
+            {
+                var name = names[i];
+                pManager.AddNumberParameter(
+                    name,
+                    name,
+                    name + " for " + StbSectionDimensions.TypeName(type) + " in mm.",
+                    GH_ParamAccess.item,
+                    defaults[i]);
+            }
+        }
+
+        private void RebuildDimensionInputs(bool expireSolution = true)
+        {
+            for (var i = Params.Input.Count - 1; i >= 2; i--)
+            {
+                Params.UnregisterInputParameter(Params.Input[i], true);
+            }
+
+            var names = StbSectionDimensions.ParameterNames(_sectionType);
+            var defaults = StbSectionDimensions.Defaults(_sectionType);
+            for (var i = 0; i < names.Count; i++)
+            {
+                var name = names[i];
+                var parameter = new Param_Number
+                {
+                    Name = name,
+                    NickName = name,
+                    Description = name + " for " + SectionTypeName + " in mm.",
+                    Access = GH_ParamAccess.item,
+                };
+                parameter.SetPersistentData(defaults[i]);
+                Params.RegisterInputParam(parameter);
+            }
+
+            Params.OnParametersChanged();
+            Attributes?.ExpireLayout();
+            if (expireSolution)
+            {
+                ExpireSolution(true);
+            }
         }
     }
 
@@ -367,10 +456,10 @@ namespace StbGrasshopper
 
     public sealed class StbLoadComponent : GH_Component
     {
-        public StbLoadComponent() : base("STB Load", "STB Load", "Create STB point load objects from points.", "STB", "Model") { }
+        public StbLoadComponent() : base("STB Point Load", "STB PLoad", "Create STB point load objects from points.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("fcf0fb0e-33d0-4926-a09f-1f1bbffcfbc1");
 
-        protected override Bitmap Icon => StbIcons.Load;
+        protected override Bitmap Icon => StbIcons.PointLoad;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
@@ -401,6 +490,7 @@ namespace StbGrasshopper
             {
                 loads.Add(new StbLoadGoo(new StbLoadModel
                 {
+                    Kind = StbLoadKind.Point,
                     Point = point,
                     LoadCase = loadCase,
                     Force = force,
@@ -409,6 +499,191 @@ namespace StbGrasshopper
             }
 
             da.SetDataList(0, loads);
+        }
+    }
+
+    public sealed class StbLineLoadComponent : GH_Component
+    {
+        public StbLineLoadComponent()
+            : base(
+                "STB Line Load",
+                "STB LLoad",
+                "Create an STB distributed load on a frame element.",
+                "STB",
+                "Model")
+        {
+        }
+
+        public override Guid ComponentGuid => new Guid("164ce563-ef3c-43f3-887a-e5839829f06a");
+
+        protected override Bitmap Icon => StbIcons.LineLoad;
+
+        protected override void RegisterInputParams(GH_InputParamManager pManager)
+        {
+            pManager.AddParameter(
+                new StbElementParameter(),
+                "Element",
+                "Elem",
+                "Loaded STB element.",
+                GH_ParamAccess.item);
+            pManager.AddIntegerParameter("LC", "LC", "Load case id.", GH_ParamAccess.item, 0);
+            pManager.AddBooleanParameter(
+                "Global",
+                "G",
+                "True: load vectors use global coordinates. False: element local coordinates.",
+                GH_ParamAccess.item,
+                true);
+            pManager.AddVectorParameter(
+                "Load i",
+                "Wi",
+                "Distributed load at the element i-end in kN/m.",
+                GH_ParamAccess.item,
+                Vector3d.Zero);
+            pManager.AddVectorParameter(
+                "Load j",
+                "Wj",
+                "Distributed load at the element j-end in kN/m.",
+                GH_ParamAccess.item,
+                Vector3d.Zero);
+        }
+
+        protected override void RegisterOutputParams(GH_OutputParamManager pManager)
+        {
+            pManager.AddParameter(
+                new StbLoadParameter(),
+                "Load",
+                "Ld",
+                "STB line load object.",
+                GH_ParamAccess.item);
+        }
+
+        protected override void SolveInstance(IGH_DataAccess da)
+        {
+            StbElementGoo elementGoo = null;
+            int loadCase = 0;
+            bool isGlobal = true;
+            var loadAtI = Vector3d.Zero;
+            var loadAtJ = Vector3d.Zero;
+
+            if (!da.GetData(0, ref elementGoo) || elementGoo?.Value == null)
+            {
+                return;
+            }
+
+            da.GetData(1, ref loadCase);
+            da.GetData(2, ref isGlobal);
+            da.GetData(3, ref loadAtI);
+            da.GetData(4, ref loadAtJ);
+
+            var axis = elementGoo.Value.Line.Direction;
+            if (axis.Unitize())
+            {
+                var axialAtI = isGlobal
+                    ? Vector3d.Multiply(loadAtI, axis)
+                    : loadAtI.X;
+                var axialAtJ = isGlobal
+                    ? Vector3d.Multiply(loadAtJ, axis)
+                    : loadAtJ.X;
+                if (Math.Abs(axialAtI) > 1e-9 || Math.Abs(axialAtJ) > 1e-9)
+                {
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Warning,
+                        "The STB solver currently ignores the member-axis component of ELOD.");
+                }
+            }
+
+            da.SetData(0, new StbLoadGoo(new StbLoadModel
+            {
+                Kind = StbLoadKind.Line,
+                ElementLine = elementGoo.Value.Line,
+                LoadCase = loadCase,
+                IsGlobal = isGlobal,
+                LoadAtI = loadAtI,
+                LoadAtJ = loadAtJ,
+            }));
+        }
+    }
+
+    public sealed class StbAreaLoadComponent : GH_Component
+    {
+        public StbAreaLoadComponent()
+            : base(
+                "STB Area Load",
+                "STB ALoad",
+                "Create an STB area load bounded by three or four frame elements.",
+                "STB",
+                "Model")
+        {
+        }
+
+        public override Guid ComponentGuid => new Guid("79badf8b-9c6c-47d7-bef5-ab1f729b89fb");
+
+        protected override Bitmap Icon => StbIcons.AreaLoad;
+
+        protected override void RegisterInputParams(GH_InputParamManager pManager)
+        {
+            pManager.AddParameter(
+                new StbElementParameter(),
+                "Boundary Elements",
+                "Elem",
+                "Three or four STB elements forming one closed panel boundary.",
+                GH_ParamAccess.list);
+            pManager.AddIntegerParameter("LC", "LC", "Load case id.", GH_ParamAccess.item, 0);
+            pManager.AddVectorParameter(
+                "Pressure",
+                "P",
+                "Area-load vector in global coordinates in kN/m2.",
+                GH_ParamAccess.item,
+                Vector3d.Zero);
+        }
+
+        protected override void RegisterOutputParams(GH_OutputParamManager pManager)
+        {
+            pManager.AddParameter(
+                new StbLoadParameter(),
+                "Load",
+                "Ld",
+                "STB area load object.",
+                GH_ParamAccess.item);
+        }
+
+        protected override void SolveInstance(IGH_DataAccess da)
+        {
+            var elements = StbModelGooUtil.GetElements(da, 0);
+            int loadCase = 0;
+            var pressure = Vector3d.Zero;
+
+            if (elements.Count < 3 || elements.Count > 4)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Error,
+                    "Area load requires exactly 3 or 4 boundary elements.");
+                return;
+            }
+
+            da.GetData(1, ref loadCase);
+            da.GetData(2, ref pressure);
+
+            var load = new StbLoadModel
+            {
+                Kind = StbLoadKind.Area,
+                LoadCase = loadCase,
+                Pressure = pressure,
+            };
+            foreach (var element in elements)
+            {
+                if (!element.Line.IsValid)
+                {
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Error,
+                        "Area-load boundary contains an invalid element line.");
+                    return;
+                }
+
+                load.BoundaryLines.Add(element.Line);
+            }
+
+            da.SetData(0, new StbLoadGoo(load));
         }
     }
 

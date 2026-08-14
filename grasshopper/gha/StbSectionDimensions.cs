@@ -5,22 +5,41 @@ namespace StbGrasshopper
 {
     internal static class StbSectionDimensions
     {
+        private static readonly string[] TypeNames =
+        {
+            "Rectangle",
+            "Circle",
+            "I-section",
+            "CHS",
+            "RHS",
+        };
+
+        private static readonly string[][] DimensionNames =
+        {
+            new[] { "B", "H" },
+            new[] { "D" },
+            new[] { "H", "B", "tw", "tf" },
+            new[] { "D", "t" },
+            new[] { "H", "B", "tw", "tf" },
+        };
+
+        public static int TypeCount => TypeNames.Length;
+
+        public static string TypeName(int type)
+        {
+            ValidateType(type);
+            return TypeNames[type];
+        }
+
+        public static IReadOnlyList<string> ParameterNames(int type)
+        {
+            ValidateType(type);
+            return DimensionNames[type];
+        }
+
         public static int RequiredCount(int type)
         {
-            switch (type)
-            {
-                case 0:
-                    return 2;
-                case 1:
-                    return 1;
-                case 2:
-                case 4:
-                    return 4;
-                case 3:
-                    return 2;
-                default:
-                    throw new InvalidOperationException("Unsupported section type: " + type + ".");
-            }
+            return ParameterNames(type).Count;
         }
 
         public static IReadOnlyList<double> Defaults(int type)
@@ -58,6 +77,14 @@ namespace StbGrasshopper
                     return "RHS H, B, t, t in mm";
                 default:
                     return "section dimensions in mm";
+            }
+        }
+
+        private static void ValidateType(int type)
+        {
+            if (type < 0 || type >= TypeNames.Length)
+            {
+                throw new InvalidOperationException("Unsupported section type: " + type + ".");
             }
         }
 
