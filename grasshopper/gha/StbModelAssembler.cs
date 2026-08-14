@@ -66,6 +66,7 @@ namespace StbGrasshopper
             }
 
             var geometryRecords = new List<string>();
+            var assembledElements = new List<(int ElementId, Line Line)>();
             var nextNodeId = 1;
             var nextElemId = 1;
 
@@ -78,12 +79,13 @@ namespace StbGrasshopper
 
                 var nodeI = nextNodeId++;
                 var nodeJ = nextNodeId++;
+                var elementId = nextElemId++;
 
                 geometryRecords.Add(FormatNode(nodeI, element.Line.From));
                 geometryRecords.Add(FormatNode(nodeJ, element.Line.To));
                 geometryRecords.Add(
                     "ELEM,"
-                    + nextElemId++
+                    + elementId
                     + ","
                     + nodeI
                     + ","
@@ -92,6 +94,7 @@ namespace StbGrasshopper
                     + sectionIds[element.Section]
                     + ","
                     + StbRecord.Number(element.Beta));
+                assembledElements.Add((elementId, element.Line));
             }
 
             var mergeResult = StbNodeMerger.MergeDuplicateNodes(geometryRecords, tolerance);
@@ -112,8 +115,52 @@ namespace StbGrasshopper
 
             foreach (var load in loads ?? Array.Empty<StbLoadModel>())
             {
-                var nodeId = FindNodeId(load.Point, canonicalNodes, tolerance);
-                finalRecords.Add(load.ToPlodRecord(nodeId));
+                if (load == null)
+                {
+                    continue;
+                }
+
+                switch (load.Kind)
+                {
+                    case StbLoadKind.Line:
+                        var lineMatch = FindElement(load.ElementLine, assembledElements, tolerance);
+                        if (lineMatch.Reversed && !load.IsGlobal)
+                        {
+                            throw new InvalidOperationException(
+                                "A local-coordinate line load references an element with reversed orientation.");
+                        }
+
+                        finalRecords.Add(load.ToElodRecord(lineMatch.ElementId, lineMatch.Reversed));
+                        break;
+
+                    case StbLoadKind.Area:
+                        if (!FormsClosedLoop(load.BoundaryLines, tolerance))
+                        {
+                            throw new InvalidOperationException(
+                                "Area-load boundary elements do not form a single closed loop.");
+                        }
+
+                        var boundaryIds = new List<int>();
+                        foreach (var boundaryLine in load.BoundaryLines)
+                        {
+                            var boundaryMatch = FindElement(boundaryLine, assembledElements, tolerance);
+                            if (boundaryIds.Contains(boundaryMatch.ElementId))
+                            {
+                                throw new InvalidOperationException(
+                                    "Area-load boundary contains the same element more than once.");
+                            }
+
+                            boundaryIds.Add(boundaryMatch.ElementId);
+                        }
+
+                        finalRecords.Add(load.ToAlodRecord(boundaryIds));
+                        break;
+
+                    default:
+                        var nodeId = FindNodeId(load.Point, canonicalNodes, tolerance);
+                        finalRecords.Add(load.ToPlodRecord(nodeId));
+                        break;
+                }
             }
 
             result.Text = string.Join(Environment.NewLine, finalRecords) + Environment.NewLine;
@@ -199,6 +246,85 @@ namespace StbGrasshopper
             }
 
             throw new InvalidOperationException("No node found near " + point + " within tolerance " + StbRecord.Number(tolerance) + ".");
+        }
+
+        private static (int ElementId, bool Reversed) FindElement(
+            Line target,
+            IReadOnlyList<(int ElementId, Line Line)> elements,
+            double tolerance)
+        {
+            if (!target.IsValid)
+            {
+                throw new InvalidOperationException("Load references an invalid element line.");
+            }
+
+            foreach (var element in elements)
+            {
+                if (element.Line.From.DistanceTo(target.From) <= tolerance
+                    && element.Line.To.DistanceTo(target.To) <= tolerance)
+                {
+                    return (element.ElementId, false);
+                }
+
+                if (element.Line.From.DistanceTo(target.To) <= tolerance
+                    && element.Line.To.DistanceTo(target.From) <= tolerance)
+                {
+                    return (element.ElementId, true);
+                }
+            }
+
+            throw new InvalidOperationException(
+                "No assembled element matches load line "
+                + target
+                + " within tolerance "
+                + StbRecord.Number(tolerance)
+                + ".");
+        }
+
+        private static bool FormsClosedLoop(IReadOnlyList<Line> lines, double tolerance)
+        {
+            if (lines == null || lines.Count < 3 || lines.Count > 4)
+            {
+                return false;
+            }
+
+            var remaining = new List<Line>(lines);
+            var first = remaining[0];
+            remaining.RemoveAt(0);
+            var start = first.From;
+            var current = first.To;
+
+            while (remaining.Count > 0)
+            {
+                var nextIndex = -1;
+                var nextPoint = Point3d.Unset;
+                for (var i = 0; i < remaining.Count; i++)
+                {
+                    if (remaining[i].From.DistanceTo(current) <= tolerance)
+                    {
+                        nextIndex = i;
+                        nextPoint = remaining[i].To;
+                        break;
+                    }
+
+                    if (remaining[i].To.DistanceTo(current) <= tolerance)
+                    {
+                        nextIndex = i;
+                        nextPoint = remaining[i].From;
+                        break;
+                    }
+                }
+
+                if (nextIndex < 0)
+                {
+                    return false;
+                }
+
+                remaining.RemoveAt(nextIndex);
+                current = nextPoint;
+            }
+
+            return current.DistanceTo(start) <= tolerance;
         }
 
         private static string FormatNode(int nodeId, Point3d point)

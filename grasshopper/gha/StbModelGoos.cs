@@ -201,7 +201,7 @@ namespace StbGrasshopper
 
         public override string TypeName => "STB Load";
 
-        public override string TypeDescription => "STB point load";
+        public override string TypeDescription => "STB point, line, or area load";
 
         public override IGH_Goo Duplicate()
         {

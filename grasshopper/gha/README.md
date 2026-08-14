@@ -17,11 +17,21 @@ environment and makes classroom Windows deployment easier.
 - `STB DAT Beams`: reads element connectivity from an existing `.dat` file
 - `STB Element`: input `Name`, `Line`, `Section`, `Beta` → output typed `Element`
 - `STB Material`: input `Name`, `E`, `G`, `Gamma`, `Alpha`, `Fy` → output typed `Mat`
-- `STB Section`: input `Name`, `Mat`, `Type`, `Dim` → output typed `Section`
+- `STB Section`: select the section type from the component drop-down; its
+  dimension inputs change to `B/H`, `D`, `H/B/tw/tf`, or `D/t` as appropriate
+  → output typed `Section`
 - `STB Support`: input `Point`, six on-component restraint toggles → output typed `Support`
-- `STB Load`: input `Point`, `LC`, `F`, `M` → output typed `Load`
+- `STB Point Load`: input `Point`, `LC`, `F` (kN), `M` (kNm) → output typed `Load`
+- `STB Line Load`: input typed `Element`, `LC`, coordinate-system toggle, `Wi`/`Wj`
+  (kN/m) → output typed `Load`; different end vectors create a trapezoidal load
+- `STB Area Load`: input three or four typed boundary `Element` objects, `LC`, and
+  global pressure vector `P` (kN/m²) → output typed `Load`
 - `STB Assemble Model`: input typed `Element`, `Load`, `Support`, `Write` → output `Text`, `DAT`
 - `STB Deformed Shape`: preview placeholder for the next step
+
+The current solver does not include the member-axis component of an `ELOD` in
+its fixed-end forces. `STB Line Load` reports a warning when such a component is
+detected.
 
 ## Build Notes
 
@@ -94,6 +104,10 @@ The first component to make production-ready is `StbAnalyzeComponent.cs`.
 ## Model-building workflow
 
 1. `STB Material` → `STB Section` → `STB Element`
-2. `STB Support` and `STB Load` use `Point3d` locations (resolved to merged nodes in assemble)
+2. Create point, line, and area loads with the corresponding `STB ... Load`
+   components. Area-load boundary elements must form one closed triangular or
+   quadrilateral loop.
 3. Merge typed objects into `STB Assemble Model`
-4. `STB Assemble Model` auto-assigns material/section/element/node ids, merges duplicate nodes at the Rhino document tolerance, and writes `.dat` text
+4. `STB Assemble Model` auto-assigns material/section/element/node ids, resolves
+   load targets at the Rhino document tolerance, emits `PLOD`/`ELOD`/`ALOD`,
+   merges duplicate nodes, and writes `.dat` text

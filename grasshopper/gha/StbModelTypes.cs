@@ -227,22 +227,44 @@ namespace StbGrasshopper
         private static int Bit(bool value) => value ? 1 : 0;
     }
 
+    public enum StbLoadKind
+    {
+        Point,
+        Line,
+        Area,
+    }
+
     public sealed class StbLoadModel
     {
+        public StbLoadKind Kind { get; set; }
         public Point3d Point { get; set; }
+        public Line ElementLine { get; set; }
+        public List<Line> BoundaryLines { get; } = new List<Line>();
         public int LoadCase { get; set; }
         public Vector3d Force { get; set; }
         public Vector3d Moment { get; set; }
+        public bool IsGlobal { get; set; } = true;
+        public Vector3d LoadAtI { get; set; }
+        public Vector3d LoadAtJ { get; set; }
+        public Vector3d Pressure { get; set; }
 
         public StbLoadModel Duplicate()
         {
-            return new StbLoadModel
+            var copy = new StbLoadModel
             {
+                Kind = Kind,
                 Point = Point,
+                ElementLine = ElementLine,
                 LoadCase = LoadCase,
                 Force = Force,
                 Moment = Moment,
+                IsGlobal = IsGlobal,
+                LoadAtI = LoadAtI,
+                LoadAtJ = LoadAtJ,
+                Pressure = Pressure,
             };
+            copy.BoundaryLines.AddRange(BoundaryLines);
+            return copy;
         }
 
         public string ToPlodRecord(int nodeId)
@@ -265,9 +287,64 @@ namespace StbGrasshopper
                 + StbRecord.Number(Moment.Z);
         }
 
+        public string ToElodRecord(int elementId, bool reverse)
+        {
+            var loadAtI = reverse ? LoadAtJ : LoadAtI;
+            var loadAtJ = reverse ? LoadAtI : LoadAtJ;
+            return "ELOD,"
+                + elementId
+                + ","
+                + LoadCase
+                + ","
+                + (IsGlobal ? 1 : 0)
+                + ","
+                + StbRecord.Number(loadAtI.X)
+                + ","
+                + StbRecord.Number(loadAtI.Y)
+                + ","
+                + StbRecord.Number(loadAtI.Z)
+                + ","
+                + StbRecord.Number(loadAtJ.X)
+                + ","
+                + StbRecord.Number(loadAtJ.Y)
+                + ","
+                + StbRecord.Number(loadAtJ.Z);
+        }
+
+        public string ToAlodRecord(IReadOnlyList<int> elementIds)
+        {
+            if (elementIds == null || elementIds.Count < 3 || elementIds.Count > 4)
+            {
+                throw new InvalidOperationException("Area load requires 3 or 4 boundary elements.");
+            }
+
+            var fields = new List<string>
+            {
+                "ALOD",
+                LoadCase.ToString(CultureInfo.InvariantCulture),
+                StbRecord.Number(Pressure.X),
+                StbRecord.Number(Pressure.Y),
+                StbRecord.Number(Pressure.Z),
+            };
+            foreach (var elementId in elementIds)
+            {
+                fields.Add(elementId.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return string.Join(",", fields);
+        }
+
         public override string ToString()
         {
-            return "Load LC" + LoadCase + " @ " + Point;
+            switch (Kind)
+            {
+                case StbLoadKind.Line:
+                    return "Line load LC" + LoadCase;
+                case StbLoadKind.Area:
+                    return "Area load LC" + LoadCase;
+                default:
+                    return "Point load LC" + LoadCase + " @ " + Point;
+            }
         }
     }
 }
