@@ -1,4 +1,3 @@
-using System;
 using System.Drawing;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
@@ -29,38 +28,60 @@ namespace StbGrasshopper
         {
             base.Layout();
 
-            const float minimumWidth = 150f;
-            const float stripHeight = 23f;
+            const int columnCount = 3;
+            const float stripHeight = 42f;
             const float margin = 4f;
             const float gap = 2f;
 
             var original = Bounds;
-            var width = Math.Max(original.Width, minimumWidth);
-            var left = original.X - (width - original.Width) * 0.5f;
+            Bounds = new RectangleF(
+                original.X,
+                original.Y,
+                original.Width,
+                original.Height + stripHeight);
 
-            Bounds = new RectangleF(left, original.Y, width, original.Height + stripHeight);
-
-            if (_owner.Params.Input.Count > 0 && _owner.Params.Input[0].Attributes != null)
+            var inputOffset = Bounds.Left - original.Left;
+            foreach (var input in _owner.Params.Input)
             {
-                var pivot = _owner.Params.Input[0].Attributes.Pivot;
-                _owner.Params.Input[0].Attributes.Pivot = new PointF(Bounds.Left, pivot.Y);
+                if (input.Attributes == null)
+                {
+                    continue;
+                }
+
+                var parameterBounds = input.Attributes.Bounds;
+                parameterBounds.Offset(inputOffset, 0f);
+                input.Attributes.Bounds = parameterBounds;
+
+                var pivot = input.Attributes.Pivot;
+                input.Attributes.Pivot = new PointF(pivot.X + inputOffset, pivot.Y);
             }
 
-            if (_owner.Params.Output.Count > 0 && _owner.Params.Output[0].Attributes != null)
+            var outputOffset = Bounds.Right - original.Right;
+            foreach (var output in _owner.Params.Output)
             {
-                var pivot = _owner.Params.Output[0].Attributes.Pivot;
-                _owner.Params.Output[0].Attributes.Pivot = new PointF(Bounds.Right, pivot.Y);
+                if (output.Attributes == null)
+                {
+                    continue;
+                }
+
+                var parameterBounds = output.Attributes.Bounds;
+                parameterBounds.Offset(outputOffset, 0f);
+                output.Attributes.Bounds = parameterBounds;
+
+                var pivot = output.Attributes.Pivot;
+                output.Attributes.Pivot = new PointF(pivot.X + outputOffset, pivot.Y);
             }
 
-            var availableWidth = Bounds.Width - margin * 2f - gap * (Labels.Length - 1);
-            var buttonWidth = availableWidth / Labels.Length;
-            var buttonY = original.Bottom + 3f;
+            var availableWidth = Bounds.Width - margin * 2f - gap * (columnCount - 1);
+            var buttonWidth = availableWidth / columnCount;
 
             for (var i = 0; i < _buttons.Length; i++)
             {
+                var row = i / columnCount;
+                var column = i % columnCount;
                 _buttons[i] = new RectangleF(
-                    Bounds.Left + margin + i * (buttonWidth + gap),
-                    buttonY,
+                    Bounds.Left + margin + column * (buttonWidth + gap),
+                    original.Bottom + 3f + row * (17f + gap),
                     buttonWidth,
                     17f);
             }
