@@ -134,7 +134,7 @@ namespace StbGrasshopper
             var rawSegments = new List<RawStressSegment>();
             foreach (var force in results.ElementForces)
             {
-                if (force.LoadCase != loadCase)
+                if (!StbLoadCaseFilter.Matches(loadCase, force.LoadCase))
                 {
                     continue;
                 }
