@@ -1,6 +1,7 @@
 ; Structural Toolbox - Windows installer (Inno Setup 6)
 ; Shortcuts point to Start Structural Toolbox.bat (always present).
 ; stb.exe is created later by Install_once.bat in [Run].
+; Install_once.bat also copies grasshopper\StbGrasshopper.gha when Grasshopper is installed.
 
 #ifndef StbSourceDir
   #define StbSourceDir "dist\_installer_staging\Payload"

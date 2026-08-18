@@ -58,7 +58,7 @@ namespace StbGrasshopper
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddGenericParameter("Results", "R", "Parsed STB result object from STB Analyze.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbModelParameter(), "STb Model", "STb Model", "STb Model containing parsed results.", GH_ParamAccess.item);
             pManager.AddIntegerParameter("Load Case", "LC", "Load case to display. Negative means all load cases.", GH_ParamAccess.item, 0);
             pManager.AddIntegerParameter("Divisions", "D", "Diagram segments per element.", GH_ParamAccess.item, 8);
             pManager.AddBooleanParameter("Values", "V", "Show value labels in the Rhino viewport.", GH_ParamAccess.item, true);
@@ -80,12 +80,12 @@ namespace StbGrasshopper
             _clippingBox = BoundingBox.Empty;
             _legendMaximum = 0.0;
 
-            StbParsedResults results = null;
+            StbParsedResults results;
             int loadCase = 0;
             int component = _componentIndex;
             int divisions = 8;
 
-            if (!da.GetData(0, ref results) || results == null)
+            if (!StbModelGooUtil.TryGetResults(da, 0, out results))
             {
                 return;
             }
@@ -147,6 +147,10 @@ namespace StbGrasshopper
                 var textNormal = Vector3d.CrossProduct(axis, diagramDirection);
                 textNormal.Unitize();
                 GetForceValues(force, componentInfo, out var valueI, out var valueCenter, out var valueJ);
+                if (!IsFinite(valueI) || !IsFinite(valueCenter) || !IsFinite(valueJ))
+                {
+                    continue;
+                }
                 _legendMaximum = Math.Max(_legendMaximum, Math.Max(Math.Abs(valueI), Math.Max(Math.Abs(valueCenter), Math.Abs(valueJ))));
 
                 var points = new List<Point3d>();
@@ -597,6 +601,11 @@ namespace StbGrasshopper
 
         private static Color ForceColor(double normalized)
         {
+            if (double.IsNaN(normalized) || double.IsInfinity(normalized))
+            {
+                return Color.FromArgb(35, 70, 180);
+            }
+
             var t = Math.Max(0.0, Math.Min(1.0, normalized));
             var palette = new[]
             {
@@ -610,6 +619,11 @@ namespace StbGrasshopper
             };
             var index = (int)Math.Floor(t * palette.Length);
             return palette[Math.Min(palette.Length - 1, index)];
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         private sealed class ForceComponentInfo

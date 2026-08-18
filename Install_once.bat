@@ -89,6 +89,26 @@ if "%SILENT%"=="1" (
 )
 if errorlevel 1 goto :pipfail
 
+REM --- Grasshopper plugin（存在する場合のみ配置）---
+set "GHA_SOURCE=%~dp0grasshopper\StbGrasshopper.gha"
+set "GH_LIBRARIES=%APPDATA%\Grasshopper\Libraries"
+if exist "%GHA_SOURCE%" (
+    if exist "%GH_LIBRARIES%" (
+        echo Grasshopper plugin を配置しています...
+        copy /Y "%GHA_SOURCE%" "%GH_LIBRARIES%\StbGrasshopper.gha" >nul
+        if errorlevel 1 (
+            echo [警告] Grasshopper plugin のコピーに失敗しました。Rhino を終了してから再実行してください。
+            call :log [警告] Grasshopper plugin のコピーに失敗しました
+        ) else (
+            echo Grasshopper plugin を配置しました: %GH_LIBRARIES%
+            call :log Grasshopper plugin を配置しました: %GH_LIBRARIES%
+        )
+    ) else (
+        echo Grasshopper の Libraries フォルダが見つかりません。後で再実行すると自動配置します。
+        call :log Grasshopper の Libraries フォルダが見つかりません
+    )
+)
+
 call :log セットアップ完了
 echo.
 echo ========================================

@@ -8,11 +8,14 @@ environment and makes classroom Windows deployment easier.
 
 ## Components
 
-- `STB Analyze`: runs `python -m stb_cli solve`
-- `STB Load Cases`: lists available load cases in parsed results
-- `STB Displacements`: exposes load case, node id, translation, and rotation rows
-- `STB Forces`: exposes parsed element force rows
-- `STB Stress`: previews maximum normal stress with a viewport color legend
+- `STb Analyze`: accepts `STb Model`, runs `python -m stb_cli solve`, and outputs
+  parsed `Results` plus an analyzed `STb Model`
+- `STb Analyze from file`: accepts a `.dat` path, runs the same solver, and outputs
+  parsed `Results` plus an analyzed `STb Model`
+- `STB Load Cases`: accepts `STb Model` and lists available load cases in its results
+- `STB Displacements`: accepts `STb Model` and exposes load case, node id, translation, and rotation rows
+- `STB Forces`: accepts `STb Model` and exposes parsed element force rows
+- `STB Stress`: accepts `STb Model` and previews maximum normal stress with a viewport color legend
 - `STB DAT Nodes`: reads original node points from an existing `.dat` file
 - `STB DAT Beams`: reads element connectivity from an existing `.dat` file
 - `STB Element`: input `Name`, `Line`, `Section`, `Beta` → output typed `Element`
@@ -26,8 +29,13 @@ environment and makes classroom Windows deployment easier.
   (kN/m) → output typed `Load`; different end vectors create a trapezoidal load
 - `STB Area Load`: input three or four typed boundary `Element` objects, `LC`, and
   global pressure vector `P` (kN/m²) → output typed `Load`
-- `STB Assemble Model`: input typed `Element`, `Load`, `Support`, `Write` → output `Text`, `DAT`
-- `STB Deformed Shape`: preview placeholder for the next step
+- `STB Assemble Model`: input typed `Element`, `Load`, `Support`, optional `Results`, and
+  `Write` → output `Text`, `DAT`, and typed `STb Model`
+- `STb Assembly from file`: input `DAT Path` → output typed `STb Model`
+- `View Support Condition`: input typed `STb Model`, `Size` → display fixed, pinned,
+  roller, and rotational restraint symbols; output support points, symbol Breps,
+  and condition descriptions
+- `STB Deformed Shape`: displays the deformed model with a scale slider and legend
 
 The current solver does not include the member-axis component of an `ELOD` in
 its fixed-end forces. `STB Line Load` reports a warning when such a component is
@@ -83,7 +91,7 @@ build. Override the destination when needed with
 
 ## Runtime Notes
 
-`STB Analyze` calls the Python CLI outside Rhino. Use the platform-specific
+`STb Analyze` and `STb Analyze from file` call the Python CLI outside Rhino. Use the platform-specific
 virtual environment Python:
 
 - Windows: `.venv\Scripts\python.exe`
@@ -97,12 +105,13 @@ python -m pip install -e .
 
 ## Load case workflow
 
-- `STB Analyze` keeps all load cases in `Results` when `Load Case` is `-1` (default).
+- `STb Analyze` and `STb Analyze from file` keep all load cases in `Results` when `Load Case` is `-1` (default).
 - Set `Load Case` on `STB Displacements`, `STB Forces`, and `STB Deformed Shape` to choose which LC to display.
 - Use `STB Load Cases` to inspect available LC ids from `Results`.
 - Negative `Load Case` on result components means "show all load cases".
-- `STB Analyze` now embeds node coordinates and element connectivity from the `.dat` file into `Results`.
-- `STB Deformed Shape` only needs `Results`, `Load Case`, and `Scale`.
+- Both Analyze components embed node coordinates and element connectivity from the `.dat` file into `Results`.
+- `STB Deformed Shape` uses `Results` and `Load Case` inputs; its `Scale` is
+  controlled by the component slider, and `Legend` toggles the viewport legend.
 
 The first component to make production-ready is `StbAnalyzeComponent.cs`.
 
@@ -113,6 +122,12 @@ The first component to make production-ready is `StbAnalyzeComponent.cs`.
    components. Area-load boundary elements must form one closed triangular or
    quadrilateral loop.
 3. Merge typed objects into `STB Assemble Model`
-4. `STB Assemble Model` auto-assigns material/section/element/node ids, resolves
+4. Connect an Analyze component's `Results` to `STB Assemble Model` `Results` to embed
+  solver results in `STb Model`.
+5. Alternatively, connect `STB Assemble Model` `STb Model` directly to `STb Analyze`
+  `STb Model`; it then outputs an analyzed `STb Model`.
+6. Connect analyzed `STb Model` to any component in the `Results` group, or to
+  `View Support Condition`, to inspect the model and results.
+6. `STB Assemble Model` auto-assigns material/section/element/node ids, resolves
    load targets at the Rhino document tolerance, emits `PLOD`/`ELOD`/`ALOD`,
    merges duplicate nodes, and writes `.dat` text

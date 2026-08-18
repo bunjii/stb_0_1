@@ -24,7 +24,7 @@ namespace StbGrasshopper
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddGenericParameter("Results", "R", "Parsed STB result object.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbModelParameter(), "STb Model", "STb Model", "STb Model containing parsed results.", GH_ParamAccess.item);
             pManager.AddIntegerParameter("Load Case", "LC", "Load case to extract. Negative means all.", GH_ParamAccess.item, 0);
         }
 
@@ -38,9 +38,9 @@ namespace StbGrasshopper
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            StbParsedResults results = null;
+            StbParsedResults results;
             int loadCase = 0;
-            if (!da.GetData(0, ref results) || results == null)
+            if (!StbModelGooUtil.TryGetResults(da, 0, out results))
             {
                 return;
             }

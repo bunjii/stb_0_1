@@ -186,6 +186,39 @@ namespace StbGrasshopper
         }
     }
 
+    public sealed class StbModelGoo : GH_Goo<StbModelModel>
+    {
+        public StbModelGoo() { }
+
+        public StbModelGoo(StbModelModel model)
+        {
+            Value = model;
+        }
+
+        public override bool IsValid => Value != null;
+        public override string TypeName => "STb Model";
+        public override string TypeDescription => "STb Model containing elements, supports, loads, and results";
+        public override IGH_Goo Duplicate() => new StbModelGoo(Value?.Duplicate());
+        public override string ToString() => Value?.ToString() ?? "Null STb Model";
+
+        public override bool CastFrom(object source)
+        {
+            if (source is StbModelModel model)
+            {
+                Value = model;
+                return true;
+            }
+
+            if (source is StbModelGoo goo)
+            {
+                Value = goo.Value?.Duplicate();
+                return Value != null;
+            }
+
+            return false;
+        }
+    }
+
     public sealed class StbLoadGoo : GH_Goo<StbLoadModel>
     {
         public StbLoadGoo()
@@ -234,7 +267,7 @@ namespace StbGrasshopper
     public sealed class StbMaterialParameter : GH_Param<StbMaterialGoo>
     {
         public StbMaterialParameter()
-            : base("Material", "Mat", "STB material", "STB", "Model", GH_ParamAccess.item)
+            : base("STb Mat", "Mat", "STB material", "STB", "Model", GH_ParamAccess.item)
         {
         }
 
@@ -248,7 +281,7 @@ namespace StbGrasshopper
     public sealed class StbSectionParameter : GH_Param<StbSectionGoo>
     {
         public StbSectionParameter()
-            : base("Section", "Sec", "STB section", "STB", "Model", GH_ParamAccess.item)
+            : base("STb Section", "Sec", "STB section", "STB", "Model", GH_ParamAccess.item)
         {
         }
 
@@ -262,7 +295,7 @@ namespace StbGrasshopper
     public sealed class StbElementParameter : GH_Param<StbElementGoo>
     {
         public StbElementParameter()
-            : base("Element", "Elem", "STB element", "STB", "Model", GH_ParamAccess.item)
+            : base("STb Element", "Elem", "STB element", "STB", "Model", GH_ParamAccess.item)
         {
         }
 
@@ -276,7 +309,7 @@ namespace StbGrasshopper
     public sealed class StbSupportParameter : GH_Param<StbSupportGoo>
     {
         public StbSupportParameter()
-            : base("Support", "Sup", "STB support", "STB", "Model", GH_ParamAccess.item)
+            : base("STb Support", "Sup", "STB support", "STB", "Model", GH_ParamAccess.item)
         {
         }
 
@@ -287,10 +320,22 @@ namespace StbGrasshopper
         protected override Bitmap Icon => null;
     }
 
+    public sealed class StbModelParameter : GH_Param<StbModelGoo>
+    {
+        public StbModelParameter()
+            : base("STb Model", "STb Model", "Structural Toolbox model and optional results", "STB", "Model", GH_ParamAccess.item)
+        {
+        }
+
+        public override Guid ComponentGuid => new Guid("e6f7a8b9-0123-4345-f567-89abcdef0123");
+        public override GH_Exposure Exposure => GH_Exposure.hidden;
+        protected override Bitmap Icon => null;
+    }
+
     public sealed class StbLoadParameter : GH_Param<StbLoadGoo>
     {
         public StbLoadParameter()
-            : base("Load", "Ld", "STB load", "STB", "Model", GH_ParamAccess.item)
+            : base("STb Load", "Ld", "STB load", "STB", "Model", GH_ParamAccess.item)
         {
         }
 
@@ -379,6 +424,63 @@ namespace StbGrasshopper
             }
 
             return values;
+        }
+
+        public static bool TryGetModel(IGH_DataAccess da, int index, out StbModelModel model)
+        {
+            model = null;
+            StbModelGoo goo = null;
+            if (!da.GetData(index, ref goo) || goo?.Value == null)
+            {
+                return false;
+            }
+
+            model = goo.Value;
+            return true;
+        }
+
+        public static bool TryGetResults(IGH_DataAccess da, int index, out StbParsedResults results)
+        {
+            results = null;
+            StbModelGoo modelGoo = null;
+            if (da.GetData(index, ref modelGoo) && modelGoo?.Value?.Results != null)
+            {
+                results = modelGoo.Value.Results;
+                return true;
+            }
+
+            StbParsedResults parsedResult = null;
+            if (da.GetData(index, ref parsedResult) && parsedResult != null)
+            {
+                results = parsedResult;
+                return true;
+            }
+
+            object value = null;
+            if (!da.GetData(index, ref value) || value == null)
+            {
+                return false;
+            }
+
+            if (value is StbParsedResults parsed)
+            {
+                results = parsed;
+                return true;
+            }
+
+            if (value is StbModelGoo valueModelGoo && valueModelGoo.Value?.Results != null)
+            {
+                results = valueModelGoo.Value.Results;
+                return true;
+            }
+
+            if (value is StbModelModel model && model.Results != null)
+            {
+                results = model.Results;
+                return true;
+            }
+
+            return false;
         }
 
         public static List<StbLoadModel> GetLoads(IGH_DataAccess da, int index)
