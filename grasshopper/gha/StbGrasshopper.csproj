@@ -54,4 +54,17 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <GrasshopperLibrariesPath Condition="'$(GrasshopperLibrariesPath)' == ''">$(APPDATA)\Grasshopper\Libraries</GrasshopperLibrariesPath>
+  </PropertyGroup>
+
+  <Target Name="CopyGhaToGrasshopperLibraries"
+          AfterTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT'">
+    <MakeDir Directories="$(GrasshopperLibrariesPath)" />
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(GrasshopperLibrariesPath)"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

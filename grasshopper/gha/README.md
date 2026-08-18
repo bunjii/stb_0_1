@@ -76,6 +76,11 @@ dotnet build grasshopper/gha/StbGrasshopper.csproj -c Release \
 
 The build output is `bin/Release/StbGrasshopper.gha`.
 
+On Windows, a successful build also copies `StbGrasshopper.gha` to
+`%APPDATA%\Grasshopper\Libraries` so Rhino/Grasshopper can load the latest
+build. Override the destination when needed with
+`-p:GrasshopperLibrariesPath="C:\path\to\Libraries"`.
+
 ## Runtime Notes
 
 `STB Analyze` calls the Python CLI outside Rhino. Use the platform-specific

@@ -15,19 +15,24 @@ namespace StbGrasshopper
     public sealed class StbForceDiagramComponent : GH_Component
     {
         private readonly List<DiagramSegment> _segments = new List<DiagramSegment>();
-        private readonly List<Line> _constructionLines = new List<Line>();
+        private readonly List<GuideLine> _constructionLines = new List<GuideLine>();
+        private readonly List<ValueLabel> _valueLabels = new List<ValueLabel>();
         private BoundingBox _clippingBox = BoundingBox.Empty;
         private double _legendMaximum;
+        private double _legendLimit;
+        private double _legendMinimum = 0.0;
+        private double _legendRangeMaximum = 100.0;
         private string _componentLabel = "Nx";
         private string _unitLabel = "kN";
         private bool _showValues = true;
         private bool _showLegend = true;
-        private double _diagramScale = 0.1;
+        private double _diagramScale = 0.015;
         private double _diagramScaleMinimum = 0.0;
-        private double _diagramScaleMaximum = 1.0;
-        private double _textSize = 2.0;
-        private double _textSizeMinimum = 0.5;
-        private double _textSizeMaximum = 10.0;
+        private double _diagramScaleMaximum = 0.03;
+        private double _textSize = 0.075;
+        private double _textSizeMinimum = 0.05;
+        private double _textSizeMaximum = 0.1;
+        private int _componentIndex = 1;
 
         public StbForceDiagramComponent()
             : base(
@@ -55,9 +60,7 @@ namespace StbGrasshopper
         {
             pManager.AddGenericParameter("Results", "R", "Parsed STB result object from STB Analyze.", GH_ParamAccess.item);
             pManager.AddIntegerParameter("Load Case", "LC", "Load case to display. Negative means all load cases.", GH_ParamAccess.item, 0);
-            pManager.AddIntegerParameter("Component", "C", "1=Nx, 2=Vy, 3=Vz, 4=Mx, 5=My, 6=Mz.", GH_ParamAccess.item, 1);
             pManager.AddIntegerParameter("Divisions", "D", "Diagram segments per element.", GH_ParamAccess.item, 8);
-            pManager.AddNumberParameter("Maximum", "Max", "Legend maximum in kN or kNm. Use 0 for automatic.", GH_ParamAccess.item, 0.0);
             pManager.AddBooleanParameter("Values", "V", "Show value labels in the Rhino viewport.", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("Legend", "Legend", "Draw the force legend in the Rhino viewport.", GH_ParamAccess.item, true);
         }
@@ -65,23 +68,22 @@ namespace StbGrasshopper
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             pManager.AddLineParameter("Diagram", "D", "Force diagram segments.", GH_ParamAccess.list);
-            pManager.AddNumberParameter("Values", "V", "Signed force value at the midpoint of each diagram segment in kN or kNm.", GH_ParamAccess.list);
+            pManager.AddNumberParameter("Values", "V", "Signed force value at the start of each diagram segment in kN or kNm.", GH_ParamAccess.list);
             pManager.AddIntegerParameter("Element IDs", "E", "Element id for each diagram segment.", GH_ParamAccess.list);
-            pManager.AddTextParameter("Component", "C", "Displayed force component and unit.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
             _segments.Clear();
             _constructionLines.Clear();
+            _valueLabels.Clear();
             _clippingBox = BoundingBox.Empty;
             _legendMaximum = 0.0;
 
             StbParsedResults results = null;
             int loadCase = 0;
-            int component = 1;
+            int component = _componentIndex;
             int divisions = 8;
-            double requestedMaximum = 0.0;
 
             if (!da.GetData(0, ref results) || results == null)
             {
@@ -89,11 +91,9 @@ namespace StbGrasshopper
             }
 
             da.GetData(1, ref loadCase);
-            da.GetData(2, ref component);
-            da.GetData(3, ref divisions);
+            da.GetData(2, ref divisions);
             var showValues = true;
             var showLegend = true;
-            ReadInput(da, "Maximum", ref requestedMaximum);
             ReadInput(da, "Values", ref showValues);
             ReadInput(da, "Legend", ref showLegend);
             _showValues = showValues;
@@ -108,6 +108,7 @@ namespace StbGrasshopper
             divisions = Math.Max(1, Math.Min(100, divisions));
             _componentLabel = componentInfo.Label;
             _unitLabel = componentInfo.Unit;
+            _componentIndex = component;
 
             var nodes = new Dictionary<int, Point3d>();
             foreach (var node in results.Nodes)
@@ -161,19 +162,29 @@ namespace StbGrasshopper
                 {
                     var t0 = (double)i / divisions;
                     var t1 = (double)(i + 1) / divisions;
-                    var value = InterpolateForce(valueI, valueCenter, valueJ, 0.5 * (t0 + t1));
+                    var value = InterpolateForce(valueI, valueCenter, valueJ, t0);
+                    var centerValue = InterpolateForce(valueI, valueCenter, valueJ, 0.5 * (t0 + t1));
                     var line = new Line(points[i], points[i + 1]);
-                    rawSegments.Add(new RawDiagramSegment(line, value, force.ElementId, textNormal));
+                    rawSegments.Add(new RawDiagramSegment(
+                        line,
+                        value,
+                        centerValue,
+                        force.ElementId,
+                        textNormal,
+                        points[i] + diagramDirection * LabelOffset(value),
+                        points[i + 1] + diagramDirection * LabelOffset(InterpolateForce(valueI, valueCenter, valueJ, t1)),
+                        i == divisions - 1,
+                        InterpolateForce(valueI, valueCenter, valueJ, t1)));
                     ExtendClippingBox(line.BoundingBox);
 
                     var baseline = new Line(
                         start + (end - start) * t0,
                         start + (end - start) * t1);
-                    _constructionLines.Add(baseline);
-                    _constructionLines.Add(new Line(baseline.From, line.From));
+                    _constructionLines.Add(new GuideLine(baseline, centerValue));
+                    _constructionLines.Add(new GuideLine(new Line(baseline.From, line.From), value));
                     if (i == divisions - 1)
                     {
-                        _constructionLines.Add(new Line(baseline.To, line.To));
+                        _constructionLines.Add(new GuideLine(new Line(baseline.To, line.To), centerValue));
                     }
                     ExtendClippingBox(baseline.BoundingBox);
                 }
@@ -185,9 +196,9 @@ namespace StbGrasshopper
                 return;
             }
 
-            if (requestedMaximum > 0.0)
+            if (_legendLimit > 0.0)
             {
-                _legendMaximum = requestedMaximum;
+                _legendMaximum = _legendLimit;
             }
 
             if (_legendMaximum <= 0.0)
@@ -200,8 +211,13 @@ namespace StbGrasshopper
             var outputElementIds = new List<int>();
             foreach (var segment in rawSegments)
             {
-                var color = ForceColor(Math.Abs(segment.Value) / _legendMaximum);
+                var color = ForceColor(Math.Abs(segment.CenterValue) / _legendMaximum);
                 _segments.Add(new DiagramSegment(segment.Line, segment.Value, segment.ElementId, segment.TextNormal, color));
+                _valueLabels.Add(new ValueLabel(segment.StartPoint, segment.Value, segment.TextNormal, color));
+                if (segment.IsLast)
+                {
+                    _valueLabels.Add(new ValueLabel(segment.EndPoint, segment.EndValue, segment.TextNormal, color));
+                }
                 outputLines.Add(segment.Line);
                 outputValues.Add(segment.Value);
                 outputElementIds.Add(segment.ElementId);
@@ -210,7 +226,6 @@ namespace StbGrasshopper
             da.SetDataList(0, outputLines);
             da.SetDataList(1, outputValues);
             da.SetDataList(2, outputElementIds);
-            da.SetData(3, _componentLabel + " [" + _unitLabel + "]");
         }
 
         internal double DiagramScale => _diagramScale;
@@ -225,6 +240,27 @@ namespace StbGrasshopper
 
         internal double TextSizeMaximum => _textSizeMaximum;
 
+        internal double LegendValue => _legendLimit > 0.0 ? _legendLimit : _legendMaximum;
+
+        internal double LegendMinimum => _legendMinimum;
+
+        internal double LegendMaximum => _legendRangeMaximum;
+
+        internal string ComponentLabel => _componentLabel;
+
+        internal int ComponentIndex => _componentIndex;
+
+        internal void SetComponent(int component)
+        {
+            if (component < 1 || component > 6 || component == _componentIndex)
+            {
+                return;
+            }
+
+            _componentIndex = component;
+            ExpireSolution(true);
+        }
+
         internal void SetDiagramScale(double value)
         {
             _diagramScale = Math.Max(_diagramScaleMinimum, Math.Min(_diagramScaleMaximum, value));
@@ -234,6 +270,12 @@ namespace StbGrasshopper
         internal void SetTextSize(double value)
         {
             _textSize = Math.Max(_textSizeMinimum, Math.Min(_textSizeMaximum, value));
+            ExpireSolution(true);
+        }
+
+        internal void SetLegendValue(double value)
+        {
+            _legendLimit = Math.Max(_legendMinimum, Math.Min(_legendRangeMaximum, value));
             ExpireSolution(true);
         }
 
@@ -293,6 +335,34 @@ namespace StbGrasshopper
             }
         }
 
+        internal void EditLegendRange()
+        {
+            var minimum = _legendMinimum;
+            if (!Rhino.UI.Dialogs.ShowNumberBox(
+                "Legend range",
+                "Minimum value",
+                ref minimum,
+                0.0,
+                _legendRangeMaximum - 0.01))
+            {
+                return;
+            }
+
+            var maximum = _legendRangeMaximum;
+            if (Rhino.UI.Dialogs.ShowNumberBox(
+                "Legend range",
+                "Maximum value",
+                ref maximum,
+                minimum + 0.01,
+                100000.0))
+            {
+                _legendMinimum = minimum;
+                _legendRangeMaximum = maximum;
+                _legendLimit = Math.Max(minimum, Math.Min(_legendLimit, maximum));
+                ExpireSolution(true);
+            }
+        }
+
         public override bool Write(GH_IWriter writer)
         {
             writer.SetDouble("DiagramScale", _diagramScale);
@@ -301,6 +371,10 @@ namespace StbGrasshopper
             writer.SetDouble("TextSize", _textSize);
             writer.SetDouble("TextSizeMinimum", _textSizeMinimum);
             writer.SetDouble("TextSizeMaximum", _textSizeMaximum);
+            writer.SetInt32("ComponentIndex", _componentIndex);
+            writer.SetDouble("LegendLimit", _legendLimit);
+            writer.SetDouble("LegendMinimum", _legendMinimum);
+            writer.SetDouble("LegendRangeMaximum", _legendRangeMaximum);
             return base.Write(writer);
         }
 
@@ -336,26 +410,42 @@ namespace StbGrasshopper
                 _textSizeMinimum = reader.GetDouble("TextSizeMinimum");
             }
 
+            if (reader.ItemExists("ComponentIndex")) _componentIndex = reader.GetInt32("ComponentIndex");
+            if (reader.ItemExists("LegendLimit")) _legendLimit = reader.GetDouble("LegendLimit");
+            if (reader.ItemExists("LegendMinimum")) _legendMinimum = reader.GetDouble("LegendMinimum");
+            if (reader.ItemExists("LegendRangeMaximum")) _legendRangeMaximum = reader.GetDouble("LegendRangeMaximum");
+
             return base.Read(reader);
         }
 
         public override void DrawViewportWires(IGH_PreviewArgs args)
         {
-            foreach (var line in _constructionLines)
+            foreach (var guide in _constructionLines)
             {
-                args.Display.DrawLine(line, Color.FromArgb(100, 150, 150, 150), 1);
+                args.Display.DrawLine(
+                    guide.Line,
+                    ForceColor(Math.Abs(guide.Value) / _legendMaximum),
+                    2);
             }
 
             foreach (var segment in _segments)
             {
-                args.Display.DrawLine(segment.Line, segment.Color, 4);
-                if (_showValues)
+                args.Display.DrawLine(segment.Line, segment.Color, 2);
+            }
+
+            if (_showValues)
+            {
+                foreach (var label in _valueLabels)
                 {
-                    var midpoint = segment.Line.PointAt(0.5);
+                    if (Math.Abs(label.Value) < 0.05)
+                    {
+                        continue;
+                    }
+
                     args.Display.Draw3dText(
-                        segment.Value.ToString("0.###", CultureInfo.InvariantCulture),
-                        Color.White,
-                        new Plane(midpoint, args.Viewport.CameraX, args.Viewport.CameraY),
+                        label.Value.ToString("0.0", CultureInfo.InvariantCulture),
+                        label.Color,
+                        new Plane(label.Point, args.Viewport.CameraX, args.Viewport.CameraY),
                         _textSize,
                         "Arial",
                         false,
@@ -395,6 +485,11 @@ namespace StbGrasshopper
             return false;
         }
 
+        private double LabelOffset(double value)
+        {
+            return (value < 0.0 ? -1.0 : 1.0) * _textSize * 0.5;
+        }
+
         private static Vector3d LocalYAxis(Vector3d axis)
         {
             var localY = Vector3d.CrossProduct(Vector3d.ZAxis, axis);
@@ -431,20 +526,19 @@ namespace StbGrasshopper
 
         private void DrawLegend(IGH_PreviewArgs args)
         {
-            const int width = 190;
-            const int height = 160;
+            const int width = 150;
             const int barXOffset = 14;
             const int barYOffset = 38;
             const int barWidth = 24;
-            const int barHeight = 96;
-            const int steps = 18;
+            const int barHeight = 250;
+            const int steps = 7;
+            const int legendHeight = barYOffset + barHeight;
+            var legendTextColor = Color.FromArgb(55, 60, 65);
 
             var viewport = args.Viewport.Bounds;
             var left = Math.Max(viewport.Left + 8, viewport.Right - width - 18);
-            var top = viewport.Top + 18;
-            var panel = new Rectangle(left, top, width, height);
-            args.Display.Draw2dRectangle(panel, Color.FromArgb(220, 30, 34, 38), 1, Color.FromArgb(230, 220, 225, 230));
-            args.Display.Draw2dText(_componentLabel + " [" + _unitLabel + "]", Color.White, new Point2d(left + 10, top + 11), false, 12);
+            var top = Math.Max(viewport.Top + 8, viewport.Top + (viewport.Height - legendHeight) / 2);
+            args.Display.Draw2dText(_componentLabel + " [" + _unitLabel + "]", legendTextColor, new Point2d(left + 10, top + 11), false, 18);
 
             for (var i = 0; i < steps; i++)
             {
@@ -456,14 +550,18 @@ namespace StbGrasshopper
                     ForceColor(normalized), 0, ForceColor(normalized));
             }
 
-            DrawLegendValue(args, left + 48, top + barYOffset - 5, _legendMaximum);
-            DrawLegendValue(args, left + 48, top + barYOffset + barHeight / 2 - 5, 0.0);
-            DrawLegendValue(args, left + 48, top + barYOffset + barHeight - 5, -_legendMaximum);
+            for (var i = 0; i <= steps; i++)
+            {
+                var normalized = (double)i / steps;
+                var value = _legendMaximum * (1.0 - 2.0 * normalized);
+                var y = top + barYOffset + i * barHeight / steps - 5;
+                DrawLegendValue(args, left + 48, y, value, legendTextColor);
+            }
         }
 
-        private static void DrawLegendValue(IGH_PreviewArgs args, int x, int y, double value)
+        private static void DrawLegendValue(IGH_PreviewArgs args, int x, int y, double value, Color textColor)
         {
-            args.Display.Draw2dText(value.ToString("0.###", CultureInfo.InvariantCulture), Color.White, new Point2d(x, y), false, 12);
+            args.Display.Draw2dText(value.ToString("0.0", CultureInfo.InvariantCulture), textColor, new Point2d(x, y), false, 18);
         }
 
         private static bool TryGetComponent(int component, out ForceComponentInfo info)
@@ -500,15 +598,18 @@ namespace StbGrasshopper
         private static Color ForceColor(double normalized)
         {
             var t = Math.Max(0.0, Math.Min(1.0, normalized));
-            return Blend(Color.FromArgb(35, 100, 210), Color.FromArgb(225, 45, 35), t);
-        }
-
-        private static Color Blend(Color start, Color end, double t)
-        {
-            return Color.FromArgb(
-                (int)Math.Round(start.R + (end.R - start.R) * t),
-                (int)Math.Round(start.G + (end.G - start.G) * t),
-                (int)Math.Round(start.B + (end.B - start.B) * t));
+            var palette = new[]
+            {
+                Color.FromArgb(35, 70, 180),
+                Color.FromArgb(35, 120, 220),
+                Color.FromArgb(0, 190, 220),
+                Color.FromArgb(35, 170, 90),
+                Color.FromArgb(245, 220, 40),
+                Color.FromArgb(245, 145, 25),
+                Color.FromArgb(215, 35, 35),
+            };
+            var index = (int)Math.Floor(t * palette.Length);
+            return palette[Math.Min(palette.Length - 1, index)];
         }
 
         private sealed class ForceComponentInfo
@@ -527,18 +628,65 @@ namespace StbGrasshopper
 
         private sealed class RawDiagramSegment
         {
-            public RawDiagramSegment(Line line, double value, int elementId, Vector3d textNormal)
+            public RawDiagramSegment(
+                Line line,
+                double value,
+                double centerValue,
+                int elementId,
+                Vector3d textNormal,
+                Point3d startPoint,
+                Point3d endPoint,
+                bool isLast,
+                double endValue)
             {
                 Line = line;
                 Value = value;
+                CenterValue = centerValue;
                 ElementId = elementId;
                 TextNormal = textNormal;
+                StartPoint = startPoint;
+                EndPoint = endPoint;
+                IsLast = isLast;
+                EndValue = endValue;
             }
 
             public Line Line { get; }
             public double Value { get; }
+            public double CenterValue { get; }
             public int ElementId { get; }
             public Vector3d TextNormal { get; }
+            public Point3d StartPoint { get; }
+            public Point3d EndPoint { get; }
+            public bool IsLast { get; }
+            public double EndValue { get; }
+        }
+
+        private sealed class ValueLabel
+        {
+            public ValueLabel(Point3d point, double value, Vector3d textNormal, Color color)
+            {
+                Point = point;
+                Value = value;
+                TextNormal = textNormal;
+                Color = color;
+            }
+
+            public Point3d Point { get; }
+            public double Value { get; }
+            public Vector3d TextNormal { get; }
+            public Color Color { get; }
+        }
+
+        private sealed class GuideLine
+        {
+            public GuideLine(Line line, double value)
+            {
+                Line = line;
+                Value = value;
+            }
+
+            public Line Line { get; }
+            public double Value { get; }
         }
 
         private sealed class DiagramSegment
@@ -565,8 +713,10 @@ namespace StbGrasshopper
         private static readonly Color TrackColor = Color.FromArgb(70, 76, 82);
         private static readonly Color FillColor = Color.FromArgb(45, 170, 210);
         private readonly StbForceDiagramComponent _owner;
+        private readonly RectangleF[] _componentButtons = new RectangleF[6];
         private RectangleF _scaleBounds;
         private RectangleF _textBounds;
+        private RectangleF _legendBounds;
         private int _draggingSlider;
 
         public StbForceDiagramAttributes(StbForceDiagramComponent owner)
@@ -579,7 +729,7 @@ namespace StbGrasshopper
         {
             base.Layout();
 
-            const float stripHeight = 54f;
+            const float stripHeight = 78f;
             const float margin = 4f;
             var original = Bounds;
             const float minimumWidth = 210f;
@@ -622,14 +772,28 @@ namespace StbGrasshopper
             }
 
             var rowWidth = Bounds.Width - 2f * margin;
+            var buttonWidth = (rowWidth - 10f) / 6f;
+            for (var i = 0; i < _componentButtons.Length; i++)
+            {
+                _componentButtons[i] = new RectangleF(
+                    Bounds.Left + margin + i * (buttonWidth + 2f),
+                    original.Bottom + 3f,
+                    buttonWidth,
+                    17f);
+            }
             _scaleBounds = new RectangleF(
                 Bounds.Left + margin,
-                original.Bottom + 5f,
+                original.Bottom + 24f,
                 rowWidth,
                 18f);
             _textBounds = new RectangleF(
                 Bounds.Left + margin,
-                original.Bottom + 29f,
+                original.Bottom + 42f,
+                rowWidth,
+                18f);
+            _legendBounds = new RectangleF(
+                Bounds.Left + margin,
+                original.Bottom + 60f,
                 rowWidth,
                 18f);
         }
@@ -645,8 +809,10 @@ namespace StbGrasshopper
                 return;
             }
 
-            DrawSlider(graphics, _scaleBounds, "Diagram scale", _owner.DiagramScale, _owner.DiagramScaleMinimum, _owner.DiagramScaleMaximum, "0.###");
-            DrawSlider(graphics, _textBounds, "Text size", _owner.TextSize, _owner.TextSizeMinimum, _owner.TextSizeMaximum, "0.##");
+            DrawSlider(graphics, _scaleBounds, "Scale", _owner.DiagramScale, _owner.DiagramScaleMinimum, _owner.DiagramScaleMaximum, "0.###");
+            DrawSlider(graphics, _textBounds, "Text size", _owner.TextSize, _owner.TextSizeMinimum, _owner.TextSizeMaximum, "0.00");
+            DrawSlider(graphics, _legendBounds, "Legend", _owner.LegendValue, _owner.LegendMinimum, _owner.LegendMaximum, "0.0");
+            DrawComponentButtons(graphics);
         }
 
         public override GH_ObjectResponse RespondToMouseDown(
@@ -655,6 +821,15 @@ namespace StbGrasshopper
         {
             if (e.Button == MouseButtons.Left)
             {
+                for (var i = 0; i < _componentButtons.Length; i++)
+                {
+                    if (_componentButtons[i].Contains(e.CanvasLocation))
+                    {
+                        _owner.SetComponent(i + 1);
+                        return GH_ObjectResponse.Handled;
+                    }
+                }
+
                 if (_scaleBounds.Contains(e.CanvasLocation))
                 {
                     _draggingSlider = 1;
@@ -666,6 +841,13 @@ namespace StbGrasshopper
                 {
                     _draggingSlider = 2;
                     UpdateSlider(e.CanvasLocation, _textBounds, _owner.TextSizeMinimum, _owner.TextSizeMaximum);
+                    return GH_ObjectResponse.Capture;
+                }
+
+                if (_legendBounds.Contains(e.CanvasLocation))
+                {
+                    _draggingSlider = 3;
+                    UpdateSlider(e.CanvasLocation, _legendBounds, _owner.LegendMinimum, _owner.LegendMaximum);
                     return GH_ObjectResponse.Capture;
                 }
             }
@@ -686,6 +868,12 @@ namespace StbGrasshopper
             if (_draggingSlider == 2)
             {
                 UpdateSlider(e.CanvasLocation, _textBounds, _owner.TextSizeMinimum, _owner.TextSizeMaximum);
+                return GH_ObjectResponse.Handled;
+            }
+
+            if (_draggingSlider == 3)
+            {
+                UpdateSlider(e.CanvasLocation, _legendBounds, _owner.LegendMinimum, _owner.LegendMaximum);
                 return GH_ObjectResponse.Handled;
             }
 
@@ -718,6 +906,12 @@ namespace StbGrasshopper
             if (e.Button == MouseButtons.Left && _textBounds.Contains(e.CanvasLocation))
             {
                 _owner.EditTextSizeRange();
+                return GH_ObjectResponse.Handled;
+            }
+
+            if (e.Button == MouseButtons.Left && _legendBounds.Contains(e.CanvasLocation))
+            {
+                _owner.EditLegendRange();
                 return GH_ObjectResponse.Handled;
             }
 
@@ -769,6 +963,33 @@ namespace StbGrasshopper
             }
         }
 
+        private void DrawComponentButtons(Graphics graphics)
+        {
+            var labels = new[] { "Nx", "Vy", "Vz", "Mx", "My", "Mz" };
+            using (var border = new Pen(Color.FromArgb(75, 80, 85), 1f))
+            using (var textBrush = new SolidBrush(Color.White))
+            using (var format = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+            })
+            {
+                for (var i = 0; i < labels.Length; i++)
+                {
+                    var fillColor = i + 1 == _owner.ComponentIndex
+                        ? FillColor
+                        : TrackColor;
+                    using (var fill = new SolidBrush(fillColor))
+                    {
+                        graphics.FillRectangle(fill, _componentButtons[i]);
+                    }
+
+                    graphics.DrawRectangle(border, _componentButtons[i].X, _componentButtons[i].Y, _componentButtons[i].Width, _componentButtons[i].Height);
+                    graphics.DrawString(labels[i], SystemFonts.MessageBoxFont, textBrush, _componentButtons[i], format);
+                }
+            }
+        }
+
         private void UpdateSlider(PointF location, RectangleF bounds, double minimum, double maximum)
         {
             var trackLeft = bounds.Left + 82f;
@@ -784,6 +1005,10 @@ namespace StbGrasshopper
             else if (_draggingSlider == 2)
             {
                 _owner.SetTextSize(value);
+            }
+            else if (_draggingSlider == 3)
+            {
+                _owner.SetLegendValue(value);
             }
         }
     }
