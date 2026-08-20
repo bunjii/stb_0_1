@@ -1,0 +1,16 @@
+{
+  "models": [
+    "examples/cantilever.dat",
+    "data/input01.dat",
+    "data/input02.dat",
+    "data/area_load_panel.dat",
+    "data/building_4f_x4y2.dat",
+    "data/practice_wood_single_story.dat",
+    "data/UK_ROOF_240420.dat",
+    "data/UK_240416.dat",
+    "data/UK_240416_floors_1to3_diaphragm.dat",
+    "data/UK_240416_floors_1to3_rigid_diaphragm.dat"
+  ],
+  "rtol": 1e-07,
+  "atol_scale": 1e-09
+}
