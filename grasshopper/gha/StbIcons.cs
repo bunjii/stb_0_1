@@ -27,6 +27,12 @@ namespace StbGrasshopper
         public static Bitmap DeformedShape => DeformedShapeIcon.Value;
         public static Bitmap DatNodes => DatNodesIcon.Value;
         public static Bitmap DatBeams => DatBeamsIcon.Value;
+        public static Bitmap LoadContainer => LoadContainerIcon.Value;
+        public static Bitmap MaterialContainer => MaterialContainerIcon.Value;
+        public static Bitmap SectionContainer => SectionContainerIcon.Value;
+        public static Bitmap ModelContainer => ModelContainerIcon.Value;
+        public static Bitmap ElementContainer => ElementContainerIcon.Value;
+        public static Bitmap SupportContainer => SupportContainerIcon.Value;
 
         private const string ResourcePrefix = "StbGrasshopper.Resources.Icons.";
 
@@ -46,6 +52,12 @@ namespace StbGrasshopper
         private static readonly Lazy<Bitmap> DeformedShapeIcon = Icon("DeformedShape");
         private static readonly Lazy<Bitmap> DatNodesIcon = Icon("DatNodes");
         private static readonly Lazy<Bitmap> DatBeamsIcon = Icon("DatBeams");
+        private static readonly Lazy<Bitmap> LoadContainerIcon = Icon("LoadContainer");
+        private static readonly Lazy<Bitmap> MaterialContainerIcon = Icon("MaterialContainer");
+        private static readonly Lazy<Bitmap> SectionContainerIcon = Icon("SectionContainer");
+        private static readonly Lazy<Bitmap> ModelContainerIcon = Icon("ModelContainer");
+        private static readonly Lazy<Bitmap> ElementContainerIcon = Icon("ElementContainer");
+        private static readonly Lazy<Bitmap> SupportContainerIcon = Icon("SupportContainer");
 
         private static Lazy<Bitmap> Icon(string name)
         {

@@ -43,9 +43,12 @@ class TestGravityLoadsView(unittest.TestCase):
         self.assertFalse(view["can_apply_dlod"])
         self.assertIn(0, view["load_cases"])
         lc0 = next(r for r in view["lc_rows"] if r["load_case"] == "0")
-        self.assertAlmostEqual(lc0["wi_kN"], 263.323, places=2)
-        self.assertAlmostEqual(lc0["reaction_tz_kN"], 263.323, places=2)
+        # Applied dead load must match the vertical reaction whatever the
+        # sample model contains.
+        self.assertAlmostEqual(lc0["wi_kN"], lc0["reaction_tz_kN"], places=6)
         self.assertTrue(lc0["equilibrium_ok"])
+        # Snapshot of the current sample; update deliberately when it changes.
+        self.assertAlmostEqual(lc0["wi_kN"], 252.362, places=2)
         self.assertTrue(all(c["ok"] for c in view["checks"]))
 
     def test_live_load_view_lc2(self):

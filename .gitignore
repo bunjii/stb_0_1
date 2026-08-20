@@ -37,6 +37,9 @@ Thumbs.db
 tests/_tmp_out/
 *.log
 
+# Benchmark scratch (generated models, timings, profiles)
+.bench/
+
 # Student distribution builds
 student/dist/
 python-embed/
