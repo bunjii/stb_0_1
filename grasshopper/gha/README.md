@@ -29,6 +29,8 @@ environment and makes classroom Windows deployment easier.
   (kN/m) → output typed `Load`; different end vectors create a trapezoidal load
 - `STB Area Load`: input three or four typed boundary `Element` objects, `LC`, and
   global pressure vector `P` (kN/m²) → output typed `Load`
+- `STb Load/Mat/Section/Model/Elem/Support Container`: collect existing typed
+  STb data and pass it on as a typed list or model value
 - `STB Assemble Model`: input typed `Element`, `Load`, `Support`, optional `Results`, and
   `Write` → output `Text`, `DAT`, and typed `STb Model`
 - `STb Assembly from file`: input `DAT Path` → output typed `STb Model`
