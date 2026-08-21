@@ -131,7 +131,7 @@ namespace StbGrasshopper
 
     public sealed class StbElementComponent : GH_Component
     {
-        public StbElementComponent() : base("STB Element", "STB Elem", "Create an STB element from a line and section.", "STB", "Model") { }
+        public StbElementComponent() : base("STb Element", "STb Elem", "Create an STb element from a line and section.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("e9ac94fe-4ee4-4d15-b16b-7881e3b1f622");
 
         protected override Bitmap Icon => StbIcons.Element;
@@ -140,13 +140,13 @@ namespace StbGrasshopper
         {
             pManager.AddTextParameter("Name", "Name", "Element name.", GH_ParamAccess.item, "ELEM");
             pManager.AddLineParameter("Line", "L", "Element center line.", GH_ParamAccess.item);
-            pManager.AddParameter(new StbSectionParameter(), "Section", "Sec", "Section definition.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbSectionParameter(), "STb Section", "Sec", "Section definition.", GH_ParamAccess.item);
             pManager.AddNumberParameter("Beta", "Beta", "Section beta angle in degrees.", GH_ParamAccess.item, 0.0);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddParameter(new StbElementParameter(), "Element", "Elem", "STB element object.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbElementParameter(), "STb Element", "Elem", "STB element object.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
@@ -179,7 +179,7 @@ namespace StbGrasshopper
 
     public sealed class StbMaterialComponent : GH_Component
     {
-        public StbMaterialComponent() : base("STB Material", "STB Mat", "Create an STB material object.", "STB", "Model") { }
+        public StbMaterialComponent() : base("STb Mat", "STb Mat", "Create an STb material object.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("2c6d678d-92f9-4ee5-a171-e95d64b1411b");
 
         protected override Bitmap Icon => StbIcons.Material;
@@ -196,7 +196,7 @@ namespace StbGrasshopper
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddParameter(new StbMaterialParameter(), "Mat", "Mat", "STB material object.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbMaterialParameter(), "STb Mat", "Mat", "STB material object.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
@@ -227,7 +227,7 @@ namespace StbGrasshopper
         private const string SectionTypeKey = "SectionType";
         private int _sectionType;
 
-        public StbSectionComponent() : base("STB Section", "STB Sec", "Create an STB section object.", "STB", "Model") { }
+        public StbSectionComponent() : base("STb Section", "STb Sec", "Create an STb section object.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("fd94f3c4-1574-45dc-bd80-6635f18517dd");
 
         protected override Bitmap Icon => StbIcons.Section;
@@ -244,13 +244,13 @@ namespace StbGrasshopper
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddTextParameter("Name", "Name", "Section name.", GH_ParamAccess.item, "SEC");
-            pManager.AddParameter(new StbMaterialParameter(), "Mat", "Mat", "Material definition.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbMaterialParameter(), "STb Mat", "Mat", "Material definition.", GH_ParamAccess.item);
             AddDimensionParameters(pManager, _sectionType);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddParameter(new StbSectionParameter(), "Section", "Sec", "STB section object.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbSectionParameter(), "STb Section", "Sec", "STB section object.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
@@ -378,7 +378,7 @@ namespace StbGrasshopper
     {
         private readonly bool[] _restraints = { true, true, true, true, true, true };
 
-        public StbSupportComponent() : base("STB Support", "STB Sup", "Create STB support objects from points.", "STB", "Model") { }
+        public StbSupportComponent() : base("STb Support", "STb Sup", "Create STb support objects from points.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("54816191-f022-43a1-b094-9bb5cf4bc371");
 
         protected override Bitmap Icon => StbIcons.Support;
@@ -403,7 +403,7 @@ namespace StbGrasshopper
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddParameter(new StbSupportParameter(), "Support", "Sup", "STB support objects.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbSupportParameter(), "STb Support", "Sup", "STB support objects.", GH_ParamAccess.list);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
@@ -456,7 +456,7 @@ namespace StbGrasshopper
 
     public sealed class StbLoadComponent : GH_Component
     {
-        public StbLoadComponent() : base("STB Point Load", "STB PLoad", "Create STB point load objects from points.", "STB", "Model") { }
+        public StbLoadComponent() : base("STb Load", "STb Load", "Create STb point load objects from points.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("fcf0fb0e-33d0-4926-a09f-1f1bbffcfbc1");
 
         protected override Bitmap Icon => StbIcons.PointLoad;
@@ -471,7 +471,7 @@ namespace StbGrasshopper
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddParameter(new StbLoadParameter(), "Load", "Ld", "STB load objects.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbLoadParameter(), "STb Load", "Ld", "STB load objects.", GH_ParamAccess.list);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
@@ -506,9 +506,9 @@ namespace StbGrasshopper
     {
         public StbLineLoadComponent()
             : base(
-                "STB Line Load",
-                "STB LLoad",
-                "Create an STB distributed load on a frame element.",
+                "STb Load",
+                "STb LLoad",
+                "Create an STb distributed load on a frame element.",
                 "STB",
                 "Model")
         {
@@ -522,7 +522,7 @@ namespace StbGrasshopper
         {
             pManager.AddParameter(
                 new StbElementParameter(),
-                "Element",
+                "STb Element",
                 "Elem",
                 "Loaded STB element.",
                 GH_ParamAccess.item);
@@ -551,7 +551,7 @@ namespace StbGrasshopper
         {
             pManager.AddParameter(
                 new StbLoadParameter(),
-                "Load",
+                "STb Load",
                 "Ld",
                 "STB line load object.",
                 GH_ParamAccess.item);
@@ -608,9 +608,9 @@ namespace StbGrasshopper
     {
         public StbAreaLoadComponent()
             : base(
-                "STB Area Load",
-                "STB ALoad",
-                "Create an STB area load bounded by three or four frame elements.",
+                "STb Load",
+                "STb ALoad",
+                "Create an STb area load bounded by three or four frame elements.",
                 "STB",
                 "Model")
         {
@@ -624,7 +624,7 @@ namespace StbGrasshopper
         {
             pManager.AddParameter(
                 new StbElementParameter(),
-                "Boundary Elements",
+                "STb Boundary Elements",
                 "Elem",
                 "Three or four STB elements forming one closed panel boundary.",
                 GH_ParamAccess.list);
@@ -641,7 +641,7 @@ namespace StbGrasshopper
         {
             pManager.AddParameter(
                 new StbLoadParameter(),
-                "Load",
+                "STb Load",
                 "Ld",
                 "STB area load object.",
                 GH_ParamAccess.item);
@@ -689,27 +689,30 @@ namespace StbGrasshopper
 
     public sealed class StbAssembleModelComponent : GH_Component
     {
-        public StbAssembleModelComponent() : base("STB Assemble Model", "STB Model", "Assemble typed STB model objects into a .dat text file.", "STB", "Model") { }
+        public StbAssembleModelComponent() : base("STB Assemble Model", "STb Model", "Assemble typed STB model objects into a .dat text file.", "STB", "Model") { }
         public override Guid ComponentGuid => new Guid("ce8a157a-b1b7-4d92-918f-e6ce2294af1c");
 
         protected override Bitmap Icon => StbIcons.Assemble;
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddParameter(new StbElementParameter(), "Element", "Elem", "STB elements.", GH_ParamAccess.list);
-            pManager.AddParameter(new StbLoadParameter(), "Load", "Ld", "STB loads.", GH_ParamAccess.list);
-            pManager.AddParameter(new StbSupportParameter(), "Support", "Sup", "STB supports.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbElementParameter(), "STb Element", "Elem", "STB elements.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbLoadParameter(), "STb Load", "Ld", "STB loads.", GH_ParamAccess.list);
+            pManager.AddParameter(new StbSupportParameter(), "STb Support", "Sup", "STB supports.", GH_ParamAccess.list);
             pManager.AddTextParameter("DAT", "DAT", "Output .dat path. Empty uses the temp folder.", GH_ParamAccess.item, string.Empty);
             pManager.AddBooleanParameter("Write", "Write", "Write the .dat file.", GH_ParamAccess.item, false);
+            pManager.AddGenericParameter("Results", "R", "Optional parsed results to store in STb Model.", GH_ParamAccess.item);
             Params.Input[1].Optional = true;
             Params.Input[2].Optional = true;
             Params.Input[3].Optional = true;
+            Params.Input[5].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             pManager.AddTextParameter("Text", "Text", "Assembled STB input text.", GH_ParamAccess.item);
             pManager.AddTextParameter("DAT", "DAT", "Resolved .dat path. Populated when Write is true.", GH_ParamAccess.item);
+            pManager.AddParameter(new StbModelParameter(), "STb Model", "STb Model", "Typed model and optional results for STB components.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
@@ -719,8 +722,10 @@ namespace StbGrasshopper
             var supports = StbModelGooUtil.GetSupports(da, 2);
             string datPath = string.Empty;
             bool write = false;
+            StbParsedResults results = null;
             da.GetData(3, ref datPath);
             da.GetData(4, ref write);
+            StbModelGooUtil.TryGetResults(da, 5, out results);
 
             if (elements.Count == 0)
             {
@@ -774,6 +779,14 @@ namespace StbGrasshopper
 
             da.SetData(0, assembleResult.Text);
             da.SetData(1, writtenPath);
+            var model = new StbModelModel();
+            model.Elements.AddRange(elements);
+            model.Supports.AddRange(supports);
+            model.Loads.AddRange(loads);
+            model.Results = results;
+            model.DatText = assembleResult.Text;
+            model.DatPath = writtenPath;
+            da.SetData(2, new StbModelGoo(model));
         }
     }
 }

@@ -113,11 +113,36 @@ function Install-EmbedPython {
     Write-Host "OK: python-embed ($Version)"
 }
 
+function Include-GrasshopperPlugin {
+    param([string]$Dest)
+    $project = Join-Path $RepoRoot 'grasshopper\gha\StbGrasshopper.csproj'
+    $artifact = Join-Path $RepoRoot 'grasshopper\gha\bin\Release\StbGrasshopper.gha'
+    $tempLibraries = Join-Path $DistDir '_gha_build_libraries'
+
+    if (-not (Test-Path -LiteralPath $artifact)) {
+        if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+            throw "Grasshopper plugin is missing and dotnet was not found: $artifact"
+        }
+
+        Write-Host 'Building Grasshopper plugin for the installer payload ...'
+        dotnet build $project -c Release -p:GrasshopperLibrariesPath=$tempLibraries
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $artifact)) {
+            throw "Failed to build Grasshopper plugin: $project"
+        }
+    }
+
+    $pluginDir = Join-Path $Dest 'grasshopper'
+    New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+    Copy-Item -LiteralPath $artifact -Destination (Join-Path $pluginDir 'StbGrasshopper.gha') -Force
+    Write-Host "OK: Grasshopper plugin ($artifact)"
+}
+
 Write-Host "Building student payload -> $WorkDir"
 New-Item -ItemType Directory -Path (Split-Path -Parent $WorkDir) -Force | Out-Null
 
 Copy-StudentPayload -Dest $WorkDir
 Install-EmbedPython -TargetDir $WorkDir
+Include-GrasshopperPlugin -Dest $WorkDir
 
 foreach ($f in @('Install_once.bat', 'Start Structural Toolbox.bat')) {
     if (-not (Test-Path -LiteralPath (Join-Path $WorkDir $f))) {

@@ -77,8 +77,8 @@ class Vec:
 
     def __init__(self, _vx, _vy, _vz):
 
-        self.v = np.array([_vx, _vy, _vz])
-        self.len = np.linalg.norm(self.v)
+        self.v = np.array([_vx, _vy, _vz], dtype=np.float64)
+        self.len = math.sqrt(_vx * _vx + _vy * _vy + _vz * _vz)
 
         return
     

@@ -227,6 +227,33 @@ namespace StbGrasshopper
         private static int Bit(bool value) => value ? 1 : 0;
     }
 
+    public sealed class StbModelModel
+    {
+        public List<StbElementModel> Elements { get; } = new List<StbElementModel>();
+        public List<StbSupportModel> Supports { get; } = new List<StbSupportModel>();
+        public List<StbLoadModel> Loads { get; } = new List<StbLoadModel>();
+        public StbParsedResults Results { get; set; }
+        public string DatText { get; set; } = string.Empty;
+        public string DatPath { get; set; } = string.Empty;
+
+        public StbModelModel Duplicate()
+        {
+            var copy = new StbModelModel();
+            foreach (var element in Elements) copy.Elements.Add(element?.Duplicate());
+            foreach (var support in Supports) copy.Supports.Add(support?.Duplicate());
+            foreach (var load in Loads) copy.Loads.Add(load?.Duplicate());
+            copy.Results = Results;
+            copy.DatText = DatText;
+            copy.DatPath = DatPath;
+            return copy;
+        }
+
+        public override string ToString()
+        {
+            return "STb Model (elements=" + Elements.Count + ", supports=" + Supports.Count + ")";
+        }
+    }
+
     public enum StbLoadKind
     {
         Point,

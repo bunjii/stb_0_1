@@ -76,9 +76,12 @@ class PLd:
         self.nd  =   None
         self.combi = _combi
 
-    def FindNd(self, _nds):
+    def FindNd(self, nodes_by_id):
 
-        self.nd =  list(filter(lambda n: n.id == self.nid, _nds))[0]
+        try:
+            self.nd = nodes_by_id[self.nid]
+        except KeyError:
+            raise IndexError("PLOD refers to missing NODE id: {0}".format(self.nid)) from None
 
     def OutputLdInfo(self):
 
@@ -119,9 +122,12 @@ class ELd:
         self.elm =   None
         self.combi = _combi
 
-    def FindElm(self, _elms):
+    def FindElm(self, elms_by_id):
 
-        self.elm =  list(filter(lambda e: e.id == self.eid, _elms))[0]
+        try:
+            self.elm = elms_by_id[self.eid]
+        except KeyError:
+            raise IndexError("ELOD refers to missing ELEM id: {0}".format(self.eid)) from None
 
     def OutputELdInfo(self):
 
