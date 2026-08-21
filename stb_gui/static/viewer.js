@@ -494,6 +494,7 @@ const THEME_RENDER_COLORS = {
 };
 let _nodePointTexture = null;
 let windVisualData = null;
+let windVisualStatus = "idle";
 let practiceSummaryData = null;
 let colocatedSitesCache = null;
 let selectedWindCaseId = null;
@@ -6778,9 +6779,10 @@ function populateWindCaseSelect() {
 
 function updateWindControlsAvailability() {
   const hasCases = !!(windVisualData && windVisualData.cases && windVisualData.cases.length);
+  const knownEmpty = windVisualStatus === "loaded" && !hasCases;
   if (el.chkWindLoads) {
-    el.chkWindLoads.disabled = !hasCases;
-    if (!hasCases) el.chkWindLoads.checked = false;
+    el.chkWindLoads.disabled = knownEmpty;
+    if (knownEmpty) el.chkWindLoads.checked = false;
   }
   if (el.windCaseSelect) {
     el.windCaseSelect.disabled = !hasCases || !(el.chkWindLoads && el.chkWindLoads.checked);
@@ -6998,7 +7000,9 @@ async function loadWindVisualForCurrentModel() {
   const path = getCurrentModelPath();
   windVisualData = null;
   selectedWindCaseId = null;
+  windVisualStatus = "idle";
   if (!path) {
+    windVisualStatus = "loaded";
     populateWindCaseSelect();
     updateWindControlsAvailability();
     return;
@@ -7016,6 +7020,7 @@ async function loadWindVisualForCurrentModel() {
   } catch (ex) {
     console.warn("Wind visual load failed:", ex.message);
   }
+  windVisualStatus = "loaded";
   populateWindCaseSelect();
   updateWindControlsAvailability();
 }
@@ -10498,7 +10503,15 @@ async function loadSelectedModel(solve, options) {
       el.chkDeformed.checked = false;
       if (el.chkDispContour) el.chkDispContour.checked = false;
     }
-    await loadWindVisualForCurrentModel();
+    if (displayPrefs.windLoads) {
+      await loadWindVisualForCurrentModel();
+    } else {
+      windVisualData = null;
+      selectedWindCaseId = null;
+      windVisualStatus = "idle";
+      populateWindCaseSelect();
+      updateWindControlsAvailability();
+    }
     practiceSummaryData = null;
     if (el.chkPracticeCenters && el.chkPracticeCenters.checked && analysisComplete(currentModel)) {
       await loadPracticeSummaryForCurrentModel();
@@ -10522,6 +10535,7 @@ async function bootstrap() {
   loadPickWrwCreateModel();
   loadPickSubMode();
   initUiTheme();
+  const listPromise = fetchModelList();
   initThree();
   initDisplayPrefs();
   initViewerOptions();
@@ -10556,7 +10570,7 @@ async function bootstrap() {
     defaultHidden: true,
   });
   try {
-    const data = await fetchModelList();
+    const data = await listPromise;
     const launchFile = launchFileFromUrl();
     const initial = resolveInitialModel(data.models, data.default);
     if (initial) {
@@ -10814,8 +10828,20 @@ el.chkLoadValues.addEventListener("change", () => {
   if (currentModel) rebuildScene();
 });
 if (el.chkWindLoads) {
-  el.chkWindLoads.addEventListener("change", () => {
+  el.chkWindLoads.addEventListener("change", async () => {
     onResultsDisplayChanged();
+    if (el.chkWindLoads.checked && windVisualStatus !== "loaded") {
+      setStatus("Loading wind overlay…");
+      await loadWindVisualForCurrentModel();
+      if (!(windVisualData && windVisualData.cases && windVisualData.cases.length)) {
+        el.chkWindLoads.checked = false;
+        onResultsDisplayChanged();
+        populateWindCaseSelect();
+        updateWindControlsAvailability();
+        setStatus("No wind cases for this model.");
+        return;
+      }
+    }
     populateWindCaseSelect();
     updateWindControlsAvailability();
     if (el.chkWindLoads.checked && windVisualData) {

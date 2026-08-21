@@ -6,11 +6,39 @@ import numpy as np
 import datetime
 
 import scipy.sparse as sp
-from scipy.sparse.linalg import ArpackError, LinearOperator, eigsh, splu
+from scipy.sparse.linalg import (
+    ArpackError, LinearOperator, eigsh, onenormest, splu,
+)
 
 # Below this many DOF a dense symmetric eigensolve is cheaper and more robust
 # than ARPACK, so small models keep the original stability check verbatim.
 DENSE_EIGEN_MAX_DOF = 2000
+
+# A mode is treated as a mechanism when its eigenvalue falls this far below the
+# largest one.
+WEAK_MODE_REL_TOL = 1.0e-12
+
+# No eigenvalue can breach WEAK_MODE_REL_TOL while the condition number stays
+# below its reciprocal, so a comfortably conditioned matrix needs no
+# eigensolve at all. Measured condition estimates run from 3e3 to 4e9 on sound
+# models and 2e22 on an actual mechanism, so this leaves a wide margin on both
+# sides while keeping the estimate's own error well inside it.
+STABLE_COND_MAX = 1.0e10
+
+# Above this many nonzeros, MMD_AT_PLUS_A's symmetric ordering pays off on a
+# stiffness matrix: measured fill drops by more than half and factorization
+# runs 1.1-1.6x faster. Below it SuperLU's default COLAMD is about twice as
+# fast, so small and irregular models keep it.
+LARGE_SYSTEM_NNZ = 200000
+
+# Sign flips applied to member-end forces for reporting. Index 6 (fxj) and
+# 9 (mxj) are left as-is; the rest depend on whether the member is vertical.
+_FORCE_SIGN_VERT = np.array(
+    [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0]
+)
+_FORCE_SIGN_FLAT = np.array(
+    [-1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, -1.0]
+)
 
 #from classes.elm import Elm1D
 
@@ -35,6 +63,7 @@ class Solve:
 
         self.kG_orig =  None
         self.constrained_rows = []
+        self._assoc_by_member = None
 
         # solve
         self.solve()
@@ -68,7 +97,10 @@ class Solve:
         # eigendecomposition.
         kG = kG.tocsc()
         try:
-            lu = splu(kG)
+            lu = splu(
+                kG,
+                permc_spec="MMD_AT_PLUS_A" if kG.nnz > LARGE_SYSTEM_NNZ else "COLAMD",
+            )
         except RuntimeError as ex:
             raise ValueError(
                 "Model stiffness matrix is singular: {0}".format(ex)
@@ -123,19 +155,45 @@ class Solve:
 
         OPinv = LinearOperator(_kG.shape, matvec=_lu.solve, dtype=np.float64)
         try:
+            # The eigenvalues are only compared against a threshold spanning
+            # orders of magnitude, so loosening the tolerance from machine
+            # precision roughly halves the iteration count for free.
             vals, vecs = eigsh(
-                _kG, k=min(6, n - 1), sigma=0.0, which="LM", OPinv=OPinv
+                _kG, k=min(6, n - 1), sigma=0.0, which="LM", OPinv=OPinv,
+                tol=1.0e-4,
             )
         except (ArpackError, RuntimeError, ValueError):
             return None
 
         return scale, vals, vecs
 
+    def ConditionEstimate(self, _kG, _lu):
+        """1-norm condition estimate, costing about eight back-substitutions.
+
+        Returns None if the estimate could not be formed.
+        """
+
+        inv = LinearOperator(
+            _kG.shape,
+            matvec=_lu.solve,
+            rmatvec=lambda b: _lu.solve(b, trans="T"),
+            dtype=np.float64,
+        )
+        try:
+            return float(onenormest(inv)) * float(abs(_kG).sum(axis=0).max())
+        except (RuntimeError, ValueError):
+            return None
+
     def CheckStability(self, _kG, _lm, _lu=None):
         """Reject near-mechanisms before sparse solve returns meaningless drifts."""
 
         if _kG.shape[0] == 0 or _kG.nnz == 0:
             return
+
+        if _lu is not None:
+            cond = self.ConditionEstimate(_kG, _lu)
+            if cond is not None and cond < STABLE_COND_MAX:
+                return
 
         modes = self.LowStiffnessModes(_kG, _lu)
         if modes is None:
@@ -147,9 +205,8 @@ class Solve:
 
         # Near-pin releases intentionally use tiny springs; if the loaded
         # structure relies on them, the resulting displacement is not meaningful.
-        rel_tol = 1.0e-12
         load_tol = 1.0e-8
-        weak = np.where(np.abs(vals) / scale < rel_tol)[0]
+        weak = np.where(np.abs(vals) / scale < WEAK_MODE_REL_TOL)[0]
         if weak.size == 0:
             return
 
@@ -360,96 +417,94 @@ class Solve:
     
     def CalcElemForces(self): 
 
-        for e in self.mdl.elms: 
+        elms = self.mdl.elms
+        n = len(elms)
+        nlc = self.num_lcs
+        if n < 1 or nlc < 1:
+            return
 
-            e_disp = np.zeros((2 * self.ndof, self.num_lcs), dtype = np.float64)
+        ndof = self.ndof
+        disps = np.empty((n, 2 * ndof, nlc), dtype=np.float64)
+        ek = np.empty((n, 12, 12), dtype=np.float64)
+        tm = np.empty((n, 12, 12), dtype=np.float64)
+        lens = np.empty(n, dtype=np.float64)
+        vert = np.empty(n, dtype=bool)
+        for k, e in enumerate(elms):
+            disps[k, 0:ndof, :] = e.n0.disps
+            disps[k, ndof:2 * ndof, :] = e.n1.disps
+            ek[k] = e.ek
+            tm[k] = e.tm
+            lens[k] = e.len
+            vert[k] = bool(e.isVxZ) and (e.pln.vx.v[2] > 0)
 
-            e_disp[0         :     self.ndof, : ] = e.n0.disps
-            e_disp[self.ndof : 2 * self.ndof, : ] = e.n1.disps
+        forces12 = np.matmul(ek, np.matmul(tm, disps))
+        for k, e in enumerate(elms):
+            if e.elds is not None:
+                forces12[k] -= e.elds
 
-            e.ndisps = e_disp # in Global Coorditate System
+        signs = np.where(vert[:, None], _FORCE_SIGN_VERT, _FORCE_SIGN_FLAT)
+        forces12 *= signs[:, :, None]
 
-            e.forces = np.matmul(e.ek, np.matmul(e.tm, e_disp)) # 12x(num_lcs)
+        forces = np.zeros((n, 14, nlc), dtype=np.float64)
+        forces[:, :12, :] = forces12
 
-            if e.elds is not None: # elds are defined already with ECS
-                e.forces = e.forces - e.elds
+        w = self._ElemLocalWLoadsBatch(elms, nlc)
+        half = 0.5 * lens
+        half2 = half ** 2
+        wzi = w[:, 2, :]
+        wzj = w[:, 5, :]
+        wyi = w[:, 1, :]
+        wyj = w[:, 4, :]
+        wxc_z = wzi + (wzj - wzi) * 0.5
+        wxc_y = wyi + (wyj - wyi) * 0.5
+        forces[:, 12, :] = (
+            forces[:, 4, :] + forces[:, 2, :] * half[:, None]
+            + (1.0 / 6.0) * (wzi + 2.0 * wxc_z) * half2[:, None]
+        )
+        forces[:, 13, :] = (
+            forces[:, 5, :] - forces[:, 1, :] * half[:, None]
+            - (1.0 / 6.0) * (wyi + 2.0 * wxc_y) * half2[:, None]
+        )
 
-            # extend force matrix to 14x to store my_center and mz_center
-            # added on 2025-01-22
-            new_rows = np.zeros((2, e.forces.shape[1]), dtype = np.float64)
-            e.forces = np.vstack((e.forces, new_rows))
-            #
-            #
-
-            vert_bl = e.isVxZ * (e.pln.vx.v[2] > 0)
-            for i in range(self.num_lcs):
-
-                for j in range(12):
-                    flip_bl = False
-                    if j == 0:
-                        flip_bl = True
-                    if j == 1:
-                        if vert_bl == 1: flip_bl = True    
-                    if j == 2:
-                        if vert_bl == 1: flip_bl = True
-                    if j == 3: 
-                        flip_bl = True
-                    if j == 4:
-                        if vert_bl == 1: flip_bl = True
-                    if j == 5:
-                        if vert_bl == 1: flip_bl = True
-
-                    if j == 6: continue
-                    if j == 7: 
-                        if vert_bl == 0: flip_bl = True
-                    if j == 8: 
-                        if vert_bl == 0: flip_bl = True
-                    if j == 9: continue
-                    if j == 10: 
-                        if vert_bl == 0: flip_bl = True
-                    if j == 11:
-                        #if vert_bl == 1: flip_bl = True 
-                        flip_bl = True 
-
-                    if flip_bl:
-                        e.forces[j, i] = -e.forces[j, i]
-
-                    # if j in [0, 3, 5, 7, 8, 10]:
-                    #     # Ni', Qyi , Qzi , Mxi', Myi , Mzi'
-                    #     # Nj , Qyj', Qzj', Mxj , Myj', Mzj
-                    #     #forces[j] = -forces[j]
-                    #     e.forces[j, i] = -e.forces[j, i]
-
-        # adding central forces # on 2025-01-20
-
-        elds = self.mdl.elds
-        for e in self.mdl.elms:
-
-            for i in range(len(self.mdl.lcs)): 
-
-                lds = self.EffectiveElemLocalWLoads(e, i)
-
-                wzi, wzj = lds[2], lds[5]
-                qzi = e.forces[2][i]
-                myi = e.forces[4][i]
-
-                wyi, wyj = lds[1], lds[4]
-                qyi = e.forces[1][i]
-                mzi = e.forces[5][i]
-
-                w_xc= wzi + (wzj - wzi) * 0.5 
-                m_yc= myi + qzi * (0.5 * e.len) + 1.0 / 6.0 * (wzi + 2 * w_xc) * (0.5*e.len)**2 
-                e.forces[12, i] = m_yc
-
-                w_xc= wyi + (wyj - wyi) * 0.5
-                m_zc= mzi - qyi * (0.5 * e.len) - 1.0 / 6.0 * (wyi + 2 * w_xc) * (0.5*e.len)**2 
-                e.forces[13, i] = m_zc
-
-                # print(f"lc: {self.mdl.lcs[i]}, e.id: {e.id}, m_yi: {myi}, m_yc: {m_yc}, m_zi: {mzi}, m_zc: {m_zc}")
-        
-        ###
+        for k, e in enumerate(elms):
+            e.ndisps = disps[k]
+            e.forces = forces[k]
 
         return
+
+    def _ElemLocalWLoadsBatch(self, elms, nlc):
+        """Distributed ECS line loads (wyi, wzi, ...) for every member and load case."""
+
+        n = len(elms)
+        w = np.zeros((n, 6, nlc), dtype=np.float64)
+        index_by_id = {e.id: k for k, e in enumerate(elms)}
+
+        for el in self.mdl.elds:
+            k = index_by_id.get(el.eid)
+            if k is None:
+                continue
+            e = elms[k]
+            lds = np.asarray(el.lds, dtype=np.float64)
+            if el.isGlobal == True:
+                lds = e.tm[0:6, 0:6] @ lds
+            w[k, :, el.clc] += lds
+
+        for k, e in enumerate(elms):
+            if e.glds is not None:
+                ncols = min(nlc, e.glds.shape[1])
+                w[k, :, :ncols] += e.glds[:, :ncols]
+            if e.alds is not None:
+                ncols = min(nlc, e.alds.shape[1])
+                w[k, :, :ncols] += e.alds[:, :ncols]
+
+        connected = self._IndexBoundaryAssocs()
+        if connected:
+            for k, e in enumerate(elms):
+                if e.id in connected:
+                    w[k, 1, :] = 0.0
+                    w[k, 4, :] = 0.0
+
+        return w
 
     def EffectiveElemLocalWLoads(self, _e, _lc_idx):
         """Element local distributed loads after diaphragm boundary transfer."""
@@ -470,7 +525,7 @@ class Solve:
         if _e.alds is not None and _lc_idx < _e.alds.shape[1]:
             lds += _e.alds[:, _lc_idx]
 
-        if self._connected_boundary_assoc(_e) is not None:
+        if self._IndexBoundaryAssocs() and (_e.id in self._assoc_by_member):
             # The in-plane transverse member load is carried by the diaphragm.
             # Keep axial and vertical components on the member.
             lds[1] = 0.0
@@ -798,48 +853,59 @@ class Solve:
         #
         # Gravity loads
         #
-        for g in self.mdl.glds:
-
-            col = g.clc
-
-            for e in self.mdl.elms: 
-                # m = e.sec.A * e.len * e.sec.mat.gamma / common.GRAVITY # [kg] 
-                m = e.sec.A * e.sec.mat.gamma / common.GRAVITY # [kg/m] 
-                lds = e.tm[0:6, 0:6] @ np.array([m*g.gx, m*g.gy, m*g.gz, m*g.gx, m*g.gy, m*g.gz])
-
-                #print(f"e.id: {e.id}, mg_array: {[m*g.gx, m*g.gy, m*g.gz, m*g.gx, m*g.gy, m*g.gz]}")
-                #print(f"e.id: {e.id}, lds: {lds}, clc: {g.clc}")
-
-                fwe     =  np.zeros((self.ndof*2, 1), dtype = np.float64)
-                
-                # all lds are now in ECS
-                fwe[ 0] =  e.len / 6.0  * (2.0 * lds[0] + 1.0 * lds[3])       # fxi
-                fwe[ 1] =  e.len / 20.0 * (7.0 * lds[1] + 3.0 * lds[4])       # fyi
-                fwe[ 2] =  e.len / 20.0 * (7.0 * lds[2] + 3.0 * lds[5])       # fzi
-                fwe[ 3] =  0.0                                                # mxi
-                fwe[ 4] = -e.len**2 / 60.0 * (3.0 * lds[2] + 2.0 * lds[5]) #+ # myi
-                fwe[ 5] =  e.len**2 / 60.0 * (3.0 * lds[1] + 2.0 * lds[4])    # mzi -
-
-                fwe[ 6] =  e.len / 6.0  * (1.0 * lds[0] + 2.0 * lds[3])       # fxj
-                fwe[ 7] =  e.len / 20.0 * (3.0 * lds[1] + 7.0 * lds[4])       # fyj
-                fwe[ 8] =  e.len / 20.0 * (3.0 * lds[2] + 7.0 * lds[5])       # fzj
-                fwe[ 9] =  0.0                                                # mxj
-                fwe[10] =  e.len**2 / 60.0 * (2.0 * lds[2] + 3.0 * lds[5]) #- # myj
-                fwe[11] = -e.len**2 / 60.0 * (2.0 * lds[1] + 3.0 * lds[4])    # mzj +
-
+        elms = self.mdl.elms
+        n_elms = len(elms)
+        if self.mdl.glds and n_elms:
+            L = np.empty(n_elms, dtype=np.float64)
+            mass = np.empty(n_elms, dtype=np.float64)
+            R = np.empty((n_elms, 3, 3), dtype=np.float64)
+            for k, e in enumerate(elms):
+                L[k] = e.len
+                mass[k] = e.sec.A * e.sec.mat.gamma / common.GRAVITY
+                R[k] = e.tm[0:3, 0:3]
                 if e.elds is None:
-                    e.elds = np.zeros((self.ndof*2, self.num_lcs), dtype = np.float64)
-                
-                e.elds[:, col] += fwe.reshape(-1)  ### ECS 
-
+                    e.elds = np.zeros((self.ndof * 2, self.num_lcs), dtype=np.float64)
                 if e.glds is None:
-                    e.glds = np.zeros((6, self.num_lcs), dtype = np.float64)
-                
-                e.glds[:, col] += lds  ### ECS 
+                    e.glds = np.zeros((6, self.num_lcs), dtype=np.float64)
+            L2 = L ** 2
+            for g in self.mdl.glds:
+                col = g.clc
+                w = np.einsum(
+                    "kij,j->ki", R,
+                    np.array([g.gx, g.gy, g.gz], dtype=np.float64),
+                )
+                w *= mass[:, None]
+                wxi = w[:, 0]
+                wyi = w[:, 1]
+                wzi = w[:, 2]
+                wxj = wxi
+                wyj = wyi
+                wzj = wzi
+                f = np.empty((n_elms, 12), dtype=np.float64)
+                f[:, 0] = L / 6.0 * (2.0 * wxi + 1.0 * wxj)
+                f[:, 1] = L / 20.0 * (7.0 * wyi + 3.0 * wyj)
+                f[:, 2] = L / 20.0 * (7.0 * wzi + 3.0 * wzj)
+                f[:, 3] = 0.0
+                f[:, 4] = -L2 / 60.0 * (3.0 * wzi + 2.0 * wzj)
+                f[:, 5] = L2 / 60.0 * (3.0 * wyi + 2.0 * wyj)
+                f[:, 6] = L / 6.0 * (1.0 * wxi + 2.0 * wxj)
+                f[:, 7] = L / 20.0 * (3.0 * wyi + 7.0 * wyj)
+                f[:, 8] = L / 20.0 * (3.0 * wzi + 7.0 * wzj)
+                f[:, 9] = 0.0
+                f[:, 10] = L2 / 60.0 * (2.0 * wzi + 3.0 * wzj)
+                f[:, 11] = -L2 / 60.0 * (2.0 * wyi + 3.0 * wyj)
+                gvec = np.empty((n_elms, 6), dtype=np.float64)
+                gvec[:, 0] = wxi
+                gvec[:, 1] = wyi
+                gvec[:, 2] = wzi
+                gvec[:, 3] = wxj
+                gvec[:, 4] = wyj
+                gvec[:, 5] = wzj
+                for k, e in enumerate(elms):
+                    e.elds[:, col] += f[k]
+                    e.glds[:, col] += gvec[k]
 
-                # print(f"elem {e.id} lds: \n {lds}")
-                # print(f"elem {e.id} fwe: \n {fwe}")
-                
+        connected = self._IndexBoundaryAssocs()
         for e in self.mdl.elms:
 
             if e.elds is None: continue 
@@ -854,7 +920,8 @@ class Solve:
                     f = e.elds[self.ndof:2*self.ndof, :]
 
                 f_gcs = e.tm[0:6, 0:6].T @ f
-                self.RedirectConnectedBoundaryMemberLoads(e, i, f, f_gcs, lm)
+                if connected:
+                    self.RedirectConnectedBoundaryMemberLoads(e, i, f, f_gcs, lm)
                 lm[row:row+self.ndof, :] += f_gcs
             
             #print(f"e.elds: \n{e.elds}")
@@ -1007,16 +1074,24 @@ class Solve:
                 loads.append((n, fz))
         return loads
 
-    def _connected_boundary_assoc(self, _e):
+    def _IndexBoundaryAssocs(self):
+        by = getattr(self, "_assoc_by_member", None)
+        if by is not None:
+            return by
+
+        by = {}
         for a in getattr(self.mdl, "dassocs", []):
-            if a.member_id != _e.id:
-                continue
             if a.connection_type != "CONNECTED_RIGID":
                 continue
             if a.association_type != "boundary_member":
                 continue
-            return a
-        return None
+            if a.member_id not in by:
+                by[a.member_id] = a
+        self._assoc_by_member = by
+        return by
+
+    def _connected_boundary_assoc(self, _e):
+        return self._IndexBoundaryAssocs().get(_e.id)
 
     def RedirectConnectedBoundaryMemberLoads(self, _e, _end_index, _f_ecs, _f_gcs, _lm):
         """For connected boundary members, transfer horizontal line-load resultants

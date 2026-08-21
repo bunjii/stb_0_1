@@ -7,9 +7,12 @@ class Cons:
 
         self.nd     = None
 
-    def FindNd(self, _nds):
+    def FindNd(self, nodes_by_id):
 
-        self.nd = list(filter(lambda n: n.id == self.nid, _nds))[0]
+        try:
+            self.nd = nodes_by_id[self.nid]
+        except KeyError:
+            raise IndexError("CONS refers to missing NODE id: {0}".format(self.nid)) from None
         self.nd.cons = self
 
     def OutputConstInfo(self):
