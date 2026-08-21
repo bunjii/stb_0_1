@@ -33,10 +33,11 @@ namespace StbGrasshopper
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddGenericParameter(
-                "Results",
-                "R",
-                "Parsed STB result object from STB Analyze.",
+            pManager.AddParameter(
+                new StbModelParameter(),
+                "STb Model",
+                "STb Model",
+                "STb Model containing parsed results.",
                 GH_ParamAccess.item);
             pManager.AddIntegerParameter(
                 "Load Case",
@@ -89,12 +90,12 @@ namespace StbGrasshopper
             _clippingBox = BoundingBox.Empty;
             _legendMaximum = 0.0;
 
-            StbParsedResults results = null;
+            StbParsedResults results;
             int loadCase = 0;
             int divisions = 12;
             double requestedMaximum = 0.0;
 
-            if (!da.GetData(0, ref results) || results == null)
+            if (!StbModelGooUtil.TryGetResults(da, 0, out results))
             {
                 return;
             }
@@ -134,7 +135,7 @@ namespace StbGrasshopper
             var rawSegments = new List<RawStressSegment>();
             foreach (var force in results.ElementForces)
             {
-                if (force.LoadCase != loadCase)
+                if (!StbLoadCaseFilter.Matches(loadCase, force.LoadCase))
                 {
                     continue;
                 }
@@ -168,6 +169,11 @@ namespace StbGrasshopper
                     force.Mzc,
                     section);
 
+                if (!IsFinite(stressI) || !IsFinite(stressCenter) || !IsFinite(stressJ))
+                {
+                    continue;
+                }
+
                 for (var i = 0; i < divisions; i++)
                 {
                     var t0 = (double)i / divisions;
@@ -176,6 +182,10 @@ namespace StbGrasshopper
                     var stress = Math.Max(
                         0.0,
                         Quadratic(stressI, stressCenter, stressJ, tm));
+                    if (!IsFinite(stress))
+                    {
+                        continue;
+                    }
                     var line = new Line(
                         Interpolate(start, end, t0),
                         Interpolate(start, end, t1));
@@ -194,7 +204,7 @@ namespace StbGrasshopper
                 return;
             }
 
-            if (requestedMaximum > 0.0)
+            if (IsFinite(requestedMaximum) && requestedMaximum > 0.0)
             {
                 _legendMaximum = requestedMaximum;
             }
@@ -328,6 +338,11 @@ namespace StbGrasshopper
 
         private static Color StressColor(double normalized)
         {
+            if (double.IsNaN(normalized) || double.IsInfinity(normalized))
+            {
+                return Color.FromArgb(38, 70, 190);
+            }
+
             var t = Math.Max(0.0, Math.Min(1.0, normalized));
             if (t <= 0.25)
             {
@@ -354,6 +369,11 @@ namespace StbGrasshopper
                 (int)Math.Round(start.G + (end.G - start.G) * t),
                 (int)Math.Round(start.B + (end.B - start.B) * t));
         }
+
+            private static bool IsFinite(double value)
+            {
+                return !double.IsNaN(value) && !double.IsInfinity(value);
+            }
 
         private sealed class RawStressSegment
         {

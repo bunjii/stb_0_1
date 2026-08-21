@@ -9,7 +9,11 @@
 | **推奨: インストーラ** | `StructuralToolbox_Setup_YYYYMMDD.exe` | 通常の Windows ソフトと同様 |
 | ZIP + .bat | `StructuralToolbox_Windows_YYYYMMDD.zip` | 解凍 → `.bat` 実行 |
 
-中身は同じ（同梱 Python + `.venv` + `stb gui`）。
+中身は同じ（同梱 Python + `.venv` + `stb gui` + Grasshopper `.gha`）。
+
+Grasshopperがインストール済みで `%APPDATA%\Grasshopper\Libraries` が存在する場合、
+初回セットアップ時に `StbGrasshopper.gha` を自動配置します。Rhinoが起動中で
+配置できない場合は、Rhinoを終了して `Install_once.bat` を再実行してください。
 
 ---
 

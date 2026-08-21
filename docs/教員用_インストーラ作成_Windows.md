@@ -80,7 +80,12 @@ PowerShell でリポジトリ直下から:
 - **Setup.exe** … 推奨（.bat を意識しない）
 - **ZIP + Install_once.bat** … 従来方式（インストーラが使えない環境向け）
 
-どちらも中身は同じ（同梱 Python + `.venv` + `stb gui`）。
+どちらも中身は同じ（同梱 Python + `.venv` + `stb gui` + Grasshopper `.gha`）。
+
+配布用ペイロードには `grasshopper\StbGrasshopper.gha` が含まれます。Setup.exe
+実行時に `%APPDATA%\Grasshopper\Libraries` が存在すれば、そこへ自動コピーされます。
+Rhino/Grasshopperが起動中でコピーできない場合は、Rhinoを終了してから
+インストール先の `Install_once.bat` を再実行してください。
 
 ---
 
@@ -100,5 +105,6 @@ PowerShell でリポジトリ直下から:
 | --- | --- |
 | `student/StructuralToolbox.iss` | Inno Setup 定義 |
 | `student/build_student_installer.ps1` | ZIP → Setup.exe ビルド |
+| `grasshopper\StbGrasshopper.gha` | インストーラーに同梱するGrasshopperプラグイン |
 | `student/installer_info_before.txt` | インストール前の説明 |
 | `student/installer_info_after.txt` | 完了後の説明 |

@@ -1,8 +1,6 @@
 import os
 import json
 
-import numpy as np
-
 from stb_gui.input_format import NEW_MODEL_TEMPLATE
 
 _STB_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,6 +65,8 @@ def _element_load_display_value(w, is_gravity=False, is_area=False):
 def _elem_local_wloads(elem, mdl, lc_idx):
     """Sum element distributed loads in local ECS for one load-case index."""
 
+    import numpy as np
+
     lds = np.zeros(6, dtype=float)
     elds = mdl.elds if mdl.elds != None else []
 
@@ -106,6 +106,7 @@ def _is_connected_boundary_member(elem, mdl):
 def _gravity_element_load_entries(mdl):
     """Per-element distributed loads from GLOD (local ECS, kN/m)."""
 
+    import numpy as np
     from classes import common
 
     entries = []
@@ -138,6 +139,8 @@ def _gravity_element_load_entries(mdl):
 
 def _area_load_element_load_entries(mdl):
     """Per-edge ALOD loads with sampled tributary profile (ECS, kN/m)."""
+
+    import numpy as np
 
     entries = []
     for al in mdl.alds or []:

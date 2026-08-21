@@ -1,6 +1,5 @@
 import numpy as np
 import math
-from numpy.typing import NDArray
 
 import common
 from nd   import Nd
@@ -78,19 +77,13 @@ class Elm1D:
     
     def CalcBeta(self):
 
-        X = np.array([1.0, 0.0, 0.0])
-        Y = np.array([0.0, 1.0, 0.0])
-        Z = np.array([0.0, 0.0, 1.0])
-
-        n0 = np.array([self.n0.x, self.n0.y, self.n0.z])
-        n1 = np.array([self.n1.x, self.n1.y, self.n1.z])
-
-        vx = n1 - n0
-        vx = vx / np.linalg.norm(vx) # normalised
-        theta_rad = np.radians(self.theta)
+        vxx = (self.n1.x - self.n0.x) / self.len
+        vxy = (self.n1.y - self.n0.y) / self.len
+        vxz = (self.n1.z - self.n0.z) / self.len
+        theta_rad = self.theta * math.pi / 180.0
 
         self.isVxZ = False
-        angle = Elm1D.CalcAngle(vx, Z) 
+        angle = Elm1D.CalcAngle(vxx, vxy, vxz, 0.0, 0.0, 1.0)
 
         if (abs(angle) < common.PRES_ANGLE) or (abs(angle - math.pi) < common.PRES_ANGLE): 
             self.isVxZ = True
@@ -104,32 +97,73 @@ class Elm1D:
             else:
                 alpha =-0.5 * math.pi
 
-            #vz   = X 
-            vy   = X * np.cos(theta_rad + alpha) + np.cross(vx, X) * np.sin(theta_rad + alpha) + vx * np.dot(vx, X) * (1 - np.cos(theta_rad + alpha))
-            vz   = np.cross(vx, vy)
-            vz   = vz / np.linalg.norm(vz)
-            beta = theta_rad + alpha
+            ang = theta_rad + alpha
+            c   = math.cos(ang)
+            s   = math.sin(ang)
+            omc = 1.0 - c
+            kdx = vxx
+            # rotate X=(1,0,0) around vx; cross(vx, X) = (0, vxz, -vxy)
+            vyx = 1.0 * c + vxx * kdx * omc
+            vyy = s * vxz + vxy * kdx * omc
+            vyz = -s * vxy + vxz * kdx * omc
+            vzx = vxy * vyz - vxz * vyy
+            vzy = vxz * vyx - vxx * vyz
+            vzz = vxx * vyy - vxy * vyx
+            nvz = math.sqrt(vzx ** 2 + vzy ** 2 + vzz ** 2)
+            vzx = vzx / nvz
+            vzy = vzy / nvz
+            vzz = vzz / nvz
+            beta = ang
             
         # not parallel to Z-axis
         else: 
 
-            vy   = np.cross(Z, vx)
-            vy   = vy / np.linalg.norm(vy) 
-            vy   = vy * np.cos(theta_rad) + np.cross(vx, vy) * np.sin(theta_rad) + vx * np.dot(vx, vy) * (1 - np.cos(theta_rad))
-            vz   = np.cross(vx, vy) 
-            vz   = vz / np.linalg.norm(vz)
+            # cross(Z, vx) = (-vxy, vxx, 0)
+            vyx = -vxy
+            vyy =  vxx
+            vyz =  0.0
+            nvy = math.sqrt(vyx ** 2 + vyy ** 2 + vyz ** 2)
+            vyx = vyx / nvy
+            vyy = vyy / nvy
+            vyz = vyz / nvy
+            c   = math.cos(theta_rad)
+            s   = math.sin(theta_rad)
+            omc = 1.0 - c
+            kdv = vxx * vyx + vxy * vyy + vxz * vyz
+            cxx = vxy * vyz - vxz * vyy
+            cxy = vxz * vyx - vxx * vyz
+            cxz = vxx * vyy - vxy * vyx
+            ryx = vyx * c + cxx * s + vxx * kdv * omc
+            ryy = vyy * c + cxy * s + vxy * kdv * omc
+            ryz = vyz * c + cxz * s + vxz * kdv * omc
+            vyx = ryx
+            vyy = ryy
+            vyz = ryz
+            vzx = vxy * vyz - vxz * vyy
+            vzy = vxz * vyx - vxx * vyz
+            vzz = vxx * vyy - vxy * vyx
+            nvz = math.sqrt(vzx ** 2 + vzy ** 2 + vzz ** 2)
+            vzx = vzx / nvz
+            vzy = vzy / nvz
+            vzz = vzz / nvz
             beta = theta_rad
         
         # plane 
         #print(f"vx:{vx}, vy:{vy}, vz:{vz}")
-        self.pln = common.Plane(self.n0, vx, vy, vz)
+        self.pln = common.Plane(self.n0, (vxx, vxy, vxz), (vyx, vyy, vyz), (vzx, vzy, vzz))
         #print(f"elemid: {self.id}, beta= {math.degrees(beta)}")
         return beta
     
     @staticmethod
-    def CalcAngle(_v1: NDArray[np.float64], _v2: NDArray[np.float64]):        
-        dp = np.dot(_v1, _v2) / ( np.linalg.norm(_v1) * np.linalg.norm(_v2)) 
-        a  = np.arccos(dp)                            # in radian
+    def CalcAngle(x1, y1, z1, x2, y2, z2):
+        n1 = math.sqrt(x1 ** 2 + y1 ** 2 + z1 ** 2)
+        n2 = math.sqrt(x2 ** 2 + y2 ** 2 + z2 ** 2)
+        dp = (x1 * x2 + y1 * y2 + z1 * z2) / (n1 * n2)
+        if dp > 1.0:
+            dp = 1.0
+        if dp < -1.0:
+            dp = -1.0
+        a  = math.acos(dp)                            # in radian
 
         return a
     
@@ -356,6 +390,173 @@ class Elm1D:
         self.PHIz    =  PHIz
 
         return esm
+
+    @staticmethod
+    def AssembleAll(elms):
+        """Fill ek, tm and ekG for every element at once.
+
+        Same formulas as ElmStiffMX / ElmTransMX, evaluated on stacked arrays
+        so the 12x12 products are one BLAS call instead of one per member.
+        """
+
+        n = len(elms)
+        if n == 0:
+            return
+
+        L   = np.empty(n, dtype=np.float64)
+        EA  = np.empty(n, dtype=np.float64)
+        EIy = np.empty(n, dtype=np.float64)
+        EIz = np.empty(n, dtype=np.float64)
+        GJ  = np.empty(n, dtype=np.float64)
+        PHIy = np.empty(n, dtype=np.float64)
+        PHIz = np.empty(n, dtype=np.float64)
+        lyi = np.empty(n, dtype=np.float64)
+        lzi = np.empty(n, dtype=np.float64)
+        lyj = np.empty(n, dtype=np.float64)
+        lzj = np.empty(n, dtype=np.float64)
+        dx  = np.empty(n, dtype=np.float64)
+        dy  = np.empty(n, dtype=np.float64)
+        dz  = np.empty(n, dtype=np.float64)
+        beta = np.empty(n, dtype=np.float64)
+
+        for k, e in enumerate(elms):
+            jnt = e.jnt
+            if jnt is None:
+                raise RuntimeError("Element {0} has no joint definition".format(e.id))
+            mat = e.sec.mat
+            L[k]   = e.len
+            EA[k]  = mat.E * e.sec.A
+            EIy[k] = mat.E * e.sec.Iy
+            EIz[k] = mat.E * e.sec.Iz
+            GJ[k]  = mat.G * e.sec.J
+            PHIy[k] = 12.0 * mat.E * e.sec.Iz / (mat.G * e.sec.Asy * e.len ** 2)
+            PHIz[k] = 12.0 * mat.E * e.sec.Iy / (mat.G * e.sec.Asz * e.len ** 2)
+            lyi[k] = jnt.Ryi / (mat.E * e.sec.Iy)
+            lzi[k] = jnt.Rzi / (mat.E * e.sec.Iz)
+            lyj[k] = jnt.Ryj / (mat.E * e.sec.Iy)
+            lzj[k] = jnt.Rzj / (mat.E * e.sec.Iz)
+            dx[k] = e.n1.x - e.n0.x
+            dy[k] = e.n1.y - e.n0.y
+            dz[k] = e.n1.z - e.n0.z
+            beta[k] = e.beta
+
+        lz1 = 1.0 + lzi + lzj
+        ly1 = 1.0 + lyi + lyj
+        cz  = EIz / L ** 3
+        cy  = EIy / L ** 3
+        L2  = L ** 2
+
+        ek = np.zeros((n, 12, 12), dtype=np.float64)
+        k00 = EA / L
+        ek[:, 0, 0] = k00
+        ek[:, 0, 6] = -k00
+        ek[:, 6, 0] = -k00
+        ek[:, 6, 6] = k00
+
+        k11 = 6.0 * cz * (lzi + lzj + 4.0 * lzi * lzj) / lz1 / (1.0 + PHIy)
+        ek[:, 1, 1] = k11
+        ek[:, 1, 7] = -k11
+        ek[:, 7, 1] = -k11
+        ek[:, 7, 7] = k11
+        k15 = 6.0 * cz * lzi * (1.0 + 2.0 * lzj) * L / lz1 / (1.0 + PHIy)
+        ek[:, 1, 5] = k15
+        ek[:, 5, 1] = k15
+        ek[:, 5, 7] = -k15
+        ek[:, 7, 5] = -k15
+        k1b = 6.0 * cz * (1.0 + 2.0 * lzi) * lzj * L / lz1 / (1.0 + PHIy)
+        ek[:, 1, 11] = k1b
+        ek[:, 11, 1] = k1b
+        ek[:, 7, 11] = -k1b
+        ek[:, 11, 7] = -k1b
+        ek[:, 5, 5] = (4.0 + PHIy) / (1.0 + PHIy) * cz * lzi * (1.0 + lzj) / lz1 * 3.0 / 2.0 * L2
+        ek[:, 11, 11] = (4.0 + PHIy) / (1.0 + PHIy) * cz * (1.0 + lzi) * lzj / lz1 * 3.0 / 2.0 * L2
+        k5b = (2.0 - PHIy) / (1.0 + PHIy) * cz * lzi * lzj / lz1 * 3.0 * L2
+        ek[:, 5, 11] = k5b
+        ek[:, 11, 5] = k5b
+
+        k22 = 6.0 * cy * (lyi + lyj + 4.0 * lyi * lyj) / ly1 / (1.0 + PHIz)
+        ek[:, 2, 2] = k22
+        ek[:, 2, 8] = -k22
+        ek[:, 8, 2] = -k22
+        ek[:, 8, 8] = k22
+        k24 = -6.0 * cy * lyi * (1.0 + 2.0 * lyj) * L / ly1 / (1.0 + PHIz)
+        ek[:, 2, 4] = k24
+        ek[:, 4, 2] = k24
+        ek[:, 4, 8] = -k24
+        ek[:, 8, 4] = -k24
+        k2a = -6.0 * cy * (1.0 + 2.0 * lyi) * lyj * L / ly1 / (1.0 + PHIz)
+        ek[:, 2, 10] = k2a
+        ek[:, 10, 2] = k2a
+        ek[:, 8, 10] = -k2a
+        ek[:, 10, 8] = -k2a
+        ek[:, 4, 4] = (4.0 + PHIz) / (1.0 + PHIz) * cy * lyi * (1.0 + lyj) / ly1 * 3.0 / 2.0 * L2
+        ek[:, 10, 10] = (4.0 + PHIz) / (1.0 + PHIz) * cy * (1.0 + lyi) * lyj / ly1 * 3.0 / 2.0 * L2
+        k4a = (2.0 - PHIz) / (1.0 + PHIz) * cy * lyi * lyj / ly1 * 3.0 * L2
+        ek[:, 4, 10] = k4a
+        ek[:, 10, 4] = k4a
+
+        k33 = GJ / L
+        ek[:, 3, 3] = k33
+        ek[:, 3, 9] = -k33
+        ek[:, 9, 3] = -k33
+        ek[:, 9, 9] = k33
+
+        lx = dx / L
+        ly = dy / L
+        lz = dz / L
+        lm = np.sqrt(lx ** 2 + ly ** 2)
+        vert = lm < common.PRES_ZERO
+        c = np.cos(beta)
+        s = np.sin(beta)
+
+        sub1 = np.zeros((n, 3, 3), dtype=np.float64)
+        sub1[:, 0, 0] = 1.0
+        sub1[:, 1, 1] = c
+        sub1[:, 1, 2] = s
+        sub1[:, 2, 1] = -s
+        sub1[:, 2, 2] = c
+
+        lm_safe = np.where(vert, 1.0, lm)
+        sub2 = np.zeros((n, 3, 3), dtype=np.float64)
+        sub2[:, 0, 0] = lx
+        sub2[:, 0, 1] = ly
+        sub2[:, 0, 2] = lz
+        sub2[:, 1, 0] = -ly / lm_safe
+        sub2[:, 1, 1] = lx / lm_safe
+        sub2[:, 2, 0] = -lx * lz / lm_safe
+        sub2[:, 2, 1] = -ly * lz / lm_safe
+        sub2[:, 2, 2] = lm
+        if np.any(vert):
+            sub2[vert] = 0.0
+            sub2[vert, 0, 2] = lz[vert]
+            sub2[vert, 1, 0] = lz[vert]
+            sub2[vert, 2, 1] = 1.0
+
+        sub = np.matmul(sub1, sub2)
+        tm = np.zeros((n, 12, 12), dtype=np.float64)
+        for i in range(4):
+            tm[:, 3 * i:3 * i + 3, 3 * i:3 * i + 3] = sub
+
+        ekG = np.matmul(np.matmul(tm.transpose(0, 2, 1), ek), tm)
+
+        for k, e in enumerate(elms):
+            e.ek  = ek[k]
+            e.tm  = tm[k]
+            e.ekG = ekG[k]
+            e.sub_tm1 = sub1[k]
+            e.sub_tm2 = sub2[k]
+            e.cy   = cy[k]
+            e.cz   = cz[k]
+            e.lyi  = lyi[k]
+            e.lyj  = lyj[k]
+            e.lzi  = lzi[k]
+            e.lzj  = lzj[k]
+            e.PHIy = PHIy[k]
+            e.PHIz = PHIz[k]
+            if vert[k]:
+                e.isVxZ = True
+
+        return
 
     def SS_ElmStiffMX(self):
 

@@ -1,5 +1,4 @@
 from cons import Cons
-import numpy as np
 import copy
 from typing import Literal
 
@@ -11,6 +10,15 @@ import ld
 import common
 import math
 from diaphragm import build_diaphragm_mpcs
+
+
+def _index_by_attr(items, attr):
+    by_attr = {}
+    for item in items:
+        by_attr.setdefault(getattr(item, attr), item)
+    return by_attr
+
+
 class Mdl:
 
     def __init__(self, 
@@ -70,6 +78,9 @@ class Mdl:
         self.lcs        =  None
         self.bounds     =  None
         self.max_clc    =  0      # added 250125
+
+        self.nodes_by_id = _index_by_attr(self.nds, 'id')
+        self.elms_by_id = _index_by_attr(self.elms, 'id')
 
         self.date_input    = _date_i
         self.date_analysis = None
@@ -256,12 +267,7 @@ class Mdl:
     
     def CalcElemMatrices(self):
 
-        for e in self.elms:
-
-            e.ek  = e.ElmStiffMX()
-            e.tm  = e.ElmTransMX()
-            e.ekG = np.matmul(np.matmul(e.tm.T, e.ek), e.tm)
-
+        Elm1D.AssembleAll(self.elms)
 
         return
     
@@ -344,55 +350,46 @@ class Mdl:
         
         self.lcs = lcs
 
+        # cid is reassigned when load combinations are applied at runtime
+        self.nodes_by_cid = _index_by_attr(self.nds, 'cid')
+
         return
 
     def FindNodeFromId(self, _id) -> Nd | Literal[-1]:
 
-        nd = list(filter(lambda n: n.id == _id, self.nds))
-        if nd:
-            return nd[0]
-        else:
-            return -1
+        nd = self.nodes_by_id.get(_id)
+        if nd is not None:
+            return nd
+        return -1
     
     def FindNodeFromCid(self, _cid) -> Nd | Literal[-1]:
 
-        nd = list(filter(lambda n: n.cid == _cid, self.nds))
-        if nd:
-            return nd[0]
-        else:
-            return -1
+        nd = self.nodes_by_cid.get(_cid)
+        if nd is not None:
+            return nd
+        return -1
 
     def FindElemFromEid(self, _eid) -> Elm1D | Literal[-1]:
 
-        elm = list(filter(lambda e: e.id == _eid, self.elms))
-        if elm:
-            return elm[0]
-        else:
-            return -1
+        elm = self.elms_by_id.get(_eid)
+        if elm is not None:
+            return elm
+        return -1
     
     def FindNodeForCons(self):
 
-        nds = self.nds
-        cons = self.cons
-
-        for c in cons:
-            c.FindNd(nds)
+        for c in self.cons:
+            c.FindNd(self.nodes_by_id)
 
         return
     
     def FindNodeElmForLd(self):
 
-        nds = self.nds
-        lds = self.lds
+        for l in self.lds:
+            l.FindNd(self.nodes_by_id)
 
-        for l in lds:
-            l.FindNd(nds)
-
-        elms = self.elms
-        elds = self.elds
-
-        for el in elds:
-            el.FindElm(elms)
+        for el in self.elds:
+            el.FindElm(self.elms_by_id)
 
         return
     

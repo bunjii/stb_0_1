@@ -59,15 +59,27 @@ def _opt_float(items, idx, default=None):
     return float(v)
 
 
-def _find_by_id(seq, id_value, label):
-    found = list(filter(lambda x: x.id == id_value, seq))
-    if not found:
+def _lookup_index_error(by_id, id_value, label):
+    try:
+        return by_id[id_value]
+    except KeyError:
+        raise IndexError("{0} id not found: {1}".format(label, id_value)) from None
+
+
+def _find_by_id(by_id, id_value, label):
+    if id_value not in by_id:
         raise ValueError("{0} id not found: {1}".format(label, id_value))
-    return found[0]
+    return by_id[id_value]
 
 
-def _next_dmat_id(dmats, used_ids):
-    ids = [m.id for m in dmats] + list(used_ids)
+def _register_unique_id(by_id, id_value, record_type, obj):
+    if id_value in by_id:
+        raise ValueError("duplicate {0} id: {1}".format(record_type, id_value))
+    by_id[id_value] = obj
+
+
+def _next_dmat_id(dmats_by_id, used_ids):
+    ids = list(dmats_by_id.keys()) + list(used_ids)
     return (max(ids) + 1) if ids else 1
 
 
@@ -96,6 +108,13 @@ def ReadLines(_lns):
     wwalls = []
     wshears = []
     dmem_specs = []
+    nds_by_id = {}
+    elms_by_id = {}
+    mats_by_id = {}
+    secs_by_id = {}
+    dmats_by_id = {}
+    diaps_by_id = {}
+    dmem_by_id = {}
     auto_dmat_ids = set()
     input_warnings = []
 
@@ -118,7 +137,9 @@ def ReadLines(_lns):
             al   = float(items[6])
             fy   = float(items[7]) * 1e6  # [N/mm2] -> [N/m2] 
 
-            mats.append(Mat(id, name, e, g, gm, al, fy))
+            mat_obj = Mat(id, name, e, g, gm, al, fy)
+            _register_unique_id(mats_by_id, id, "MATE", mat_obj)
+            mats.append(mat_obj)
 
         elif key == "DMAT":
 
@@ -131,17 +152,21 @@ def ReadLines(_lns):
             gamma = float(items[7]) * 1e3 if len(items) > 7 and items[7] != "" else 0.0
             alpha = float(items[8]) if len(items) > 8 and items[8] != "" else 0.0
 
-            dmats.append(DiaphragmMaterial(id, name, ex, ey, gxy, nuxy, gamma, alpha))
+            dmat_obj = DiaphragmMaterial(id, name, ex, ey, gxy, nuxy, gamma, alpha)
+            _register_unique_id(dmats_by_id, id, "DMAT", dmat_obj)
+            dmats.append(dmat_obj)
 
         elif key == "SECT":
 
             id   = int(items[1])
             name = str(items[2]).strip()
-            mat  = list(filter(lambda n: n.id == int(items[3]), mats))[0]
+            mat  = _lookup_index_error(mats_by_id, int(items[3]), "MATE")
             type = int(items[4])
             dims = list(map(lambda d: float(d) * 1e-3, items[5:])) # [mm] -> [m]
             
-            secs.append(Sec(id, name, mat, type, dims))
+            sec_obj = Sec(id, name, mat, type, dims)
+            _register_unique_id(secs_by_id, id, "SECT", sec_obj)
+            secs.append(sec_obj)
 
         elif key == "NODE":
 
@@ -150,20 +175,24 @@ def ReadLines(_lns):
             y  = float(items[3]) # [m]
             z  = float(items[4]) # [m]
 
-            nds.append(Nd(id, x, y, z))
+            nd_obj = Nd(id, x, y, z)
+            _register_unique_id(nds_by_id, id, "NODE", nd_obj)
+            nds.append(nd_obj)
 
         elif key == "ELEM":
 
             id  = int(items[1])
-            n0  = list(filter(lambda n: n.id == int(items[2]), nds))[0]
-            n1  = list(filter(lambda n: n.id == int(items[3]), nds))[0]
-            sec = list(filter(lambda s: s.id == int(items[4]), secs))[0]
+            n0  = _lookup_index_error(nds_by_id, int(items[2]), "NODE")
+            n1  = _lookup_index_error(nds_by_id, int(items[3]), "NODE")
+            sec = _lookup_index_error(secs_by_id, int(items[4]), "SECT")
             if len(items) > 5:
                 theta = float(items[5])
             else:
                 theta = 0.0
 
-            elms.append(Elm1D(id, n0, n1, sec, theta)) 
+            elm_obj = Elm1D(id, n0, n1, sec, theta)
+            _register_unique_id(elms_by_id, id, "ELEM", elm_obj)
+            elms.append(elm_obj) 
 
         elif key == "EJNT":
 
@@ -198,17 +227,20 @@ def ReadLines(_lns):
                 source = diap_src_from_code(src)
                 timber_multiplier = float(mag_raw)
                 thick = thick_mm * 1e-3 if thick_mm is not None else 1.0
-                mat_id = _next_dmat_id(dmats, auto_dmat_ids)
+                mat_id = _next_dmat_id(dmats_by_id, auto_dmat_ids)
                 auto_dmat_ids.add(mat_id)
                 mat = make_timber_diaphragm_material(
                     mat_id, "{0}_{1}".format(name, source), source,
                     timber_multiplier, reference_drift, 0.0, thick
                 )
+                dmats_by_id[mat_id] = mat
                 dmats.append(mat)
-                diaps.append(DiaphragmRegion(
+                diap_obj = DiaphragmRegion(
                     id, name, dtype, mat, thick, theta,
                     source, hmax, reference_drift, timber_multiplier
-                ))
+                )
+                _register_unique_id(diaps_by_id, id, "DIAP", diap_obj)
+                diaps.append(diap_obj)
                 continue
 
             if src != DIAP_SRC_DMAT:
@@ -216,9 +248,11 @@ def ReadLines(_lns):
 
             if dtype in [DIAP_RIGID, DIAP_FLEXIBLE]:
                 thick = thick_mm * 1e-3 if thick_mm is not None else None
-                diaps.append(DiaphragmRegion(
+                diap_obj = DiaphragmRegion(
                     id, name, dtype, None, thick, theta, "DMAT", hmax, None, None
-                ))
+                )
+                _register_unique_id(diaps_by_id, id, "DIAP", diap_obj)
+                diaps.append(diap_obj)
                 continue
 
             if mag_raw is None:
@@ -228,8 +262,10 @@ def ReadLines(_lns):
 
             mat_id = int(mag_raw)
             thick = thick_mm * 1e-3
-            mat = _find_by_id(dmats, mat_id, "DMAT")
-            diaps.append(DiaphragmRegion(id, name, dtype, mat, thick, theta))
+            mat = _find_by_id(dmats_by_id, mat_id, "DMAT")
+            diap_obj = DiaphragmRegion(id, name, dtype, mat, thick, theta)
+            _register_unique_id(diaps_by_id, id, "DIAP", diap_obj)
+            diaps.append(diap_obj)
 
         elif key == "DREG":
 
@@ -248,6 +284,7 @@ def ReadLines(_lns):
             id = int(items[1])
             diap_id = int(items[2])
             nids = [int(items[3]), int(items[4]), int(items[5])]
+            _register_unique_id(dmem_by_id, id, "DMEM", nids)
             dmem_specs.append((id, diap_id, nids))
 
         elif key == "DCON":
@@ -454,15 +491,15 @@ def ReadLines(_lns):
       
     dmems = []
     for id, diap_id, nids in dmem_specs:
-        diap = _find_by_id(diaps, diap_id, "DIAP")
-        ns = [_find_by_id(nds, nid, "NODE") for nid in nids]
+        diap = _find_by_id(diaps_by_id, diap_id, "DIAP")
+        ns = [_find_by_id(nds_by_id, nid, "NODE") for nid in nids]
         dmems.append(CSTMembrane3(id, diap, ns[0], ns[1], ns[2]))
 
     input_warnings.extend(collect_diaphragm_input_warnings(diaps, dopns, dcons))
     dregs, dreg_warnings = ensure_diaphragm_dregs(diaps, dregs, dmems)
     input_warnings.extend(dreg_warnings)
 
-    by_node = {n.id: n for n in nds}
+    by_node = nds_by_id
     for w in wwalls:
         if all(v is not None for v in [w.n1, w.n2, w.n3, w.n4]):
             from wood_wall import order_wwll_corner_node_ids
