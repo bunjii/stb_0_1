@@ -26,6 +26,10 @@ environment and makes classroom Windows deployment easier.
   (kN/m) → output typed `Load`; different end vectors create a trapezoidal load
 - `STB Area Load`: input three or four typed boundary `Element` objects, `LC`, and
   global pressure vector `P` (kN/m²) → output typed `Load`
+- `STB Area Tributary`: input typed area `Load` → equivalent boundary line loads
+  `Wi`/`Wj` (global kN/m) and tributary areas; viewport preview uses the same
+  nearest-edge split as the solver. Do not also send these line loads to
+  `STB Assemble Model` if the original area load is already connected.
 - `STB Assemble Model`: input typed `Element`, `Load`, `Support`, `Write` → output `Text`, `DAT`
 - `STB Deformed Shape`: preview placeholder for the next step
 
