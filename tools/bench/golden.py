@@ -157,11 +157,20 @@ def record(models):
             os.path.getsize(path) / 1024.0,
         ))
 
+    # A partial re-record (--only) must not drop the other models from the
+    # index, or the regression set would silently shrink to whatever was last
+    # recorded.
+    tracked = read_index()
+    merged = list(tracked) + [m for m in recorded if m not in tracked]
+    merged = [m for m in DEFAULT_MODELS if m in merged] + \
+             [m for m in merged if m not in DEFAULT_MODELS]
+
     with open(INDEX_PATH, "w", encoding="utf-8") as fh:
-        json.dump({"models": recorded, "rtol": RTOL, "atol_scale": ATOL_SCALE}, fh, indent=2)
-    total = sum(os.path.getsize(golden_path(p)) for p in recorded)
-    print("index written to {0} ({1} models, {2:.1f} KB total)".format(
-        INDEX_PATH, len(recorded), total / 1024.0))
+        json.dump({"models": merged, "rtol": RTOL, "atol_scale": ATOL_SCALE}, fh, indent=2)
+    total = sum(os.path.getsize(golden_path(p)) for p in merged
+                if os.path.isfile(golden_path(p)))
+    print("index written to {0} ({1} models tracked, {2} re-recorded, {3:.1f} KB total)".format(
+        INDEX_PATH, len(merged), len(recorded), total / 1024.0))
 
 
 def check(models):

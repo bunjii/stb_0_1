@@ -81,6 +81,25 @@ class TestStabilityCheck(unittest.TestCase):
             self.assertIn("unstable or ill-conditioned", str(ctx.exception),
                           msg="{0} path missed the mechanism".format(name))
 
+    def test_sound_model_skips_the_eigensolve(self):
+        # The condition estimate exists to keep sound models off the eigensolver.
+        # Without this test a mis-set threshold could quietly restore the old
+        # cost while every other test still passed.
+        calls = []
+        original = solve_module.Solve.LowStiffnessModes
+
+        def counting(self, _kG, _lu=None):
+            calls.append(1)
+            return original(self, _kG, _lu)
+
+        solve_module.Solve.LowStiffnessModes = counting
+        try:
+            self._solve(self.base, 0)
+        finally:
+            solve_module.Solve.LowStiffnessModes = original
+
+        self.assertEqual(calls, [], "sound model should not reach the eigensolver")
+
     def test_unrestrained_node_reports_singular_matrix(self):
         lines = self.base + [
             "NODE, 9002, 0, 0, 99",

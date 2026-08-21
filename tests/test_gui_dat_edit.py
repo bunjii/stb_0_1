@@ -317,7 +317,14 @@ NODE, 4, 0.5, 0.0, 2.0
         self.assertTrue(any("WWLL" in w for w in warnings))
 
     def test_delete_selection_mixed_types(self):
-        mixed = SAMPLE + DIAPHRAGM_SAMPLE.split("MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20\n", 1)[1] + WWLL_SAMPLE.split("MATE, 1, Sugi, 9500, 633, 5.0, 3.0e-06, 20\n", 1)[1]
+        # DIAPHRAGM_SAMPLE restates SAMPLE's nodes 1-3 at the same coordinates,
+        # so take only its diaphragm records and let them reference SAMPLE's
+        # nodes. WWLL_SAMPLE numbers its nodes from 11 and does not collide.
+        extra = [l for l in DIAPHRAGM_SAMPLE.splitlines()
+                 if l.startswith(("DIAP,", "DMEM,"))]
+        extra += [l for l in WWLL_SAMPLE.splitlines()
+                  if l and not l.startswith("MATE,")]
+        mixed = SAMPLE + "\n".join(extra) + "\n"
         out, warnings = delete_selection(
             mixed,
             element_ids=[3],

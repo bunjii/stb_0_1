@@ -530,8 +530,21 @@ class TestGuiApi(unittest.TestCase):
         self.assertIn("st-icon-256.png", r.text)
         self.assertNotIn("app-icon", r.text)
         self.assertIn("manifest.webmanifest", r.text)
+        self.assertIn("/static/vendor/three/three.module.js", r.text)
+        self.assertNotIn("cdn.jsdelivr.net", r.text)
         r_popup = self.client.get("/static/popup.html")
         self.assertEqual(r_popup.status_code, 200)
+
+    def test_vendor_three_is_served_locally(self):
+        if self.client == None:
+            self.skipTest("fastapi not installed")
+        r = self.client.get("/static/vendor/three/three.module.js")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("max-age=31536000", r.headers.get("cache-control", "").lower())
+        self.assertIn("Three.js Authors", r.text[:500])
+        self.assertIn("160", r.text[:500])
+        r_ctrl = self.client.get("/static/vendor/three/addons/controls/OrbitControls.js")
+        self.assertEqual(r_ctrl.status_code, 200)
 
     def test_gui_open_url(self):
         from stb_gui.server import gui_open_url

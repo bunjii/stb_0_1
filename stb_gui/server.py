@@ -5,36 +5,28 @@ import threading
 import time
 
 from stb_gui.browser import open_gui_browser
-from stb_gui.dat_edit import apply_edit_action, validate_dat_text, ejnt_lines_for_elements
-from stb_gui.dat_format_headers import prepare_dat_text_for_write, write_dat_text
-from stb_gui.input_format import EJNT_EDITOR_HEADER
-from stb_gui.loads_view import (
-    apply_seismic_dlod_for_model,
-    apply_wind_dlod_for_model,
-    load_dead_view_for_model,
-    load_live_view_for_model,
-    load_seismic_view_for_model,
-    load_wind_view_for_model,
-)
-from stb_gui.model_session import invalidate_model_session
-from stb_loads.equilibrium import invalidate_solved_model_cache
-from stb_gui.practice_view import load_practice_summary_view_for_model
-from stb_gui.project_view import (
-    build_new_project_template_view,
-    load_project_view_for_model,
-    save_project_json_for_model,
-)
-from stb_gui.model_json import (
-    project_root,
-    list_model_files,
-    load_model_dict,
-    load_input_text,
-    load_results_text,
-    normalize_model_relpath,
-    resolve_model_path,
-    create_new_model_file,
-    open_uploaded_model,
-)
+
+
+def _invalidate_caches(full):
+    from stb_gui.model_session import invalidate_model_session
+    from stb_loads.equilibrium import invalidate_solved_model_cache
+
+    invalidate_model_session(full)
+    invalidate_solved_model_cache(full)
+
+
+def _open_browser_when_ready(host, port, url, timeout_s=20.0):
+    """Open the GUI window after the HTTP port is accepting connections."""
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if _port_is_open(host, port):
+            try:
+                open_gui_browser(url)
+            except Exception:
+                pass
+            return
+        time.sleep(0.05)
 
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -78,6 +70,16 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
     if exit_with_browser is None:
         exit_with_browser = watch_client
     _GUI_WATCH_CLIENT = bool(exit_with_browser)
+    from stb_gui.model_json import (
+        create_new_model_file,
+        list_model_files,
+        load_input_text,
+        load_model_dict,
+        load_results_text,
+        normalize_model_relpath,
+        open_uploaded_model,
+        resolve_model_path,
+    )
     default_model = normalize_model_relpath(default_model)
     try:
         from fastapi import FastAPI, HTTPException, Query, Body
@@ -126,10 +128,12 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
             raise HTTPException(status_code=404, detail="Not found")
         if not os.path.isfile(full):
             raise HTTPException(status_code=404, detail="Not found")
-        return FileResponse(
-            full,
-            headers={"Cache-Control": "no-cache, must-revalidate"},
+        cache = (
+            "public, max-age=31536000, immutable"
+            if asset_path.replace("\\", "/").startswith("vendor/")
+            else "no-cache, must-revalidate"
         )
+        return FileResponse(full, headers={"Cache-Control": cache})
 
     @app.get("/api/models")
     def api_models():
@@ -178,6 +182,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         text: str = Body(..., embed=True, description="Input file content"),
     ):
         try:
+            from stb_gui.dat_format_headers import prepare_dat_text_for_write, write_dat_text
+
             full = resolve_model_path(path)
             current = load_input_text(path)
             normalized = prepare_dat_text_for_write(text)
@@ -188,8 +194,7 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
                     "changed": False,
                 })
             write_dat_text(full, text)
-            invalidate_model_session(full)
-            invalidate_solved_model_cache(full)
+            _invalidate_caches(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -206,13 +211,15 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         body: dict = Body(..., description="Edit action payload"),
     ):
         try:
+            from stb_gui.dat_edit import apply_edit_action, validate_dat_text
+            from stb_gui.dat_format_headers import write_dat_text
+
             full = resolve_model_path(path)
             text = load_input_text(path)
             new_text, warnings = apply_edit_action(text, body)
             validate_dat_text(new_text)
             write_dat_text(full, new_text)
-            invalidate_model_session(full)
-            invalidate_solved_model_cache(full)
+            _invalidate_caches(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -231,6 +238,9 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         element_ids: str = Query(..., description="Comma-separated element ids"),
     ):
         try:
+            from stb_gui.dat_edit import ejnt_lines_for_elements
+            from stb_gui.input_format import EJNT_EDITOR_HEADER
+
             resolve_model_path(path)
             ids = [int(x.strip()) for x in element_ids.split(",") if x.strip()]
             text = load_input_text(path)
@@ -248,6 +258,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.project_view import load_project_view_for_model
+
             resolve_model_path(path)
             data = load_project_view_for_model(path)
         except ValueError as ex:
@@ -261,6 +273,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.project_view import build_new_project_template_view
+
             resolve_model_path(path)
             data = build_new_project_template_view(path)
         except ValueError as ex:
@@ -278,10 +292,11 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         if project is None:
             raise HTTPException(status_code=400, detail="project is required")
         try:
+            from stb_gui.project_view import save_project_json_for_model
+
             full = resolve_model_path(path)
             data = save_project_json_for_model(path, project)
-            invalidate_model_session(full)
-            invalidate_solved_model_cache(full)
+            _invalidate_caches(full)
         except ValueError as ex:
             raise HTTPException(status_code=400, detail=str(ex))
         except OSError as ex:
@@ -293,6 +308,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.loads_view import load_dead_view_for_model
+
             resolve_model_path(path)
             data = load_dead_view_for_model(path)
         except ValueError as ex:
@@ -306,6 +323,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.loads_view import load_live_view_for_model
+
             resolve_model_path(path)
             data = load_live_view_for_model(path)
         except ValueError as ex:
@@ -319,6 +338,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.loads_view import load_seismic_view_for_model
+
             resolve_model_path(path)
             data = load_seismic_view_for_model(path)
         except ValueError as ex:
@@ -336,6 +357,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         ),
     ):
         try:
+            from stb_gui.loads_view import load_wind_view_for_model
+
             resolve_model_path(path)
             data = load_wind_view_for_model(path, include_visual=include_visual)
         except ValueError as ex:
@@ -349,6 +372,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.practice_view import load_practice_summary_view_for_model
+
             resolve_model_path(path)
             data = load_practice_summary_view_for_model(path)
         except ValueError as ex:
@@ -362,6 +387,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.loads_view import apply_seismic_dlod_for_model
+
             resolve_model_path(path)
             data = apply_seismic_dlod_for_model(path)
         except ValueError as ex:
@@ -375,6 +402,8 @@ def create_app(default_model=None, watch_client=False, exit_with_browser=None):
         path: str = Query(..., description="Relative path to .dat under project root"),
     ):
         try:
+            from stb_gui.loads_view import apply_wind_dlod_for_model
+
             resolve_model_path(path)
             data = apply_wind_dlod_for_model(path)
         except ValueError as ex:
@@ -448,15 +477,8 @@ def run_server(
     log_file=None,
     exit_with_browser=True,
 ):
-    try:
-        import uvicorn
-    except ImportError:
-        raise ImportError(
-            "Structural Toolbox GUI requires uvicorn. "
-            "Install with: pip install -e \".[gui]\""
-        )
+    from stb_gui.model_json import project_root
 
-    app = create_app(default_model=default_model, exit_with_browser=exit_with_browser)
     url = gui_open_url(host, port)
 
     if _port_is_open(host, port):
@@ -472,10 +494,22 @@ def run_server(
         return "already_running"
 
     if open_browser:
-        try:
-            open_gui_browser(url)
-        except Exception:
-            pass
+        threading.Thread(
+            target=_open_browser_when_ready,
+            args=(host, port, url),
+            daemon=True,
+            name="stb-gui-browser",
+        ).start()
+
+    try:
+        import uvicorn
+    except ImportError:
+        raise ImportError(
+            "Structural Toolbox GUI requires uvicorn. "
+            "Install with: pip install -e \".[gui]\""
+        )
+
+    app = create_app(default_model=default_model, exit_with_browser=exit_with_browser)
 
     print("Structural Toolbox: {0}".format(url))
     print("  project root: {0}".format(project_root()))

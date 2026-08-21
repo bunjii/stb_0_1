@@ -142,5 +142,26 @@ class TestGuiBrowser(unittest.TestCase):
             self.assertEqual(kind, "chrome")
 
 
+class TestGuiBrowserReady(unittest.TestCase):
+
+    def test_open_browser_when_ready_waits_for_port(self):
+        from stb_gui import server as server_mod
+
+        calls = {"n": 0}
+
+        def port_open(host, port):
+            calls["n"] += 1
+            return calls["n"] >= 3
+
+        with mock.patch.object(server_mod, "_port_is_open", side_effect=port_open), \
+             mock.patch.object(server_mod, "open_gui_browser") as opener, \
+             mock.patch.object(server_mod.time, "sleep"):
+            server_mod._open_browser_when_ready(
+                "127.0.0.1", 8765, "http://127.0.0.1:8765/"
+            )
+        opener.assert_called_once_with("http://127.0.0.1:8765/")
+        self.assertGreaterEqual(calls["n"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()
